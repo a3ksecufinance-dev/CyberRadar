@@ -1,0 +1,232 @@
+{
+  "realm": "cyberradar",
+  "displayName": "CyberRadar Platform",
+  "displayNameHtml": "<strong>CyberRadar</strong> Platform",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": false,
+  "offlineSessionMaxLifespan": 5184000,
+  "clientSessionIdleTimeout": 0,
+  "clientSessionMaxLifespan": 0,
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en", "fr"],
+  "defaultLocale": "en",
+  "roles": {
+    "realm": [
+      { "name": "ciso",           "description": "Chief Information Security Officer — full platform access" },
+      { "name": "soc_analyst_l1", "description": "SOC Analyst Level 1 — read-only SIEM + alerts" },
+      { "name": "soc_analyst_l2", "description": "SOC Analyst Level 2 — SIEM, IR, threat intel" },
+      { "name": "soc_analyst_l3", "description": "SOC Analyst Level 3 — full SOC access + playbook exec" },
+      { "name": "dpo",            "description": "Data Protection Officer — DSPM, GDPR, compliance" },
+      { "name": "risk_manager",   "description": "Risk Manager — risk register, compliance, reports" },
+      { "name": "auditor",        "description": "Auditor — read-only access to all domains" },
+      { "name": "it_admin",       "description": "IT Administrator — assets, mobile, integrations" },
+      { "name": "platform_admin", "description": "Platform Administrator — full admin access" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "cyberradar-frontend",
+      "name": "CyberRadar Frontend",
+      "description": "Next.js frontend application",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "crp-frontend-secret-dev-change-in-prod",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:3000/api/auth/callback/keycloak",
+        "https://cyberradar.internal/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "https://cyberradar.internal"
+      ],
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "full-name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-full-name-mapper",
+          "consentRequired": false,
+          "config": {
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "locale",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "locale",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "locale",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "cyberradar-backend",
+      "name": "CyberRadar Backend Services",
+      "description": "Service-to-service authentication for Go microservices",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "crp-backend-secret-dev-change-in-prod",
+      "redirectUris": [],
+      "webOrigins": [],
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@cyberradar.io",
+      "email": "admin@cyberradar.io",
+      "firstName": "Platform",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Admin@CyberRadar2025!", "temporary": false }],
+      "realmRoles": ["platform_admin", "ciso"],
+      "attributes": { "locale": ["en"] }
+    },
+    {
+      "username": "ciso@bnf.fr",
+      "email": "ciso@bnf.fr",
+      "firstName": "Marie",
+      "lastName": "Dupont",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Ciso@BNF2025!", "temporary": false }],
+      "realmRoles": ["ciso"],
+      "attributes": { "locale": ["fr"] }
+    },
+    {
+      "username": "soc-l2@bnf.fr",
+      "email": "soc-l2@bnf.fr",
+      "firstName": "Jean",
+      "lastName": "Moreau",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Soc@BNF2025!", "temporary": false }],
+      "realmRoles": ["soc_analyst_l2"],
+      "attributes": { "locale": ["fr"] }
+    },
+    {
+      "username": "dpo@bnf.fr",
+      "email": "dpo@bnf.fr",
+      "firstName": "Alice",
+      "lastName": "Bernard",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Dpo@BNF2025!", "temporary": false }],
+      "realmRoles": ["dpo"],
+      "attributes": { "locale": ["fr"] }
+    },
+    {
+      "username": "risk@bnf.fr",
+      "email": "risk@bnf.fr",
+      "firstName": "Paul",
+      "lastName": "Martin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Risk@BNF2025!", "temporary": false }],
+      "realmRoles": ["risk_manager"],
+      "attributes": { "locale": ["fr"] }
+    },
+    {
+      "username": "auditor@bnf.fr",
+      "email": "auditor@bnf.fr",
+      "firstName": "Claire",
+      "lastName": "Petit",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Audit@BNF2025!", "temporary": false }],
+      "realmRoles": ["auditor"],
+      "attributes": { "locale": ["fr"] }
+    },
+    {
+      "username": "soc-l1@bnf.fr",
+      "email": "soc-l1@bnf.fr",
+      "firstName": "Thomas",
+      "lastName": "Leroy",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "Soc1@BNF2025!", "temporary": false }],
+      "realmRoles": ["soc_analyst_l1"],
+      "attributes": { "locale": ["fr"] }
+    }
+  ],
+  "requiredActions": [],
+  "browserFlow": "browser",
+  "registrationFlow": "registration",
+  "directGrantFlow": "direct grant",
+  "resetCredentialsFlow": "reset credentials",
+  "clientAuthenticationFlow": "clients",
+  "dockerAuthenticationFlow": "docker auth",
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "enabledEventTypes": [
+    "LOGIN", "LOGIN_ERROR", "LOGOUT", "LOGOUT_ERROR",
+    "REGISTER", "REGISTER_ERROR",
+    "TOKEN_EXCHANGE", "TOKEN_EXCHANGE_ERROR",
+    "CLIENT_LOGIN", "CLIENT_LOGIN_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true
+}

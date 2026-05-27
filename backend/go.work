@@ -1,0 +1,37 @@
+go 1.22
+
+use (
+	./internal
+	./services/tenant
+	./services/identity
+	./services/audit
+	./services/notification
+	./services/collector
+	./services/pipeline
+	./services/asset
+	./services/pam
+	./services/siem
+	./services/ueba
+	./services/ti
+	./services/vuln
+	./services/attackpath
+	./services/knowledgegraph
+	./services/soar
+	./services/dashboard
+	./services/copilot
+	./services/apifw
+	./services/compliance
+	./services/easm
+	./services/fraud
+	./services/dlp
+	./services/netsec
+	./services/risk
+	./services/iga
+	./services/cspm
+	./services/ir
+	./services/scs
+	./services/ot
+	./services/mobile
+	./services/dspm
+	./services/syslog
+)

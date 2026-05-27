@@ -1,0 +1,1046 @@
+version: "3.9"
+
+# ============================================================
+# Cyber Radar Platform — Local Development Stack
+# ============================================================
+# Usage:
+#   docker compose -f deployments/docker-compose.yml up -d
+#   docker compose -f deployments/docker-compose.yml down -v
+# ============================================================
+
+networks:
+  crp-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  clickhouse-data:
+  redis-data:
+  kafka-data:
+  vault-data:
+  keycloak-data:
+
+services:
+
+  # ─── Keycloak (Identity Provider) ───────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.4
+    container_name: crp-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/crp_keycloak
+      KC_DB_USERNAME: crp_user
+      KC_DB_PASSWORD: crp_password_dev
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: 8080
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_LOG_LEVEL: INFO
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Admin@CyberRadar2025!
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - crp-network
+
+  # ─── PostgreSQL ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: crp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crp_foundation
+      POSTGRES_USER: crp_user
+      POSTGRES_PASSWORD: crp_password_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crp_user -d crp_foundation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── ClickHouse (Audit + Events) ─────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: crp-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: crp_audit
+      CLICKHOUSE_USER: crp_user
+      CLICKHOUSE_PASSWORD: crp_password_dev
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native interface
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── Redis ──────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: crp-redis
+    restart: unless-stopped
+    command: redis-server --requirepass crp_redis_dev --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "crp_redis_dev", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── Kafka (KRaft mode — no Zookeeper) ──────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: crp-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: crp-kafka-cluster-dev
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── Vault (Secrets) ─────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.16
+    container_name: crp-vault
+    restart: unless-stopped
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: crp-vault-dev-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault-data:/vault/data
+    command: server -dev
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── Jaeger (Distributed Tracing) ────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: crp-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    networks:
+      - crp-network
+
+  # ─── Prometheus ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: crp-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - crp-network
+
+  # ─── Grafana ─────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: crp-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: crp_grafana_dev
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    networks:
+      - crp-network
+
+  # ─── Services ────────────────────────────────────────────
+  tenant-service:
+    build:
+      context: ..
+      dockerfile: services/tenant/Dockerfile
+    container_name: crp-tenant-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=tenant-service
+      - SERVICE_PORT=8001
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/0
+      - KAFKA_BROKERS=kafka:9092
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=crp-vault-dev-token
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  identity-service:
+    build:
+      context: ..
+      dockerfile: services/identity/Dockerfile
+    container_name: crp-identity-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=identity-service
+      - SERVICE_PORT=8002
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/1
+      - KAFKA_BROKERS=kafka:9092
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=crp-vault-dev-token
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_EXPIRY_MINUTES=60
+      - JWT_REFRESH_EXPIRY_HOURS=24
+      - MFA_ISSUER=CyberRadar
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  audit-service:
+    build:
+      context: ..
+      dockerfile: services/audit/Dockerfile
+    container_name: crp-audit-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=audit-service
+      - SERVICE_PORT=8003
+      - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8003:8003"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  notification-service:
+    build:
+      context: ..
+      dockerfile: services/notification/Dockerfile
+    container_name: crp-notification-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=notification-service
+      - SERVICE_PORT=8004
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - SMTP_HOST=localhost
+      - SMTP_PORT=1025
+      - SMTP_FROM=noreply@cyberradar.io
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 1: Cyber Data Fabric ─────────────────────────
+  collector-service:
+    build:
+      context: ..
+      dockerfile: services/collector/Dockerfile
+    container_name: crp-collector-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=collector-service
+      - SERVICE_PORT=8005
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8005:8005"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  pipeline-worker:
+    build:
+      context: ..
+      dockerfile: services/pipeline/Dockerfile
+    container_name: crp-pipeline-worker
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_GROUP_ID=crp-pipeline
+      - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
+      - CLICKHOUSE_BATCH_SIZE=1000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=info
+    depends_on:
+      kafka:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 3: Identity & PAM ────────────────────────────
+  pam-service:
+    build:
+      context: ..
+      dockerfile: services/pam/Dockerfile
+    container_name: crp-pam-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=pam-service
+      - SERVICE_PORT=8007
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8007:8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 7: Vulnerability & Exposure ─────────────────
+  vuln-service:
+    build:
+      context: ..
+      dockerfile: services/vuln/Dockerfile
+    container_name: crp-vuln-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=vuln-service
+      - SERVICE_PORT=8011
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8011:8011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 12: AI Copilot ───────────────────────────────
+  copilot-service:
+    build:
+      context: ..
+      dockerfile: services/copilot/Dockerfile
+    container_name: crp-copilot-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=copilot-service
+      - SERVICE_PORT=8016
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SIEM_SERVICE_URL=http://siem-service:8008
+      - UEBA_SERVICE_URL=http://ueba-service:8009
+      - TI_SERVICE_URL=http://ti-service:8010
+      - VULN_SERVICE_URL=http://vuln-service:8011
+      - ATTACKPATH_SERVICE_URL=http://attackpath-service:8012
+      - KG_SERVICE_URL=http://knowledgegraph-service:8013
+      - SOAR_SERVICE_URL=http://soar-service:8014
+      - DASHBOARD_SERVICE_URL=http://dashboard-service:8015
+      - ASSET_SERVICE_URL=http://asset-service:8006
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8016:8016"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 17: Data Security & DLP ─────────────────────
+  dlp-service:
+    build:
+      context: ..
+      dockerfile: services/dlp/Dockerfile
+    container_name: crp-dlp-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=dlp-service
+      - SERVICE_PORT=8021
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8021:8021"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 21: Cloud Security Posture Management ────────
+  cspm-service:
+    build:
+      context: ..
+      dockerfile: services/cspm/Dockerfile
+    container_name: crp-cspm-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=cspm-service
+      - SERVICE_PORT=8025
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8025:8025"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 24: OT/ICS Security ─────────────────────────────
+  ot-service:
+    build:
+      context: ..
+      dockerfile: services/ot/Dockerfile
+    container_name: crp-ot-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=ot-service
+      - SERVICE_PORT=8028
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKER=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8028:8028"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 23: Supply Chain Security ───────────────────────
+  scs-service:
+    build:
+      context: ..
+      dockerfile: services/scs/Dockerfile
+    container_name: crp-scs-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=scs-service
+      - SERVICE_PORT=8027
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKER=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8027:8027"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 22: Incident Response & Forensics ────────────
+  ir-service:
+    build:
+      context: ..
+      dockerfile: services/ir/Dockerfile
+    container_name: crp-ir-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=ir-service
+      - SERVICE_PORT=8026
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKER=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8026:8026"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 20: Identity Governance & Administration ─────
+  iga-service:
+    build:
+      context: ..
+      dockerfile: services/iga/Dockerfile
+    container_name: crp-iga-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=iga-service
+      - SERVICE_PORT=8024
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8024:8024"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 19: Cyber Risk Quantification ───────────────
+  risk-service:
+    build:
+      context: ..
+      dockerfile: services/risk/Dockerfile
+    container_name: crp-risk-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=risk-service
+      - SERVICE_PORT=8023
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8023:8023"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 18: Network Security & Microsegmentation ────
+  netsec-service:
+    build:
+      context: ..
+      dockerfile: services/netsec/Dockerfile
+    container_name: crp-netsec-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=netsec-service
+      - SERVICE_PORT=8022
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8022:8022"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 16: Fraud & Financial Crime ─────────────────
+  fraud-service:
+    build:
+      context: ..
+      dockerfile: services/fraud/Dockerfile
+    container_name: crp-fraud-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=fraud-service
+      - SERVICE_PORT=8020
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8020:8020"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 15: EASM ────────────────────────────────────
+  easm-service:
+    build:
+      context: ..
+      dockerfile: services/easm/Dockerfile
+    container_name: crp-easm-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=easm-service
+      - SERVICE_PORT=8019
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8019:8019"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 13: API Framework ───────────────────────────
+  apifw-service:
+    build:
+      context: ..
+      dockerfile: services/apifw/Dockerfile
+    container_name: crp-apifw-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=apifw-service
+      - SERVICE_PORT=8017
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8017:8017"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 14: Security & Compliance ───────────────────
+  compliance-service:
+    build:
+      context: ..
+      dockerfile: services/compliance/Dockerfile
+    container_name: crp-compliance-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=compliance-service
+      - SERVICE_PORT=8018
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8018:8018"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 11: Dashboards ───────────────────────────────
+  dashboard-service:
+    build:
+      context: ..
+      dockerfile: services/dashboard/Dockerfile
+    container_name: crp-dashboard-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=dashboard-service
+      - SERVICE_PORT=8015
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - CLICKHOUSE_URL=clickhouse:9000
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8015:8015"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 10: SOAR ─────────────────────────────────────
+  soar-service:
+    build:
+      context: ..
+      dockerfile: services/soar/Dockerfile
+    container_name: crp-soar-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=soar-service
+      - SERVICE_PORT=8014
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8014:8014"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 9: Knowledge Graph ───────────────────────────
+  knowledgegraph-service:
+    build:
+      context: ..
+      dockerfile: services/knowledgegraph/Dockerfile
+    container_name: crp-knowledgegraph-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=knowledgegraph-service
+      - SERVICE_PORT=8013
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8013:8013"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 8: Attack Path Analysis ─────────────────────
+  attackpath-service:
+    build:
+      context: ..
+      dockerfile: services/attackpath/Dockerfile
+    container_name: crp-attackpath-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=attackpath-service
+      - SERVICE_PORT=8012
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8012:8012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 6: Threat Intelligence ──────────────────────
+  ti-service:
+    build:
+      context: ..
+      dockerfile: services/ti/Dockerfile
+    container_name: crp-ti-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=ti-service
+      - SERVICE_PORT=8010
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8010:8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 5: UEBA ──────────────────────────────────────
+  ueba-service:
+    build:
+      context: ..
+      dockerfile: services/ueba/Dockerfile
+    container_name: crp-ueba-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=ueba-service
+      - SERVICE_PORT=8009
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8009:8009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 4: SIEM/XDR ─────────────────────────────────
+  siem-service:
+    build:
+      context: ..
+      dockerfile: services/siem/Dockerfile
+    container_name: crp-siem-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=siem-service
+      - SERVICE_PORT=8008
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8008:8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 25: Mobile Security ─────────────────────────
+  mobile-service:
+    build:
+      context: ..
+      dockerfile: services/mobile/Dockerfile
+    container_name: crp-mobile-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=mobile-service
+      - SERVICE_PORT=8029
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8029:8029"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Domain 26: DSPM ─────────────────────────────────────
+  dspm-service:
+    build:
+      context: ..
+      dockerfile: services/dspm/Dockerfile
+    container_name: crp-dspm-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=dspm-service
+      - SERVICE_PORT=8030
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8030:8030"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network
+
+  # ─── Syslog Connector ────────────────────────────────────
+  syslog-connector:
+    build:
+      context: ..
+      dockerfile: services/syslog/Dockerfile
+    container_name: crp-syslog-connector
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_TOPIC=crp.events.normalized
+      - DEFAULT_TENANT_ID=default
+      - SYSLOG_UDP_ADDR=:5140
+      - SYSLOG_TCP_ADDR=:5141
+      - SYSLOG_TLS_ADDR=:6514
+      - TLS_CERT_FILE=/certs/syslog.crt
+      - TLS_KEY_FILE=/certs/syslog.key
+      - HEALTH_PORT=8031
+      - LOG_LEVEL=info
+    ports:
+      - "5140:5140/udp"   # UDP syslog (RFC 5426) — maps to standard port 514
+      - "5141:5141/tcp"   # TCP syslog (RFC 6587) — maps to standard port 514
+      - "6514:6514/tcp"   # TLS syslog (RFC 5425)
+      - "8031:8031"       # HTTP health / metrics
+    volumes:
+      - ./certs:/certs:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8031/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crp-network
+
+  # ─── Domain 2: Asset Intelligence ────────────────────────
+  asset-service:
+    build:
+      context: ..
+      dockerfile: services/asset/Dockerfile
+    container_name: crp-asset-service
+    restart: unless-stopped
+    environment:
+      - SERVICE_NAME=asset-service
+      - SERVICE_PORT=8006
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - KAFKA_BROKERS=kafka:9092
+      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - LOG_LEVEL=debug
+    ports:
+      - "8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - crp-network

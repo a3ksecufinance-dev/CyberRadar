@@ -1,0 +1,325 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: cyber-radar
+    environment: dev
+
+# Alertmanager (add when deploying to staging/prod)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ["alertmanager:9093"]
+
+# Alert rules
+# rule_files:
+#   - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ─── Prometheus self-monitoring ───────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ─── CRP Microservices ────────────────────────────────────────────────────
+  - job_name: crp-tenant-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["tenant-service:8001"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: service
+        replacement: tenant-service
+
+  - job_name: crp-identity-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["identity-service:8002"]
+    relabel_configs:
+      - target_label: service
+        replacement: identity-service
+
+  - job_name: crp-audit-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["audit-service:8003"]
+    relabel_configs:
+      - target_label: service
+        replacement: audit-service
+
+  - job_name: crp-notification-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["notification-service:8004"]
+    relabel_configs:
+      - target_label: service
+        replacement: notification-service
+
+  # Domain 1 — Cyber Data Fabric
+  - job_name: crp-collector-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["collector-service:8005"]
+    relabel_configs:
+      - target_label: service
+        replacement: collector-service
+
+  - job_name: crp-pipeline-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pipeline-worker:9100"]
+    relabel_configs:
+      - target_label: service
+        replacement: pipeline-worker
+
+  # Domain 3 — Identity & PAM
+  - job_name: crp-pam-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["pam-service:8007"]
+    relabel_configs:
+      - target_label: service
+        replacement: pam-service
+
+  # Domain 2 — Asset Intelligence
+  - job_name: crp-asset-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["asset-service:8006"]
+    relabel_configs:
+      - target_label: service
+        replacement: asset-service
+
+  # Domain 12 — AI Copilot
+  - job_name: crp-copilot-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["copilot-service:8016"]
+    relabel_configs:
+      - target_label: service
+        replacement: copilot-service
+
+  # Domain 11 — Dashboards
+  - job_name: crp-dashboard-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["dashboard-service:8015"]
+    relabel_configs:
+      - target_label: service
+        replacement: dashboard-service
+
+  # Domain 10 — SOAR
+  - job_name: crp-soar-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["soar-service:8014"]
+    relabel_configs:
+      - target_label: service
+        replacement: soar-service
+
+  # Domain 9 — Knowledge Graph
+  - job_name: crp-knowledgegraph-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["knowledgegraph-service:8013"]
+    relabel_configs:
+      - target_label: service
+        replacement: knowledgegraph-service
+
+  # Domain 8 — Attack Path Analysis
+  - job_name: crp-attackpath-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["attackpath-service:8012"]
+    relabel_configs:
+      - target_label: service
+        replacement: attackpath-service
+
+  # Domain 7 — Vulnerability & Exposure
+  - job_name: crp-vuln-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["vuln-service:8011"]
+    relabel_configs:
+      - target_label: service
+        replacement: vuln-service
+
+  # Domain 6 — Threat Intelligence
+  - job_name: crp-ti-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ti-service:8010"]
+    relabel_configs:
+      - target_label: service
+        replacement: ti-service
+
+  # Domain 5 — UEBA
+  - job_name: crp-ueba-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ueba-service:8009"]
+    relabel_configs:
+      - target_label: service
+        replacement: ueba-service
+
+  # Domain 4 — SIEM/XDR
+  - job_name: crp-siem-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["siem-service:8008"]
+    relabel_configs:
+      - target_label: service
+        replacement: siem-service
+
+  # ─── Infrastructure ───────────────────────────────────────────────────────
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: clickhouse-exporter
+    static_configs:
+      - targets: ["clickhouse:9363"]
+
+  # Domain 13 — API Framework
+  - job_name: crp-apifw-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["apifw-service:8017"]
+    relabel_configs:
+      - target_label: service
+        replacement: apifw-service
+
+  # Domain 17 — Data Security & DLP
+  - job_name: crp-dlp-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["dlp-service:8021"]
+    relabel_configs:
+      - target_label: service
+        replacement: dlp-service
+
+  # Domain 21 — Cloud Security Posture Management
+  - job_name: crp-cspm-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["cspm-service:8025"]
+    relabel_configs:
+      - target_label: service
+        replacement: cspm-service
+
+  # Domain 22 — Incident Response & Forensics
+  - job_name: crp-ir-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ir-service:8026"]
+    relabel_configs:
+      - target_label: service
+        replacement: ir-service
+
+  # Domain 23 — Supply Chain Security
+  - job_name: crp-scs-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["scs-service:8027"]
+    relabel_configs:
+      - target_label: service
+        replacement: scs-service
+
+  # Domain 24 — OT/ICS Security
+  - job_name: crp-ot-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ot-service:8028"]
+    relabel_configs:
+      - target_label: service
+        replacement: ot-service
+
+  # Domain 25 — Mobile Security
+  - job_name: crp-mobile-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["mobile-service:8029"]
+    relabel_configs:
+      - target_label: service
+        replacement: mobile-service
+
+  # Domain 26 — DSPM
+  - job_name: crp-dspm-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["dspm-service:8030"]
+    relabel_configs:
+      - target_label: service
+        replacement: dspm-service
+
+  # Domain 20 — Identity Governance & Administration
+  - job_name: crp-iga-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["iga-service:8024"]
+    relabel_configs:
+      - target_label: service
+        replacement: iga-service
+
+  # Domain 19 — Cyber Risk Quantification
+  - job_name: crp-risk-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["risk-service:8023"]
+    relabel_configs:
+      - target_label: service
+        replacement: risk-service
+
+  # Domain 18 — Network Security & Microsegmentation
+  - job_name: crp-netsec-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["netsec-service:8022"]
+    relabel_configs:
+      - target_label: service
+        replacement: netsec-service
+
+  # Domain 16 — Fraud & Financial Crime
+  - job_name: crp-fraud-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["fraud-service:8020"]
+    relabel_configs:
+      - target_label: service
+        replacement: fraud-service
+
+  # Domain 15 — EASM
+  - job_name: crp-easm-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["easm-service:8019"]
+    relabel_configs:
+      - target_label: service
+        replacement: easm-service
+
+  # Domain 14 — Security & Compliance
+  - job_name: crp-compliance-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["compliance-service:8018"]
+    relabel_configs:
+      - target_label: service
+        replacement: compliance-service
+
+  # Syslog Connector (Chantier 3)
+  - job_name: crp-syslog-connector
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["syslog-connector:8031"]
+    relabel_configs:
+      - target_label: service
+        replacement: syslog-connector

@@ -1,0 +1,31 @@
+# Node
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+*.local
+
+# Go
+vendor/
+*.test
+*.out
+
+# Env
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+~$*.docx
+*.docx
