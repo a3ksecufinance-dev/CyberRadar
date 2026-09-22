@@ -46,9 +46,18 @@ v, _ := r.Context().Value(contextKey("tenant_id")).(string)
 Go compare les clés de contexte par **(type, valeur)**. Une clé `string` ne correspondra jamais à une clé
 `contextKey`. **Tout appel tenant-scopé du service identity reçoit `uuid.Nil`.**
 
-Le défaut est spécifique à `identity` : `siem/cmd/server/main.go:160` et ses handlers utilisent `string`
-des deux côtés, de façon cohérente. La convention `string` nue reste néanmoins fragile — elle fonctionne
-par accident et expose la plateforme entière à des collisions de clés entre packages.
+Le défaut n'est pas isolé. Cinq services perdent silencieusement l'identité de l'appelant :
+
+| Service | Écriture (middleware) | Lecture (handler) | Effet |
+|---|---|---|---|
+| `identity` | clé `string` | `contextKey` | tenant et user = `uuid.Nil` |
+| `audit` | clé `string` | `contextKey` | tenant et `is_super_admin` perdus |
+| `notification` | clé `string` | `contextKey` | tenant perdu |
+| `tenant` | littéral `string` via helper `any` | constante typée `ctxTenantID` | tenant et `is_super_admin` perdus |
+| `mobile` | valeur `string` | assertion `.(uuid.UUID)` | assertion toujours fausse |
+
+Les 27 autres services utilisent `string` des deux côtés, de façon cohérente : ils fonctionnent, mais
+par accident. La convention reste fragile et expose la plateforme aux collisions de clés entre packages.
 
 > Invisible pour `go build` et `go vet` en configuration par défaut : le défaut a été livré sans être détecté.
 
@@ -105,11 +114,34 @@ Ce manque bloque aussi la Phase 2 : le SOAR ne peut pas appeler les services de 
 destiné aux banques et administrations, une instance de connecteur = un client, sans mapping
 source → tenant.
 
-### 2.7 Le middleware frontend ne valide pas le jeton
+### 2.7 Le middleware frontend n'était pas exécuté, et ne validait pas le jeton
 
-`frontend/middleware.ts` vérifie uniquement la **présence** du cookie de session. Il ne décode ni ne
-valide le JWT : il est aveugle à l'expiration et à l'état `RefreshAccessTokenError`. Un cookie expiré
-laisse passer vers les routes protégées, l'échec ne survenant qu'au premier appel API.
+Deux défauts superposés :
+
+1. **Le middleware n'a jamais tourné.** `middleware.ts` était placé à la racine du projet alors que
+   l'application utilise un répertoire `src/`. Next.js attend alors `src/middleware.ts`. Le
+   `middleware-manifest.json` produit par le build était vide : **aucune protection de route n'était
+   active**, pas même la vérification de cookie.
+2. **La vérification elle-même était insuffisante.** Le code testait uniquement la **présence** du
+   cookie de session, sans décoder ni valider le JWT : aveugle à l'expiration, à l'altération et à
+   l'état `RefreshAccessTokenError`.
+
+L'activation du middleware a révélé un troisième défaut latent, jusque-là masqué : `next-intl`
+préfixait les routes `/api/*` avec la locale, transformant `/api/auth/*` en `/en/api/auth/*` et
+cassant tous les endpoints NextAuth.
+
+### 2.8 Le frontend ne compilait pas
+
+`next.config.ts` n'est pas supporté par Next.js 14 (la configuration TypeScript arrive en Next 15) :
+`next build` échouait avant même de compiler. S'y ajoutaient 11 erreurs de typage (`tsc --noEmit`),
+dont une augmentation de module `next-auth/jwt` non résolue qui dégradait tous les champs du token
+en `unknown`. **L'application n'avait donc jamais été compilée ni typée avec succès.**
+
+### 2.9 Next.js 14.2.3 porte une vulnérabilité connue
+
+`npm install` signale que la version épinglée fait l'objet d'un avis de sécurité
+(<https://nextjs.org/blog/security-update-2025-12-11>). À corriger en Phase 1 avec la mise en place
+de `govulncheck` / `npm audit` en CI.
 
 ---
 
@@ -127,7 +159,7 @@ laisse passer vers les routes protégées, l'échec ne survenant qu'au premier a
 | Agrégation stats tenant | `tenant/internal/handler/tenant.go:179` | TODO |
 | **7 pages frontend en données figées** | `ot`, `risk`, `ir`, `scs`, `attackpath`, `compliance`, `settings` | Tableaux `mockRisks`, `mockIncidents`… définis dans le fichier de page, sans état loading/error. `useOT.ts` existe intégralement mais `ot/page.tsx` ne l'importe jamais. |
 | **Aucun graphique** | `recharts` déclaré, jamais importé | `useKPITimeseries` existe, aucune page ne l'utilise. Produit de dashboards sans visualisation. |
-| **Zéro test, zéro CI/CD** | — | Aucun filet de sécurité sur 32 services |
+| **Zéro test, zéro CI/CD** | — | Aucun filet de sécurité sur 32 services. Une CI exécutant `go build`, `tsc --noEmit` et `next build` aurait intercepté les défauts 2.7 et 2.8 au premier commit. |
 
 ---
 
@@ -160,13 +192,16 @@ laisse passer vers les routes protégées, l'échec ne survenant qu'au premier a
 
 Coût faible, impact sécurité maximal. Prérequis à tout le reste.
 
-| # | Action | Réf. audit |
-|---|---|---|
-| 0.1 | Package `internal/pkg/authctx` avec clés typées + accesseurs ; correction du bug `identity` ; migration des 32 services | 2.1 |
-| 0.2 | Authentification service-à-service (jeton de service signé ou mTLS interne) — débloque Copilot et prépare le SOAR | 2.5 |
-| 0.3 | Secret par service, ou migration RS256 (identity signe, les services vérifient avec la clé publique) | 2.4 |
-| 0.4 | Validation réelle du JWT dans `frontend/middleware.ts` | 2.7 |
-| 0.5 | Trancher sur OPA : brancher le moteur ou retirer les dépendances fantômes du `go.mod` | 2.2, 2.3 |
+| # | Action | Réf. audit | État |
+|---|---|---|---|
+| 0.1 | Package `internal/pkg/authctx` avec clés typées + accesseurs ; correction des 5 services cassés ; migration des 32 services | 2.1 | **Fait** |
+| 0.2 | Authentification service-à-service (jeton de service signé ou mTLS interne) — débloque Copilot et prépare le SOAR | 2.5 | À faire |
+| 0.3 | Secret par service, ou migration RS256 (identity signe, les services vérifient avec la clé publique) | 2.4 | À faire |
+| 0.4 | Activation du middleware frontend + validation réelle de la session | 2.7, 2.8 | **Fait** |
+| 0.5 | Trancher sur OPA : retrait des dépendances non importées, policies conservées pour la Phase 1 | 2.2, 2.3 | **Fait** |
+
+Les points 0.2 et 0.3 sont liés : le choix du mécanisme de signature (RS256 avec clé publique
+distribuée) conditionne la forme du jeton de service. Les traiter ensemble évite une double migration.
 
 ### Phase 1 — Socle de confiance · 4 à 6 semaines
 
@@ -258,5 +293,15 @@ Le délai d'obtention (12 à 18 mois) impose un démarrage en parallèle du dév
 Audit conduit par lecture intégrale du code de 9 services représentatifs (`identity`, `siem`, `syslog`,
 `soar`, `pam`, `ueba`, `copilot`, `asset`, `compliance`) couvrant l'éventail de taille et de criticité,
 du socle partagé `internal/pkg`, des policies OPA, des migrations SQL et de l'intégralité du frontend.
-Les défauts 2.1 (clés de contexte) et 2.3 (dépendances fantômes) ont été reproduits et confirmés
-directement sur le dépôt.
+
+Défauts reproduits et confirmés directement sur le dépôt, non déduits de la lecture :
+
+- 2.1 — comparaison des sites d'écriture et de lecture sur les 32 services
+- 2.3 — `grep` des chemins d'import sur l'ensemble des fichiers `.go`
+- 2.7 — `middleware-manifest.json` vide après `next build`, puis vérification du comportement
+  (requête sans session, requête avec cookie forgé, routes publiques, préfixe de locale) contre
+  un build de production servi localement
+- 2.8 — échec de `next build` et 11 erreurs de `tsc --noEmit` sur le commit initial
+
+Baseline de compilation établie avant toute modification : les 33 modules Go compilaient, le frontend
+non.
