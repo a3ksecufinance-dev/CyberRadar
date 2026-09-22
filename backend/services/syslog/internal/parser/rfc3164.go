@@ -83,7 +83,9 @@ func parseRFC3164(line string, defaultHostname string) (*Parsed, error) {
 	}
 
 	// ─── Tag (PROCESS[PID]: ) ────────────────────────────────
-	if idx := strings.IndexAny(rest, ":[ "); idx > 0 {
+	// '[' must not terminate the tag: the PID is part of it, and stopping at
+	// the bracket left ProcID empty and prefixed the message with "[1234]: ".
+	if idx := strings.IndexAny(rest, ": "); idx > 0 {
 		tag := rest[:idx]
 		rest = rest[idx:]
 
