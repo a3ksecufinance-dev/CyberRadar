@@ -240,23 +240,36 @@ Aucun déploiement production sans cette phase.
   (logique pure, test facile, valeur élevée).
 - **CI/CD** : GitHub Actions — `golangci-lint`, build, test, `govulncheck`, scan d'images (Trivy),
   build/push des images. Ajouter un analyzer de clés de contexte pour attraper la classe de défaut 2.1.
-- **RBAC réel** — *fait, partiellement appliqué.* Le mécanisme est en place : migration `000029`
-  seedant 79 associations rôle→permission, permissions effectives résolues à la connexion et portées
-  par le jeton (claim `perms`), et `authmw.RequirePermission` / `RequirePermissionByMethod` qui
-  refusent en 403. Appliqué à `tenant` (tenants), `asset` (assets), `identity` (users) et `siem`
-  — ce dernier par groupe, car autoriser une règle de détection n'est pas triager une alerte :
-  `rules:*`, `alerts:*`, `incidents:*` pour les cas.
+- **RBAC réel** — *fait, 29 services sur 30 protégés.*
 
-  **Reste à appliquer.** Un service ne peut être protégé que si sa ressource existe dans le
-  catalogue de permissions ; il n'en couvre que 11. Trois cas appellent une décision avant d'être
-  branchés, et ne l'ont donc pas été :
-  - `audit` — `POST /events` est un appel service-à-service, qui n'aura d'identité qu'avec le
-    travail d'identité de service prévu en Phase 2 ;
-  - `collector` — ingestion machine, même raison ;
-  - `ir` — les playbooks n'ont aucune permission définie dans le catalogue.
+  **Mécanisme.** Les permissions effectives sont résolues à la connexion et portées par le jeton
+  (claim `perms`) ; `authmw.RequirePermission` refuse en 403 en nommant la permission attendue, et
+  `RequirePermissionByMethod` dérive l'action de la méthode HTTP (GET → `read`, DELETE → `delete`,
+  le reste → `write`).
 
-  Les autres domaines (CSPM, DSPM, OT, SCS, PAM, IGA, UEBA, TI, VULN, SOAR…) n'ont pas de
-  permissions déclarées : les ajouter est une décision de politique produit, pas un choix technique.
+  **Catalogue.** `000002` déclarait 26 permissions sur 11 ressources sans jamais les relier aux
+  rôles. `000029` seede la matrice manquante ; `000030` étend le catalogue aux domaines restants —
+  une ressource par domaine de service. Total : **82 permissions sur 34 ressources, 219 associations**
+  réparties sur 10 rôles (`super_admin` en est absent : il contourne le contrôle).
+
+  `:delete` n'est déclaré que pour les 9 domaines exposant réellement une route `DELETE`, afin de
+  ne jamais accorder un droit sans objet.
+
+  **Granularité.** Trois services sont protégés par groupe de routes plutôt qu'en bloc, parce que
+  leurs routes ne relèvent pas de la même autorité :
+  - `siem` → `rules:*` (écrire une règle de détection), `alerts:*` (trier), `incidents:*` (les cas) ;
+  - `ir` → `playbooks:*` (rédiger une procédure) distinct de `incidents:*` (traiter un incident) ;
+  - `audit` → `audit:read` en lecture, `audit:export` à l'export — l'export d'une piste d'audit
+    n'est pas sa consultation.
+
+  **Seule exception : `collector`.** Ses deux routes (`POST /events/ingest`, `/events/heartbeat`)
+  sont des appels machine sans utilisateur derrière. Idem pour `POST /audit/events`, laissée
+  ouverte au sein d'un `audit` par ailleurs protégé. Les deux attendent l'identité de service
+  prévue en Phase 2 ; elles restent couvertes par `RequireJWT`.
+
+  **À revoir avant production.** La matrice de `000030` suit les descriptions de rôles seedées en
+  `000002` et constitue un point de départ défendable, pas une politique de sécurité arrêtée :
+  qui peut lire les actifs OT ou approuver un accès privilégié est une décision d'organisation.
 
   **Compromis assumé** : porter les permissions dans le jeton rend l'autorisation locale et sans
   appel réseau, mais un changement de droits ne prend effet qu'au jeton suivant. La durée de vie du

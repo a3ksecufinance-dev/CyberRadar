@@ -71,6 +71,7 @@ func main() {
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("attack_paths"))
 		attackH.RegisterRoutes(r)
 	})
 

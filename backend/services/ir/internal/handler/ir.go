@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/services/ir/internal/model"
 	"github.com/cyberradar/platform/services/ir/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -25,34 +26,38 @@ func NewIRHandler(svc *service.IRService, logger zerolog.Logger) *IRHandler {
 func (h *IRHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 
-	// Playbooks
-	r.Post("/playbooks", h.CreatePlaybook)
-	r.Get("/playbooks", h.ListPlaybooks)
-	r.Get("/playbooks/{playbookID}", h.GetPlaybook)
-	r.Patch("/playbooks/{playbookID}", h.UpdatePlaybook)
+	// Playbooks — authoring a response procedure is a separate authority from
+	// working an incident, so it carries its own permission.
+	r.Route("/playbooks", func(r chi.Router) {
+		r.Use(authmw.RequirePermissionByMethod("playbooks"))
+		r.Post("/", h.CreatePlaybook)
+		r.Get("/", h.ListPlaybooks)
+		r.Get("/{playbookID}", h.GetPlaybook)
+		r.Patch("/{playbookID}", h.UpdatePlaybook)
+	})
 
-	// Incidents
-	r.Post("/incidents", h.CreateIncident)
-	r.Get("/incidents", h.ListIncidents)
-	r.Get("/incidents/{incidentID}", h.GetIncident)
-	r.Patch("/incidents/{incidentID}", h.UpdateIncident)
+	// Incidents, with their timeline, tasks and evidence.
+	r.Route("/incidents", func(r chi.Router) {
+		r.Use(authmw.RequirePermissionByMethod("incidents"))
+		r.Post("/", h.CreateIncident)
+		r.Get("/", h.ListIncidents)
+		r.Get("/{incidentID}", h.GetIncident)
+		r.Patch("/{incidentID}", h.UpdateIncident)
 
-	// Timeline
-	r.Post("/incidents/{incidentID}/timeline", h.AddTimelineEvent)
-	r.Get("/incidents/{incidentID}/timeline", h.GetTimeline)
+		r.Post("/{incidentID}/timeline", h.AddTimelineEvent)
+		r.Get("/{incidentID}/timeline", h.GetTimeline)
 
-	// Tasks
-	r.Post("/incidents/{incidentID}/tasks", h.CreateTask)
-	r.Get("/incidents/{incidentID}/tasks", h.ListTasks)
-	r.Patch("/incidents/{incidentID}/tasks/{taskID}", h.UpdateTask)
+		r.Post("/{incidentID}/tasks", h.CreateTask)
+		r.Get("/{incidentID}/tasks", h.ListTasks)
+		r.Patch("/{incidentID}/tasks/{taskID}", h.UpdateTask)
 
-	// Evidence
-	r.Post("/incidents/{incidentID}/evidence", h.CreateEvidence)
-	r.Get("/incidents/{incidentID}/evidence", h.ListEvidence)
-	r.Patch("/incidents/{incidentID}/evidence/{evidenceID}", h.UpdateEvidence)
+		r.Post("/{incidentID}/evidence", h.CreateEvidence)
+		r.Get("/{incidentID}/evidence", h.ListEvidence)
+		r.Patch("/{incidentID}/evidence/{evidenceID}", h.UpdateEvidence)
+	})
 
 	// Stats
-	r.Get("/stats", h.GetStats)
+	r.With(authmw.RequirePermission("incidents:read")).Get("/stats", h.GetStats)
 
 	return r
 }

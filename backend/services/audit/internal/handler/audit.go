@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/audit/internal/model"
@@ -33,10 +34,17 @@ func NewAuditHandler(svc *service.AuditService) *AuditHandler {
 // RegisterRoutes mounts audit routes.
 func (h *AuditHandler) RegisterRoutes(r chi.Router) {
 	r.Route("/audit", func(r chi.Router) {
-		r.Post("/events", h.Write)       // Write a single event (service-to-service)
-		r.Get("/events", h.Search)       // Search audit events
-		r.Get("/events/{id}", h.GetByID) // Get a specific event
-		r.Post("/export", h.Export)      // Export audit log
+		// Reading the audit trail is privileged; exporting it is a separate
+		// authority again, which is why audit:export exists alongside audit:read.
+		r.With(authmw.RequirePermission("audit:read")).Get("/events", h.Search)
+		r.With(authmw.RequirePermission("audit:read")).Get("/events/{id}", h.GetByID)
+		r.With(authmw.RequirePermission("audit:export")).Post("/export", h.Export)
+
+		// Written by other CRP services, not by end users, so it carries no
+		// user permission. It stays gated only by RequireJWT until services get
+		// an identity of their own; the handler already checks the payload's
+		// tenant against the token's.
+		r.Post("/events", h.Write)
 	})
 }
 
