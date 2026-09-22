@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/identity/internal/model"
@@ -183,15 +184,11 @@ func (h *AuthHandler) DisableUser(w http.ResponseWriter, r *http.Request) {
 // ─── Context helpers ─────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(contextKey("tenant_id")).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustUserID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(contextKey("user_id")).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func resolveTenantID(r *http.Request) (uuid.UUID, error) {
@@ -202,11 +199,9 @@ func resolveTenantID(r *http.Request) (uuid.UUID, error) {
 	return uuid.Parse(raw)
 }
 
-type contextKey string
-
 func requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Context().Value(contextKey("tenant_id")) == nil {
+		if _, ok := authctx.From(r.Context()); !ok {
 			response.Unauthorized(w, "Authentication required")
 			return
 		}

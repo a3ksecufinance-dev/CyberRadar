@@ -12,6 +12,7 @@ import (
 	"time"
 
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/dashboard/internal/handler"
 	"github.com/cyberradar/platform/services/dashboard/internal/model"
@@ -190,9 +191,14 @@ func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http
 				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
 				return
 			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
+			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, "", claims.Roles, claims.IsAdmin)
+			if claimsErr != nil {
+				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
+					http.StatusUnauthorized)
+				return
+			}
+			ctx := authctx.With(r.Context(), identity)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

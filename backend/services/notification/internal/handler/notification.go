@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/notification/internal/model"
@@ -100,12 +101,9 @@ func (h *NotificationHandler) Test(w http.ResponseWriter, r *http.Request) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-type contextKey string
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(contextKey("tenant_id")).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 var _ = apierrors.IsKind   // ensure import used

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/tenant/internal/model"
@@ -12,15 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-)
-
-// contextKey is a private type for context keys to avoid collisions.
-type contextKey string
-
-const (
-	ctxTenantID    contextKey = "tenant_id"
-	ctxUserID      contextKey = "user_id"
-	ctxIsSuperAdmin contextKey = "is_super_admin"
 )
 
 // TenantHandler exposes tenant management endpoints.
@@ -185,14 +177,11 @@ func (h *TenantHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // mustTenantID extracts the tenant_id from context (set by JWT middleware).
 // It panics if not found — the auth middleware must always set this.
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(ctxTenantID).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustIsSuperAdmin(r *http.Request) bool {
-	v, _ := r.Context().Value(ctxIsSuperAdmin).(bool)
-	return v
+	return authctx.IsSuperAdmin(r.Context())
 }
 
 // ─── Error mapping ────────────────────────────────────────────────────────────

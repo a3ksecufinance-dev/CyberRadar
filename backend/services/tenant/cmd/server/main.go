@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/tenant/internal/handler"
 	"github.com/cyberradar/platform/services/tenant/internal/repository"
@@ -156,19 +157,18 @@ func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http
 			}
 
 			// Inject into context — downstream code reads from context only
-			ctx := r.Context()
-			ctx = contextWithValue(ctx, "tenant_id", claims.TenantID)
-			ctx = contextWithValue(ctx, "user_id", claims.UserID)
-			ctx = contextWithValue(ctx, "is_super_admin", claims.IsAdmin)
-			ctx = contextWithValue(ctx, "roles", claims.Roles)
+			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, "", claims.Roles, claims.IsAdmin)
+			if claimsErr != nil {
+				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
+					http.StatusUnauthorized)
+				return
+			}
+			ctx := authctx.With(r.Context(), identity)
 
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-func contextWithValue(ctx context.Context, key, val any) context.Context {
-	return context.WithValue(ctx, key, val)
 }
 
 // ─── Config helpers ───────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/services/ir/internal/model"
 	"github.com/cyberradar/platform/services/ir/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -59,24 +60,15 @@ func (h *IRHandler) Routes() chi.Router {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, bool) {
-	raw, ok := r.Context().Value("tenant_id").(string)
-	if !ok || raw == "" {
-		return uuid.Nil, false
-	}
-	id, err := uuid.Parse(raw)
-	return id, err == nil
+	id := authctx.TenantID(r.Context())
+	return id, id != uuid.Nil
 }
 
 func userFromCtx(r *http.Request) *uuid.UUID {
-	raw, ok := r.Context().Value("user_id").(string)
-	if !ok || raw == "" {
-		return nil
+	if id := authctx.UserID(r.Context()); id != uuid.Nil {
+		return &id
 	}
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return nil
-	}
-	return &id
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

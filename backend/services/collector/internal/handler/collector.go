@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/collector/internal/model"
 	"github.com/cyberradar/platform/services/collector/internal/service"
@@ -78,6 +79,8 @@ func (h *CollectorHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 // mustTenantID extracts the tenant_id injected by the JWT middleware.
 func mustTenantID(r *http.Request) string {
-	v, _ := r.Context().Value("tenant_id").(string)
-	return v
+	if id, ok := authctx.From(r.Context()); ok {
+		return id.TenantID.String()
+	}
+	return ""
 }

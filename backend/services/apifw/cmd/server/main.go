@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/apifw/internal/handler"
@@ -29,10 +30,10 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "apifw-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8017")
+	port := envOrDefault("SERVICE_PORT", "8017")
 	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -46,8 +47,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	apifwRepo := repository.NewAPIFWRepository(pool)
-	apifwSvc  := service.NewAPIFWService(apifwRepo, logger)
-	apifwH    := handler.NewAPIFWHandler(apifwSvc)
+	apifwSvc := service.NewAPIFWService(apifwRepo, logger)
+	apifwH := handler.NewAPIFWHandler(apifwSvc)
 
 	// ── Kafka consumer: fan-out events to webhooks ────────────────────────────
 	// Listen on five event topics and deliver to matching tenant webhooks.
@@ -209,9 +210,14 @@ func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http
 				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
 				return
 			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
+			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, "", claims.Roles, claims.IsAdmin)
+			if claimsErr != nil {
+				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
+					http.StatusUnauthorized)
+				return
+			}
+			ctx := authctx.With(r.Context(), identity)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

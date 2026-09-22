@@ -11,13 +11,14 @@ import (
 	"time"
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/audit/internal/handler"
 	"github.com/cyberradar/platform/services/audit/internal/repository"
 	"github.com/cyberradar/platform/services/audit/internal/service"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -28,8 +29,8 @@ func main() {
 	logger := log.With().Str("service", "audit-service").Logger()
 
 	// ─── Config ──────────────────────────────────────────────
-	port      := envOrDefault("SERVICE_PORT", "8003")
-	chDSN     := mustEnv("CLICKHOUSE_DSN")
+	port := envOrDefault("SERVICE_PORT", "8003")
+	chDSN := mustEnv("CLICKHOUSE_DSN")
 	jwtSecret := mustEnv("JWT_SECRET")
 
 	// ─── ClickHouse ──────────────────────────────────────────
@@ -47,8 +48,8 @@ func main() {
 	logger.Info().Msg("clickhouse connected")
 
 	// ─── Wiring ──────────────────────────────────────────────
-	auditRepo    := repository.NewAuditRepository(chConn)
-	auditSvc     := service.NewAuditService(auditRepo, logger)
+	auditRepo := repository.NewAuditRepository(chConn)
+	auditSvc := service.NewAuditService(auditRepo, logger)
 	auditHandler := handler.NewAuditHandler(auditSvc)
 
 	// ─── Router ──────────────────────────────────────────────
@@ -130,9 +131,14 @@ func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
+			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, claims.Email, claims.Roles, claims.IsAdmin)
+			if claimsErr != nil {
+				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
+					http.StatusUnauthorized)
+				return
+			}
+			ctx := authctx.With(r.Context(), identity)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

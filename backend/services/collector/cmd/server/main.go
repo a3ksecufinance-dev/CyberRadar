@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/collector/internal/handler"
@@ -25,9 +26,9 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "collector-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8005")
+	port := envOrDefault("SERVICE_PORT", "8005")
 	jwtSecret := mustEnv("JWT_SECRET")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	producer := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers:  brokers,
@@ -43,7 +44,7 @@ func main() {
 	}, logger)
 	defer dlqProducer.Close()
 
-	collectorSvc     := service.NewCollectorService(producer, logger)
+	collectorSvc := service.NewCollectorService(producer, logger)
 	collectorHandler := handler.NewCollectorHandler(collectorSvc)
 
 	r := chi.NewRouter()
@@ -117,9 +118,14 @@ func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http
 				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
 				return
 			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
+			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, "", claims.Roles, claims.IsAdmin)
+			if claimsErr != nil {
+				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
+					http.StatusUnauthorized)
+				return
+			}
+			ctx := authctx.With(r.Context(), identity)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

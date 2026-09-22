@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/services/mobile/internal/model"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -114,15 +115,12 @@ func (h *Handler) Routes() http.Handler {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) uuid.UUID {
-	if v, ok := r.Context().Value("tenant_id").(uuid.UUID); ok {
-		return v
-	}
-	return uuid.Nil
+	return authctx.TenantID(r.Context())
 }
 
 func userFromCtx(r *http.Request) *uuid.UUID {
-	if v, ok := r.Context().Value("user_id").(uuid.UUID); ok {
-		return &v
+	if id := authctx.UserID(r.Context()); id != uuid.Nil {
+		return &id
 	}
 	return nil
 }
