@@ -646,7 +646,7 @@ const vulnSelect = `
 	SELECT id, tenant_id, cve_id, title, description, cvss_score, cvss_vector, cvss_severity,
 	       is_exploited, exploit_available, epss_score, cwe_id, cwe_name, mitre_technique,
 	       affected_products, patch_available, patch_url, published_at, modified_at,
-	       nvd_url, references, tags, created_at, updated_at
+	       nvd_url, reference_urls, tags, created_at, updated_at
 	FROM vulnerabilities`
 
 func scanVuln(row scannable) (*model.Vulnerability, error) {
