@@ -52,7 +52,10 @@ func newPair(t *testing.T) (*Signer, *Verifier, []byte) {
 func TestRoundTrip(t *testing.T) {
 	signer, verifier, _ := newPair(t)
 
-	tokens, err := signer.GenerateTokenPair(testTenant, testUser, "a@b.c", []string{"analyst"}, true)
+	tokens, err := signer.GenerateTokenPair(Subject{
+		TenantID: testTenant, UserID: testUser, Email: "a@b.c",
+		Roles: []string{"analyst"}, Permissions: []string{"alerts:read"}, IsAdmin: true,
+	})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}
@@ -111,7 +114,7 @@ func TestRejectsTokenFromAnotherKey(t *testing.T) {
 	signer, _, _ := newPair(t)
 	_, otherVerifier, _ := newPair(t)
 
-	tokens, err := signer.GenerateTokenPair(testTenant, testUser, "a@b.c", nil, false)
+	tokens, err := signer.GenerateTokenPair(Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c"})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}
@@ -132,7 +135,7 @@ func TestRejectsExpiredToken(t *testing.T) {
 		t.Fatalf("NewVerifier: %v", err)
 	}
 
-	tokens, err := signer.GenerateTokenPair(testTenant, testUser, "a@b.c", nil, false)
+	tokens, err := signer.GenerateTokenPair(Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c"})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}

@@ -69,7 +69,10 @@ func serve(t *testing.T, verifier *jwt.Verifier, authHeader string) (status int,
 
 func TestValidTokenReachesHandler(t *testing.T) {
 	signer, verifier := newSignerVerifier(t)
-	tokens, err := signer.GenerateTokenPair(testTenant, testUser, "a@b.c", []string{"analyst"}, true)
+	tokens, err := signer.GenerateTokenPair(jwt.Subject{
+		TenantID: testTenant, UserID: testUser, Email: "a@b.c",
+		Roles: []string{"analyst"}, Permissions: []string{"alerts:read"}, IsAdmin: true,
+	})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}
@@ -115,7 +118,7 @@ func TestRejectsTokenFromAnotherIssuerKey(t *testing.T) {
 	otherSigner, _ := newSignerVerifier(t)
 	_, verifier := newSignerVerifier(t)
 
-	tokens, err := otherSigner.GenerateTokenPair(testTenant, testUser, "a@b.c", nil, false)
+	tokens, err := otherSigner.GenerateTokenPair(jwt.Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c"})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}
@@ -131,7 +134,7 @@ func TestRejectsTokenFromAnotherIssuerKey(t *testing.T) {
 
 func TestSchemeIsCaseInsensitive(t *testing.T) {
 	signer, verifier := newSignerVerifier(t)
-	tokens, err := signer.GenerateTokenPair(testTenant, testUser, "a@b.c", nil, false)
+	tokens, err := signer.GenerateTokenPair(jwt.Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c"})
 	if err != nil {
 		t.Fatalf("GenerateTokenPair: %v", err)
 	}
@@ -155,5 +158,108 @@ func TestUnauthorizedBodyIsValidJSON(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+// ─── Authorization ────────────────────────────────────────────────────────────
+
+// serveAuthorized runs a request through RequireJWT then the given permission
+// middleware, reporting the status and whether the handler was reached.
+func serveAuthorized(t *testing.T, sub jwt.Subject, mw func(http.Handler) http.Handler, method string) (int, bool) {
+	t.Helper()
+	signer, verifier := newSignerVerifier(t)
+	tokens, err := signer.GenerateTokenPair(sub)
+	if err != nil {
+		t.Fatalf("GenerateTokenPair: %v", err)
+	}
+
+	reached := false
+	handler := RequireJWT(verifier, zerolog.Nop())(
+		mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true })))
+
+	req := httptest.NewRequest(method, "/api/v1/things", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Code, reached
+}
+
+func analyst(perms ...string) jwt.Subject {
+	return jwt.Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c",
+		Roles: []string{"soc_analyst_l2"}, Permissions: perms}
+}
+
+func TestRequirePermissionGrantsAndDenies(t *testing.T) {
+	if code, reached := serveAuthorized(t, analyst("alerts:read"),
+		RequirePermission("alerts:read"), http.MethodGet); !reached || code != http.StatusOK {
+		t.Errorf("holder of alerts:read was denied: status %d", code)
+	}
+
+	code, reached := serveAuthorized(t, analyst("alerts:read"),
+		RequirePermission("tenants:read"), http.MethodGet)
+	if reached {
+		t.Error("handler reached without the required permission")
+	}
+	if code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", code)
+	}
+}
+
+func TestRequirePermissionDeniesWhenNoneHeld(t *testing.T) {
+	if code, reached := serveAuthorized(t, analyst(),
+		RequirePermission("alerts:read"), http.MethodGet); reached || code != http.StatusForbidden {
+		t.Errorf("caller with no permissions was allowed: status %d", code)
+	}
+}
+
+func TestSuperAdminBypassesPermissionChecks(t *testing.T) {
+	// Mirrors the super-admin rule in policies/rbac.rego.
+	sub := jwt.Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c", IsAdmin: true}
+	if code, reached := serveAuthorized(t, sub,
+		RequirePermission("tenants:delete"), http.MethodDelete); !reached || code != http.StatusOK {
+		t.Errorf("super-admin denied: status %d", code)
+	}
+}
+
+func TestRequirePermissionByMethodMapsVerbs(t *testing.T) {
+	cases := []struct {
+		method string
+		held   string
+		want   int
+	}{
+		{http.MethodGet, "assets:read", http.StatusOK},
+		{http.MethodPost, "assets:write", http.StatusOK},
+		{http.MethodPut, "assets:write", http.StatusOK},
+		{http.MethodPatch, "assets:write", http.StatusOK},
+		{http.MethodDelete, "assets:delete", http.StatusOK},
+		// A read grant must not authorize a mutation.
+		{http.MethodPost, "assets:read", http.StatusForbidden},
+		{http.MethodDelete, "assets:write", http.StatusForbidden},
+	}
+
+	for _, c := range cases {
+		code, _ := serveAuthorized(t, analyst(c.held), RequirePermissionByMethod("assets"), c.method)
+		if code != c.want {
+			t.Errorf("%s holding %s: status %d, want %d", c.method, c.held, code, c.want)
+		}
+	}
+}
+
+func TestForbiddenBodyIsValidJSON(t *testing.T) {
+	signer, verifier := newSignerVerifier(t)
+	tokens, _ := signer.GenerateTokenPair(analyst("alerts:read"))
+
+	handler := RequireJWT(verifier, zerolog.Nop())(
+		RequirePermission("tenants:read")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tenants", nil)
+	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	body, _ := io.ReadAll(rec.Body)
+	want := `{"error":{"code":"FORBIDDEN","message":"permission required: tenants:read"}}`
+	if string(body) != want {
+		t.Errorf("body = %s, want %s", body, want)
 	}
 }

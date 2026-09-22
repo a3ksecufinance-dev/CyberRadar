@@ -49,9 +49,53 @@ func RequireJWT(verifier *jwt.Verifier, logger zerolog.Logger) func(http.Handler
 				return
 			}
 			identity.Token = raw
+			identity.Permissions = claims.Perms
 
 			next.ServeHTTP(w, r.WithContext(authctx.With(r.Context(), identity)))
 		})
+	}
+}
+
+// RequirePermission rejects a request whose caller does not hold perm, named
+// "resource:action". It must be mounted after RequireJWT, which is what puts
+// the caller in the context.
+//
+// Before this existed no service compared the caller's roles against anything,
+// so any authenticated user could reach every route of every service.
+func RequirePermission(perm string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !authctx.HasPermission(r.Context(), perm) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				//nolint:errcheck // nothing actionable if the client already hung up
+				fmt.Fprintf(w, `{"error":{"code":"FORBIDDEN","message":%q}}`,
+					"permission required: "+perm)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequirePermissionByMethod applies read/write/delete on resource according to
+// the request method, for route groups that share one resource.
+func RequirePermissionByMethod(resource string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			RequirePermission(resource+":"+actionFor(r.Method))(next).ServeHTTP(w, r)
+		})
+	}
+}
+
+func actionFor(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return "read"
+	case http.MethodDelete:
+		return "delete"
+	default:
+		return "write"
 	}
 }
 

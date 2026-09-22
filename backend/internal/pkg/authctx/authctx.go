@@ -24,6 +24,7 @@ type Identity struct {
 	UserID       uuid.UUID
 	Email        string
 	Roles        []string
+	Permissions  []string
 	IsSuperAdmin bool
 
 	// Token is the caller's raw bearer token, kept so a service calling another
@@ -102,4 +103,23 @@ func Roles(ctx context.Context) []string {
 func Token(ctx context.Context) string {
 	id, _ := From(ctx)
 	return id.Token
+}
+
+// HasPermission reports whether the caller may perform perm, named
+// "resource:action". A super-admin holds every permission, which mirrors the
+// bypass in policies/rbac.rego.
+func HasPermission(ctx context.Context, perm string) bool {
+	id, ok := From(ctx)
+	if !ok {
+		return false
+	}
+	if id.IsSuperAdmin {
+		return true
+	}
+	for _, p := range id.Permissions {
+		if p == perm {
+			return true
+		}
+	}
+	return false
 }

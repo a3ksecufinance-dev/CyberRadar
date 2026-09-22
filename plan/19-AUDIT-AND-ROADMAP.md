@@ -61,7 +61,7 @@ par accident. La convention reste fragile et expose la plateforme aux collisions
 
 > Invisible pour `go build` et `go vet` en configuration par défaut : le défaut a été livré sans être détecté.
 
-### 2.2 OPA est du code mort — le RBAC n'est jamais évalué
+### 2.2 Aucune autorisation à l'exécution — le RBAC n'est jamais évalué
 
 Les trois policies (`policies/abac.rego`, `rbac.rego`, `tenant_isolation.rego`) sont correctement écrites
 (bypass super-admin, MFA obligatoire pour l'export, geo-blocking, restriction horaire).
@@ -74,6 +74,14 @@ Conséquences :
   Tout utilisateur authentifié peut appeler toute route.
 - L'isolation tenant est réimplémentée à la main, service par service, en comparaisons
   `if user.TenantID != tenantID` dupliquées. Cela fonctionne là où c'est présent, mais sans garantie centrale.
+
+La donnée de politique manquait également : `000002` seede 26 permissions et 11 rôles system, mais
+**jamais le lien entre les deux** — `role_permissions` était vide, donc aucun rôle ne portait la
+moindre permission.
+
+> Corrigé en Phase 1 : migration `000029` seedant la matrice rôles→permissions, permissions
+> effectives portées par le jeton, et `authmw.RequirePermission` appliqué par groupe de routes.
+> Voir §5 Phase 1.
 
 ### 2.3 Dépendances déclarées sans aucun code
 
@@ -232,7 +240,28 @@ Aucun déploiement production sans cette phase.
   (logique pure, test facile, valeur élevée).
 - **CI/CD** : GitHub Actions — `golangci-lint`, build, test, `govulncheck`, scan d'images (Trivy),
   build/push des images. Ajouter un analyzer de clés de contexte pour attraper la classe de défaut 2.1.
-- **RBAC réel** : brancher OPA en middleware, ou implémenter un contrôle de permissions centralisé.
+- **RBAC réel** — *fait, partiellement appliqué.* Le mécanisme est en place : migration `000029`
+  seedant 79 associations rôle→permission, permissions effectives résolues à la connexion et portées
+  par le jeton (claim `perms`), et `authmw.RequirePermission` / `RequirePermissionByMethod` qui
+  refusent en 403. Appliqué à `tenant` (tenants), `asset` (assets), `identity` (users) et `siem`
+  — ce dernier par groupe, car autoriser une règle de détection n'est pas triager une alerte :
+  `rules:*`, `alerts:*`, `incidents:*` pour les cas.
+
+  **Reste à appliquer.** Un service ne peut être protégé que si sa ressource existe dans le
+  catalogue de permissions ; il n'en couvre que 11. Trois cas appellent une décision avant d'être
+  branchés, et ne l'ont donc pas été :
+  - `audit` — `POST /events` est un appel service-à-service, qui n'aura d'identité qu'avec le
+    travail d'identité de service prévu en Phase 2 ;
+  - `collector` — ingestion machine, même raison ;
+  - `ir` — les playbooks n'ont aucune permission définie dans le catalogue.
+
+  Les autres domaines (CSPM, DSPM, OT, SCS, PAM, IGA, UEBA, TI, VULN, SOAR…) n'ont pas de
+  permissions déclarées : les ajouter est une décision de politique produit, pas un choix technique.
+
+  **Compromis assumé** : porter les permissions dans le jeton rend l'autorisation locale et sans
+  appel réseau, mais un changement de droits ne prend effet qu'au jeton suivant. La durée de vie du
+  jeton d'accès (60 min par défaut) borne donc la révocation ; la réduire si le besoin l'exige.
+
 - **Observabilité** : instrumenter OpenTelemetry + Prometheus (les bibliothèques sont déjà déclarées).
 - **Vault** : client réel dans `internal/pkg`, injection des secrets au démarrage.
 - **README** et documentation d'onboarding (absents).

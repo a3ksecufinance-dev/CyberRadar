@@ -126,6 +126,35 @@ func (r *RoleRepository) GetRoleNamesByUser(ctx context.Context, userID uuid.UUI
 	return names, rows.Err()
 }
 
+// GetPermissionsByUser returns the distinct "resource:action" permissions a
+// user holds through all of their roles. These go into the access token so
+// every service can authorize locally, without querying identity per request.
+func (r *RoleRepository) GetPermissionsByUser(ctx context.Context, userID uuid.UUID) ([]string, error) {
+	const q = `
+		SELECT DISTINCT p.resource || ':' || p.action
+		FROM identity_roles ir
+		JOIN role_permissions rp ON rp.role_id = ir.role_id
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE ir.identity_id = $1
+		ORDER BY 1`
+
+	rows, err := r.db.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var perms []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		perms = append(perms, p)
+	}
+	return perms, rows.Err()
+}
+
 // AssignRoles assigns roles to a user (additive — does not remove existing).
 func (r *RoleRepository) AssignRoles(ctx context.Context, userID uuid.UUID, roleIDs []uuid.UUID) error {
 	for _, roleID := range roleIDs {

@@ -93,7 +93,13 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireJWT(jwtVerifier, logger))
 			authHandler.RegisterProtectedRoutes(r)
-			userHandler.RegisterRoutes(r)
+
+			// User and identity administration; /auth/me and /auth/logout above
+			// stay reachable by any authenticated caller.
+			r.Group(func(r chi.Router) {
+				r.Use(authmw.RequirePermissionByMethod("users"))
+				userHandler.RegisterRoutes(r)
+			})
 		})
 	})
 

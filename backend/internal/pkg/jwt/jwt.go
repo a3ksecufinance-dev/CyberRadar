@@ -28,8 +28,23 @@ type Claims struct {
 	UserID   string   `json:"uid"`
 	Email    string   `json:"email"`
 	Roles    []string `json:"roles"`
-	IsAdmin  bool     `json:"is_admin"`
+	// Perms are the caller's effective permissions, resolved from their roles
+	// when the token was minted. Carrying them makes authorization a local
+	// check in every service; the cost is that a permission change only takes
+	// effect on the next token, so access token lifetime bounds revocation.
+	Perms   []string `json:"perms,omitempty"`
+	IsAdmin bool     `json:"is_admin"`
 	gojwt.RegisteredClaims
+}
+
+// Subject describes who a token is being minted for.
+type Subject struct {
+	TenantID    string
+	UserID      string
+	Email       string
+	Roles       []string
+	Permissions []string
+	IsAdmin     bool
 }
 
 // TokenPair holds an access token and a refresh token.
@@ -130,18 +145,19 @@ func NewSignerFromFile(path string, accessExpiry, refreshExpiry time.Duration) (
 }
 
 // GenerateTokenPair issues an access + refresh token pair.
-func (s *Signer) GenerateTokenPair(tenantID, userID, email string, roles []string, isAdmin bool) (*TokenPair, error) {
+func (s *Signer) GenerateTokenPair(sub Subject) (*TokenPair, error) {
 	now := time.Now()
 	expiresAt := now.Add(s.accessTokenExpiry)
 
 	accessClaims := &Claims{
-		TenantID: tenantID,
-		UserID:   userID,
-		Email:    email,
-		Roles:    roles,
-		IsAdmin:  isAdmin,
+		TenantID: sub.TenantID,
+		UserID:   sub.UserID,
+		Email:    sub.Email,
+		Roles:    sub.Roles,
+		Perms:    sub.Permissions,
+		IsAdmin:  sub.IsAdmin,
 		RegisteredClaims: gojwt.RegisteredClaims{
-			Subject:   userID,
+			Subject:   sub.UserID,
 			IssuedAt:  gojwt.NewNumericDate(now),
 			ExpiresAt: gojwt.NewNumericDate(expiresAt),
 			ID:        uuid.NewString(),
@@ -155,7 +171,7 @@ func (s *Signer) GenerateTokenPair(tenantID, userID, email string, roles []strin
 	}
 
 	refreshClaims := &gojwt.RegisteredClaims{
-		Subject:   userID,
+		Subject:   sub.UserID,
 		IssuedAt:  gojwt.NewNumericDate(now),
 		ExpiresAt: gojwt.NewNumericDate(now.Add(s.refreshTokenExpiry)),
 		ID:        uuid.NewString(),
