@@ -119,6 +119,21 @@ func matchField(fm model.FieldMatch, ev *event.NormalizedEvent) bool {
 		a, _ := strconv.ParseFloat(actual, 64)
 		b, _ := strconv.ParseFloat(fm.Value, 64)
 		return a >= b
+	case model.OpLt:
+		a, _ := strconv.ParseFloat(actual, 64)
+		b, _ := strconv.ParseFloat(fm.Value, 64)
+		return a < b
+	case model.OpLte:
+		a, _ := strconv.ParseFloat(actual, 64)
+		b, _ := strconv.ParseFloat(fm.Value, 64)
+		return a <= b
+	case model.OpIn:
+		for _, candidate := range strings.Split(fm.Value, ",") {
+			if strings.EqualFold(actual, strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+		return false
 	case model.OpExists:
 		return actual != ""
 	default:
