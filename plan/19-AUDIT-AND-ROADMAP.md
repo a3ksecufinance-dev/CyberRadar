@@ -97,6 +97,13 @@ La valeur est explicitement de développement, mais le modèle est la faille : *
 peut forger des jetons valides pour tous les autres.** Sur une plateforme dont un composant est
 exposé à Internet (collecteur syslog), c'est un chemin de latéralisation direct.
 
+S'y ajoutait une faiblesse de vérification : **un seul service sur trente (`tenant`) contrôlait
+l'algorithme de signature du jeton reçu.** Chaque service embarquait sa propre copie du middleware,
+et les copies avaient divergé.
+
+> Corrigé en 0.3 : signature RS256, clé privée détenue par `identity` seul, contrôle obligatoire de
+> la famille d'algorithme dans un middleware unique.
+
 ### 2.5 Aucune authentification service-à-service
 
 `services/copilot/internal/service/tools.go:203-210` émet uniquement l'en-tête `X-Internal-Tenant-ID`,
@@ -195,13 +202,26 @@ Coût faible, impact sécurité maximal. Prérequis à tout le reste.
 | # | Action | Réf. audit | État |
 |---|---|---|---|
 | 0.1 | Package `internal/pkg/authctx` avec clés typées + accesseurs ; correction des 5 services cassés ; migration des 32 services | 2.1 | **Fait** |
-| 0.2 | Authentification service-à-service (jeton de service signé ou mTLS interne) — débloque Copilot et prépare le SOAR | 2.5 | À faire |
-| 0.3 | Secret par service, ou migration RS256 (identity signe, les services vérifient avec la clé publique) | 2.4 | À faire |
+| 0.2 | Propagation du token appelant dans les appels du Copilot | 2.5 | **Fait** |
+| 0.3 | Migration RS256 : identity signe, les 30 services vérifient avec la clé publique seule | 2.4 | **Fait** |
 | 0.4 | Activation du middleware frontend + validation réelle de la session | 2.7, 2.8 | **Fait** |
 | 0.5 | Trancher sur OPA : retrait des dépendances non importées, policies conservées pour la Phase 1 | 2.2, 2.3 | **Fait** |
 
-Les points 0.2 et 0.3 sont liés : le choix du mécanisme de signature (RS256 avec clé publique
-distribuée) conditionne la forme du jeton de service. Les traiter ensemble évite une double migration.
+**Phase 0 terminée.** Deux décisions de conception méritent d'être notées :
+
+- **0.2 — propagation plutôt que jeton de service.** Les appels du Copilot sont faits *pour le compte
+  d'un utilisateur* : transmettre son propre jeton authentifie l'appel **et** le confine à ce que cet
+  utilisateur peut déjà voir. Un jeton de service aurait élargi le périmètre sans nécessité. Les
+  appelants autonomes — les actions SOAR réelles, sans utilisateur derrière — auront besoin d'une
+  identité de service propre ; elle sera introduite avec ces actions en Phase 2, pas avant d'avoir un
+  consommateur.
+- **0.3 — RS256 plutôt qu'un secret par service.** Un secret distinct par service aurait résolu la
+  latéralisation mais imposé la distribution de N secrets. Avec RS256, il n'existe qu'une clé privée,
+  détenue par le seul émetteur. Effet de bord important : la clé publique n'étant pas secrète, un
+  vérificateur acceptant HMAC accepterait un jeton que n'importe qui peut forger avec elle — d'où le
+  contrôle obligatoire de la famille d'algorithme dans le middleware partagé.
+
+Un effet collatéral notable : le middleware unique remplace 30 copies et retire environ 1 150 lignes.
 
 ### Phase 1 — Socle de confiance · 4 à 6 semaines
 
