@@ -467,18 +467,18 @@ func (r *GraphRepository) ChokePoints(ctx context.Context, tenantID uuid.UUID, s
 
 func (r *GraphRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.AttackGraphStats, error) {
 	s := &model.AttackGraphStats{}
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1`, tenantID).Scan(&s.TotalNodes)                                                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_edges WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.TotalEdges)                                                                    //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_internet_facing=true`, tenantID).Scan(&s.InternetFacingNodes)                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_critical_system=true`, tenantID).Scan(&s.CriticalSystemNodes)                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_compromised=true`, tenantID).Scan(&s.CompromisedNodes)                                                         //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_scenarios WHERE tenant_id=$1`, tenantID).Scan(&s.TotalScenarios)                                                                               //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.TotalPaths)                                                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND path_score >= 7.0`, tenantID).Scan(&s.HighRiskPaths)                                                              //nolint
-	r.db.QueryRow(ctx, `SELECT COALESCE(MIN(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.ShortestPath)                                                                   //nolint
-	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.AvgPathLength)                                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_exploit_step=true`, tenantID).Scan(&s.PathsWithExploit)                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_priv_esc=true`, tenantID).Scan(&s.PathsWithPrivEsc)                                                           //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1`, tenantID).Scan(&s.TotalNodes)                                      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_edges WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.TotalEdges)                   //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_internet_facing=true`, tenantID).Scan(&s.InternetFacingNodes) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_critical_system=true`, tenantID).Scan(&s.CriticalSystemNodes) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_compromised=true`, tenantID).Scan(&s.CompromisedNodes)        //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_scenarios WHERE tenant_id=$1`, tenantID).Scan(&s.TotalScenarios)                              //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.TotalPaths)                                      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND path_score >= 7.0`, tenantID).Scan(&s.HighRiskPaths)             //nolint
+	r.db.QueryRow(ctx, `SELECT COALESCE(MIN(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.ShortestPath)                  //nolint
+	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.AvgPathLength)                 //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_exploit_step=true`, tenantID).Scan(&s.PathsWithExploit)      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_priv_esc=true`, tenantID).Scan(&s.PathsWithPrivEsc)          //nolint
 	return s, nil
 }
 

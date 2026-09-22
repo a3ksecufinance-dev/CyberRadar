@@ -17,9 +17,9 @@ import (
 // rfc3164Months maps abbreviated month names to their numeric value.
 var rfc3164Months = map[string]time.Month{
 	"Jan": time.January, "Feb": time.February, "Mar": time.March,
-	"Apr": time.April,   "May": time.May,       "Jun": time.June,
-	"Jul": time.July,    "Aug": time.August,     "Sep": time.September,
-	"Oct": time.October, "Nov": time.November,   "Dec": time.December,
+	"Apr": time.April, "May": time.May, "Jun": time.June,
+	"Jul": time.July, "Aug": time.August, "Sep": time.September,
+	"Oct": time.October, "Nov": time.November, "Dec": time.December,
 }
 
 // parseRFC3164 parses an RFC 3164 syslog message.

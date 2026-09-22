@@ -85,11 +85,11 @@ func (h *NotificationHandler) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.svc.Send(r.Context(), &model.SendNotificationRequest{
-		TenantID:  tenantID.String(),
-		Title:     "CyberRadar — Test Notification",
-		Body:      "This is a test notification from Cyber Radar Platform.",
-		Severity:  model.SeverityLow,
-		Channels:  []model.ChannelConfig{body.Channel},
+		TenantID: tenantID.String(),
+		Title:    "CyberRadar — Test Notification",
+		Body:     "This is a test notification from Cyber Radar Platform.",
+		Severity: model.SeverityLow,
+		Channels: []model.ChannelConfig{body.Channel},
 	})
 	if err != nil {
 		response.InternalError(w)
@@ -101,10 +101,9 @@ func (h *NotificationHandler) Test(w http.ResponseWriter, r *http.Request) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-
 func mustTenantID(r *http.Request) uuid.UUID {
 	return authctx.TenantID(r.Context())
 }
 
-var _ = apierrors.IsKind   // ensure import used
-var _ = fmt.Sprintf        // ensure import used
+var _ = apierrors.IsKind // ensure import used
+var _ = fmt.Sprintf      // ensure import used

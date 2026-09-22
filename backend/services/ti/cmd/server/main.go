@@ -28,13 +28,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "ti-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8010")
+	port := envOrDefault("SERVICE_PORT", "8010")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,7 +50,7 @@ func main() {
 	iocRepo := repository.NewIOCRepository(pool)
 
 	// ── TI service ────────────────────────────────────────────────────────────
-	tiSvc     := service.NewTIService(iocRepo, logger)
+	tiSvc := service.NewTIService(iocRepo, logger)
 	tiHandler := handler.NewTIHandler(tiSvc)
 
 	// ── IOC Matcher (Kafka consumer on crp.events.enriched) ──────────────────

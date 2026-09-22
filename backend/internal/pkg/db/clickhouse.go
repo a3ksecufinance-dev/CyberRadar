@@ -12,16 +12,16 @@ import (
 
 // ClickHouseConfig holds connection settings.
 type ClickHouseConfig struct {
-	Addr     []string
-	Database string
-	Username string
-	Password string
-	TLSEnabled bool
-	MaxOpenConns     int
-	MaxIdleConns     int
-	ConnMaxLifetime  time.Duration
-	DialTimeout      time.Duration
-	ReadTimeout      time.Duration
+	Addr            []string
+	Database        string
+	Username        string
+	Password        string
+	TLSEnabled      bool
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	DialTimeout     time.Duration
+	ReadTimeout     time.Duration
 }
 
 // DefaultClickHouseConfig returns sensible defaults.

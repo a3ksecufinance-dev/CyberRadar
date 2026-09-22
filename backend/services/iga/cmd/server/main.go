@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "iga-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8024")
+	port := envOrDefault("SERVICE_PORT", "8024")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,8 +53,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	igaRepo := repository.NewIGARepository(pool)
-	igaSvc  := service.NewIGAService(igaRepo, producer, logger)
-	igaH    := handler.NewIGAHandler(igaSvc)
+	igaSvc := service.NewIGAService(igaRepo, producer, logger)
+	igaH := handler.NewIGAHandler(igaSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()

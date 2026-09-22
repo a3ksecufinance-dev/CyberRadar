@@ -273,14 +273,14 @@ func (s *RiskService) publishScenarioAlert(tenantID uuid.UUID, sc *model.RiskSce
 func (s *RiskService) publishKRIAlert(tenantID uuid.UUID, k *model.RiskKRI) {
 	ctx := context.Background()
 	payload := map[string]any{
-		"event_type":   "risk.kri_red",
-		"tenant_id":    tenantID.String(),
-		"kri_id":       k.ID.String(),
-		"metric_name":  k.MetricName,
-		"category":     k.Category,
-		"value":        k.CurrentValue,
-		"status":       k.Status,
-		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		"event_type":  "risk.kri_red",
+		"tenant_id":   tenantID.String(),
+		"kri_id":      k.ID.String(),
+		"metric_name": k.MetricName,
+		"category":    k.Category,
+		"value":       k.CurrentValue,
+		"status":      k.Status,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 	}
 	data, _ := json.Marshal(payload)
 	if err := s.producer.Publish(ctx, k.ID.String(), data); err != nil {

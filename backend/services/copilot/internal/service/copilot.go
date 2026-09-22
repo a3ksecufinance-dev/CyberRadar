@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
-	"fmt"
 	"unicode/utf8"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
@@ -191,11 +191,11 @@ func (s *CopilotService) runHuntJob(ctx context.Context, tenantID uuid.UUID, job
 	latencyMS := int(time.Since(start).Milliseconds())
 
 	payload := map[string]any{
-		"hunt_type":    job.HuntType,
-		"query":        job.Query,
-		"summary":      summary,
-		"latency_ms":   latencyMS,
-		"stop_reason":  resp.StopReason,
+		"hunt_type":   job.HuntType,
+		"query":       job.Query,
+		"summary":     summary,
+		"latency_ms":  latencyMS,
+		"stop_reason": resp.StopReason,
 	}
 
 	_ = s.repo.UpdateHuntJob(ctx, job.ID, "completed", truncate(summary, 500), "",
@@ -250,12 +250,12 @@ func truncate(s string, maxRunes int) string {
 
 func buildHuntPrompt(huntType, query string, ctx map[string]any) string {
 	base := map[string]string{
-		model.HuntTypeThreatHunt:        "Conduct a comprehensive threat hunt based on the following hypothesis. Use available tools to query alerts, anomalies, and IOCs. Correlate findings and provide a structured report with: (1) Executive Summary, (2) Findings, (3) Risk Assessment, (4) Recommended Actions.",
-		model.HuntTypeIncidentTriage:    "Perform AI-assisted incident triage. Query the incident details, related alerts, affected assets, and IOCs. Provide: (1) Incident Overview, (2) Attack Timeline, (3) Scope Assessment, (4) Immediate Actions, (5) Evidence Summary.",
+		model.HuntTypeThreatHunt:         "Conduct a comprehensive threat hunt based on the following hypothesis. Use available tools to query alerts, anomalies, and IOCs. Correlate findings and provide a structured report with: (1) Executive Summary, (2) Findings, (3) Risk Assessment, (4) Recommended Actions.",
+		model.HuntTypeIncidentTriage:     "Perform AI-assisted incident triage. Query the incident details, related alerts, affected assets, and IOCs. Provide: (1) Incident Overview, (2) Attack Timeline, (3) Scope Assessment, (4) Immediate Actions, (5) Evidence Summary.",
 		model.HuntTypeVulnPrioritization: "Analyze the vulnerability landscape and provide a prioritized remediation roadmap. Consider CVSS scores, EPSS, KEV status, and asset criticality. Output: (1) Critical Path, (2) Priority Matrix, (3) Quick Wins (patch within 24h), (4) Risk Acceptance Candidates.",
-		model.HuntTypeAttackPathSummary: "Analyze attack path scenarios and identify the most critical lateral movement risks. Query choke points and provide: (1) Highest-Risk Paths, (2) Choke Point Recommendations, (3) Network Segmentation Gaps, (4) Remediation Priority.",
-		model.HuntTypeIOCCorrelation:    "Perform IOC correlation and threat actor attribution. Look up the provided indicators and find related entities in the knowledge graph. Provide: (1) IOC Profile, (2) Related Indicators, (3) Threat Actor Attribution, (4) Exposure Assessment.",
-		model.HuntTypeEntityProfiling:   "Build a comprehensive security profile for the specified entity. Query behavioral baselines, anomaly history, vulnerability exposure, and graph relationships. Output: (1) Entity Overview, (2) Risk Profile, (3) Anomaly History, (4) Recommendations.",
+		model.HuntTypeAttackPathSummary:  "Analyze attack path scenarios and identify the most critical lateral movement risks. Query choke points and provide: (1) Highest-Risk Paths, (2) Choke Point Recommendations, (3) Network Segmentation Gaps, (4) Remediation Priority.",
+		model.HuntTypeIOCCorrelation:     "Perform IOC correlation and threat actor attribution. Look up the provided indicators and find related entities in the knowledge graph. Provide: (1) IOC Profile, (2) Related Indicators, (3) Threat Actor Attribution, (4) Exposure Assessment.",
+		model.HuntTypeEntityProfiling:    "Build a comprehensive security profile for the specified entity. Query behavioral baselines, anomaly history, vulnerability exposure, and graph relationships. Output: (1) Entity Overview, (2) Risk Profile, (3) Anomaly History, (4) Recommendations.",
 	}
 
 	instruction := base[huntType]

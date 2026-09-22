@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "cspm-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8025")
+	port := envOrDefault("SERVICE_PORT", "8025")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,8 +50,8 @@ func main() {
 	}, logger)
 
 	cspmRepo := repository.NewCSPMRepository(pool)
-	cspmSvc  := service.NewCSPMService(cspmRepo, producer, logger)
-	cspmH    := handler.NewCSPMHandler(cspmSvc)
+	cspmSvc := service.NewCSPMService(cspmRepo, producer, logger)
+	cspmH := handler.NewCSPMHandler(cspmSvc)
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)

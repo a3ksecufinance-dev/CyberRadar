@@ -8,12 +8,12 @@ import "fmt"
 type Kind string
 
 const (
-	KindNotFound   Kind = "NOT_FOUND"
-	KindConflict   Kind = "CONFLICT"
-	KindForbidden  Kind = "FORBIDDEN"
-	KindBadInput   Kind = "BAD_INPUT"
-	KindInternal   Kind = "INTERNAL"
-	KindUnauth     Kind = "UNAUTHORIZED"
+	KindNotFound  Kind = "NOT_FOUND"
+	KindConflict  Kind = "CONFLICT"
+	KindForbidden Kind = "FORBIDDEN"
+	KindBadInput  Kind = "BAD_INPUT"
+	KindInternal  Kind = "INTERNAL"
+	KindUnauth    Kind = "UNAUTHORIZED"
 )
 
 // DomainError is a typed error returned by service layer.

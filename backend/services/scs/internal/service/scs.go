@@ -82,10 +82,10 @@ func (s *SCSService) CreateSBOM(ctx context.Context, tenantID uuid.UUID, req *mo
 	// Publish event if risky SBOM
 	if sbom.CriticalVulns > 0 || sbom.RiskScore >= 50 {
 		go s.publishAlert("scs.sbom_risky", map[string]any{
-			"sbom_id":       sbom.ID,
-			"name":          sbom.Name,
-			"tenant_id":     sbom.TenantID,
-			"risk_score":    sbom.RiskScore,
+			"sbom_id":        sbom.ID,
+			"name":           sbom.Name,
+			"tenant_id":      sbom.TenantID,
+			"risk_score":     sbom.RiskScore,
 			"critical_vulns": sbom.CriticalVulns,
 		})
 	}

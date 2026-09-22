@@ -22,9 +22,9 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "pipeline-worker").Logger()
 
-	brokers  := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
-	chDSN    := mustEnv("CLICKHOUSE_DSN") // clickhouse://user:pass@host:9000/crp_audit
-	groupID  := envOrDefault("KAFKA_GROUP_ID", "crp-pipeline")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	chDSN := mustEnv("CLICKHOUSE_DSN") // clickhouse://user:pass@host:9000/crp_audit
+	groupID := envOrDefault("KAFKA_GROUP_ID", "crp-pipeline")
 	batchStr := envOrDefault("CLICKHOUSE_BATCH_SIZE", "1000")
 	batchSize := 1000
 	if n := parseInt(batchStr); n > 0 {

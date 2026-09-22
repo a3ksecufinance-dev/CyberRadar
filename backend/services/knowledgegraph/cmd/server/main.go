@@ -30,13 +30,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "knowledgegraph-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8013")
+	port := envOrDefault("SERVICE_PORT", "8013")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,8 +50,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	kgRepo := repository.NewKGRepository(pool)
-	kgSvc  := service.NewKGService(kgRepo, logger)
-	kgH    := handler.NewKGHandler(kgSvc)
+	kgSvc := service.NewKGService(kgRepo, logger)
+	kgH := handler.NewKGHandler(kgSvc)
 
 	// ── Kafka consumer: auto-ingest entities from enriched events ─────────────
 	go func() {
@@ -79,9 +79,9 @@ func main() {
 			}
 
 			var ev struct {
-				TenantID  string `json:"tenant_id"`
-				EventType string `json:"event_type"`
-				Severity  string `json:"severity"`
+				TenantID  string         `json:"tenant_id"`
+				EventType string         `json:"event_type"`
+				Severity  string         `json:"severity"`
 				RawEvent  map[string]any `json:"raw_event"`
 			}
 			if err := json.Unmarshal(msg.Value, &ev); err != nil {

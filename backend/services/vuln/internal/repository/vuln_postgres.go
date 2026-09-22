@@ -574,12 +574,12 @@ func (r *VulnRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.
 		ByStatus:   make(map[string]int),
 	}
 
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM vulnerabilities WHERE tenant_id=$1`, tenantID).Scan(&s.TotalVulns)           //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFindings)  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities WHERE tenant_id=$1 AND status IN ('open','in_remediation')`, tenantID).Scan(&s.OpenFindings) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM vulnerabilities WHERE tenant_id=$1`, tenantID).Scan(&s.TotalVulns)                                                                                                                             //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFindings)                                                                                                                    //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities WHERE tenant_id=$1 AND status IN ('open','in_remediation')`, tenantID).Scan(&s.OpenFindings)                                                                             //nolint
 	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND av.sla_due_at < NOW() AND av.status IN ('open','in_remediation')`, tenantID).Scan(&s.SLABreached) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND v.is_exploited=true AND av.status IN ('open','in_remediation')`, tenantID).Scan(&s.KEVFindings)  //nolint
-	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(v.cvss_score),0) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND av.status IN ('open','in_remediation')`, tenantID).Scan(&s.AvgCVSS)       //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND v.is_exploited=true AND av.status IN ('open','in_remediation')`, tenantID).Scan(&s.KEVFindings)   //nolint
+	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(v.cvss_score),0) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND av.status IN ('open','in_remediation')`, tenantID).Scan(&s.AvgCVSS)          //nolint
 
 	rows, _ := r.db.Query(ctx, `SELECT v.cvss_severity, COUNT(*) FROM asset_vulnerabilities av JOIN vulnerabilities v ON v.id=av.vuln_id WHERE av.tenant_id=$1 AND av.status IN ('open','in_remediation') GROUP BY v.cvss_severity`, tenantID)
 	if rows != nil {

@@ -35,7 +35,7 @@ type RuleEngine struct {
 	cache     ruleCache
 
 	// In-memory threshold counters: key = dedup_key → []event_time
-	threshMu      sync.Mutex
+	threshMu       sync.Mutex
 	threshCounters map[string][]time.Time
 }
 

@@ -343,8 +343,8 @@ func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
 			scenarioID = &id
 		}
 	}
-	status   := r.URL.Query().Get("status")
-	page     := queryInt(r, "page", "1")
+	status := r.URL.Query().Get("status")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -434,8 +434,8 @@ func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	status   := r.URL.Query().Get("status")
-	page     := queryInt(r, "page", "1")
+	status := r.URL.Query().Get("status")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	if page < 1 {
 		page = 1
@@ -502,7 +502,7 @@ func (h *RiskHandler) ListKRIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	category := r.URL.Query().Get("category")
-	status   := r.URL.Query().Get("status")
+	status := r.URL.Query().Get("status")
 	kris, err := h.svc.ListKRIs(r.Context(), tenantID, category, status)
 	if err != nil {
 		writeError(w, err)

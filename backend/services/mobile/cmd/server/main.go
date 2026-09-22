@@ -28,13 +28,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "mobile-service").Logger()
 
-	dbURL      := mustEnv("DATABASE_URL")
+	dbURL := mustEnv("DATABASE_URL")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
 	kafkaBrokers := envOrDefault("KAFKA_BROKERS", "localhost:9092")
-	port       := envOrDefault("SERVICE_PORT", "8029")
+	port := envOrDefault("SERVICE_PORT", "8029")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -52,8 +52,8 @@ func main() {
 	defer producer.Close()
 
 	repo := repository.NewMobileRepository(pool)
-	svc  := service.New(repo, producer, kafkaTopic, logger)
-	h    := handler.New(svc, logger)
+	svc := service.New(repo, producer, kafkaTopic, logger)
+	h := handler.New(svc, logger)
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)

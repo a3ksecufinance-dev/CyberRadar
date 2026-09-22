@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "netsec-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8022")
+	port := envOrDefault("SERVICE_PORT", "8022")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,8 +53,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	netsecRepo := repository.NewNetSecRepository(pool)
-	netsecSvc  := service.NewNetSecService(netsecRepo, producer, logger)
-	netsecH    := handler.NewNetSecHandler(netsecSvc)
+	netsecSvc := service.NewNetSecService(netsecRepo, producer, logger)
+	netsecH := handler.NewNetSecHandler(netsecSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()

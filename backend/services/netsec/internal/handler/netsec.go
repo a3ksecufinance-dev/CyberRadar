@@ -239,7 +239,7 @@ func (h *NetSecHandler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	activeOnly := r.URL.Query().Get("active_only") != "false"
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -483,7 +483,7 @@ func (h *NetSecHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
 			zoneID = &id
 		}
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1

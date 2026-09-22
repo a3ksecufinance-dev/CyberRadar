@@ -42,16 +42,16 @@ func main() {
 
 	// ─── Configuration ───────────────────────────────────────
 	healthPort := envOrDefault("HEALTH_PORT", "8031")
-	udpAddr    := envOrDefault("SYSLOG_UDP_ADDR", ":5140")
-	tcpAddr    := envOrDefault("SYSLOG_TCP_ADDR", ":5141")
-	tlsAddr    := envOrDefault("SYSLOG_TLS_ADDR", ":6514")
-	brokers    := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
-	tenantID   := envOrDefault("DEFAULT_TENANT_ID", "default")
-	topic      := envOrDefault("KAFKA_TOPIC", "crp.events.normalized")
+	udpAddr := envOrDefault("SYSLOG_UDP_ADDR", ":5140")
+	tcpAddr := envOrDefault("SYSLOG_TCP_ADDR", ":5141")
+	tlsAddr := envOrDefault("SYSLOG_TLS_ADDR", ":6514")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	tenantID := envOrDefault("DEFAULT_TENANT_ID", "default")
+	topic := envOrDefault("KAFKA_TOPIC", "crp.events.normalized")
 
 	// Optional TLS config (required only when TLS_CERT_FILE is set)
 	tlsCertFile := os.Getenv("TLS_CERT_FILE")
-	tlsKeyFile  := os.Getenv("TLS_KEY_FILE")
+	tlsKeyFile := os.Getenv("TLS_KEY_FILE")
 
 	// ─── Kafka publisher ─────────────────────────────────────
 	pub := publisher.NewPublisher(brokers, topic, logger)

@@ -501,11 +501,11 @@ type scannable interface {
 func scanAsset(row scannable) (*model.Asset, error) {
 	a := &model.Asset{}
 	var (
-		hostname, fqdn, os, osVer           *string
-		dept, loc, bizSvc, discoveredBy     *string
-		ownerID                             *uuid.UUID
-		lastSeen                            *time.Time
-		metadata                            map[string]any
+		hostname, fqdn, os, osVer       *string
+		dept, loc, bizSvc, discoveredBy *string
+		ownerID                         *uuid.UUID
+		lastSeen                        *time.Time
+		metadata                        map[string]any
 	)
 	err := row.Scan(
 		&a.ID, &a.TenantID, &a.Name, &hostname, &fqdn,

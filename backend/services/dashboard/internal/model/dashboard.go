@@ -35,12 +35,12 @@ const (
 
 // ── Report types ──────────────────────────────────────────────────────────────
 const (
-	ReportExecutiveSummary    = "executive_summary"
-	ReportIncidentSummary     = "incident_summary"
-	ReportVulnPosture         = "vulnerability_posture"
-	ReportThreatIntelligence  = "threat_intelligence"
-	ReportCompliance          = "compliance"
-	ReportCustom              = "custom"
+	ReportExecutiveSummary   = "executive_summary"
+	ReportIncidentSummary    = "incident_summary"
+	ReportVulnPosture        = "vulnerability_posture"
+	ReportThreatIntelligence = "threat_intelligence"
+	ReportCompliance         = "compliance"
+	ReportCustom             = "custom"
 )
 
 // ─── Core models ──────────────────────────────────────────────────────────────
@@ -78,9 +78,9 @@ type Widget struct {
 	Config      map[string]any `json:"config,omitempty"`
 	RefreshSec  int            `json:"refresh_sec"`
 	// Populated at query time
-	Data        any            `json:"data,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	Data      any       `json:"data,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Report is a scheduled or on-demand report definition.
@@ -121,28 +121,28 @@ type KPIPoint struct {
 // PlatformOverview is the cross-domain executive summary returned by /dashboard/overview.
 type PlatformOverview struct {
 	// SIEM
-	OpenAlerts        int     `json:"open_alerts"`
-	CriticalAlerts    int     `json:"critical_alerts"`
+	OpenAlerts     int `json:"open_alerts"`
+	CriticalAlerts int `json:"critical_alerts"`
 	// UEBA
-	ActiveAnomalies   int     `json:"active_anomalies"`
-	HighRiskEntities  int     `json:"high_risk_entities"`
+	ActiveAnomalies  int `json:"active_anomalies"`
+	HighRiskEntities int `json:"high_risk_entities"`
 	// TI
-	ActiveIOCs        int     `json:"active_iocs"`
-	IOCHitsToday      int     `json:"ioc_hits_today"`
+	ActiveIOCs   int `json:"active_iocs"`
+	IOCHitsToday int `json:"ioc_hits_today"`
 	// Vuln
-	CriticalVulns     int     `json:"critical_vulns"`
-	SLABreachedVulns  int     `json:"sla_breached_vulns"`
+	CriticalVulns    int `json:"critical_vulns"`
+	SLABreachedVulns int `json:"sla_breached_vulns"`
 	// Attack Path
-	AttackPaths       int     `json:"attack_paths"`
-	ChokePoints       int     `json:"choke_points"`
+	AttackPaths int `json:"attack_paths"`
+	ChokePoints int `json:"choke_points"`
 	// SOAR
-	OpenIncidents     int     `json:"open_incidents"`
-	SLABreachedInc    int     `json:"sla_breached_incidents"`
+	OpenIncidents  int `json:"open_incidents"`
+	SLABreachedInc int `json:"sla_breached_incidents"`
 	// KG
-	TotalEntities     int     `json:"total_entities"`
+	TotalEntities int `json:"total_entities"`
 	// Platform risk
-	OverallRiskScore  float64 `json:"overall_risk_score"`
-	GeneratedAt       time.Time `json:"generated_at"`
+	OverallRiskScore float64   `json:"overall_risk_score"`
+	GeneratedAt      time.Time `json:"generated_at"`
 }
 
 // ── Request / filter models ───────────────────────────────────────────────────
@@ -192,7 +192,7 @@ type CreateReportRequest struct {
 	Name        string   `json:"name"        validate:"required,min=2,max=200"`
 	Description string   `json:"description"`
 	ReportType  string   `json:"report_type" validate:"required,oneof=executive_summary incident_summary vulnerability_posture threat_intelligence compliance custom"`
-	Schedule    string   `json:"schedule"`   // cron expression, empty = on-demand
+	Schedule    string   `json:"schedule"` // cron expression, empty = on-demand
 	Format      string   `json:"format"      validate:"omitempty,oneof=json pdf"`
 	Recipients  []string `json:"recipients"`
 }

@@ -25,12 +25,12 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "copilot-service").Logger()
 
-	port       := envOrDefault("SERVICE_PORT", "8016")
+	port := envOrDefault("SERVICE_PORT", "8016")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL      := mustEnv("DATABASE_URL")
+	dbURL := mustEnv("DATABASE_URL")
 	anthropicKey := mustEnv("ANTHROPIC_API_KEY")
 
 	// Service URL map for tool dispatcher (all optional — missing = tool returns unavailable)
@@ -63,10 +63,10 @@ func main() {
 
 	// ── Services ──────────────────────────────────────────────────────────────
 	copilotRepo := repository.NewCopilotRepository(pool)
-	dispatcher  := service.NewToolDispatcher(serviceURLs)
-	llmClient   := service.NewLLMClient(anthropicKey, dispatcher, logger)
-	copilotSvc  := service.NewCopilotService(copilotRepo, llmClient, logger)
-	copilotH    := handler.NewCopilotHandler(copilotSvc)
+	dispatcher := service.NewToolDispatcher(serviceURLs)
+	llmClient := service.NewLLMClient(anthropicKey, dispatcher, logger)
+	copilotSvc := service.NewCopilotService(copilotRepo, llmClient, logger)
+	copilotH := handler.NewCopilotHandler(copilotSvc)
 
 	logger.Info().Int("configured_service_urls", len(serviceURLs)).Msg("tool_dispatcher_ready")
 

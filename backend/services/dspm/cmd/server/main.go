@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "dspm-service").Logger()
 
-	dbURL        := mustEnv("DATABASE_URL")
+	dbURL := mustEnv("DATABASE_URL")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
 	kafkaBrokers := envOrDefault("KAFKA_BROKERS", "localhost:9092")
-	port         := envOrDefault("SERVICE_PORT", "8030")
+	port := envOrDefault("SERVICE_PORT", "8030")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -56,8 +56,8 @@ func main() {
 	defer kw.Close()
 
 	repo := repository.NewDSPMRepository(pool, logger)
-	svc  := service.NewDSPMService(repo, kw, topic, logger)
-	h    := handler.NewDSPMHandler(svc, logger)
+	svc := service.NewDSPMService(repo, kw, topic, logger)
+	h := handler.NewDSPMHandler(svc, logger)
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)

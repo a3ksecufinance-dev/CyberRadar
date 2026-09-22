@@ -90,21 +90,21 @@ type ListDataStoresFilter struct {
 // ─── Scan Jobs ────────────────────────────────────────────────────────────────
 
 type DSPMScanJob struct {
-	ID                   uuid.UUID  `json:"id"`
-	TenantID             uuid.UUID  `json:"tenant_id"`
-	DataStoreID          uuid.UUID  `json:"data_store_id"`
-	ScanType             string     `json:"scan_type"`
-	Status               string     `json:"status"`
-	FindingsCount        int        `json:"findings_count"`
-	SensitiveFindingsCount int      `json:"sensitive_findings_count"`
-	ScannedObjects       int        `json:"scanned_objects"`
-	ErrorMessage         string     `json:"error_message,omitempty"`
-	TriggeredBy          string     `json:"triggered_by,omitempty"`
-	StartedAt            *time.Time `json:"started_at,omitempty"`
-	CompletedAt          *time.Time `json:"completed_at,omitempty"`
-	DurationSeconds      int        `json:"duration_seconds,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                     uuid.UUID  `json:"id"`
+	TenantID               uuid.UUID  `json:"tenant_id"`
+	DataStoreID            uuid.UUID  `json:"data_store_id"`
+	ScanType               string     `json:"scan_type"`
+	Status                 string     `json:"status"`
+	FindingsCount          int        `json:"findings_count"`
+	SensitiveFindingsCount int        `json:"sensitive_findings_count"`
+	ScannedObjects         int        `json:"scanned_objects"`
+	ErrorMessage           string     `json:"error_message,omitempty"`
+	TriggeredBy            string     `json:"triggered_by,omitempty"`
+	StartedAt              *time.Time `json:"started_at,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	DurationSeconds        int        `json:"duration_seconds,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 type CreateScanJobRequest struct {
@@ -124,29 +124,29 @@ type UpdateScanJobRequest struct {
 // ─── Findings ─────────────────────────────────────────────────────────────────
 
 type DSPMFinding struct {
-	ID                  uuid.UUID  `json:"id"`
-	TenantID            uuid.UUID  `json:"tenant_id"`
-	DataStoreID         uuid.UUID  `json:"data_store_id"`
-	ScanJobID           *uuid.UUID `json:"scan_job_id,omitempty"`
-	FindingType         string     `json:"finding_type"`
-	Severity            string     `json:"severity"`
-	Status              string     `json:"status"`
-	LocationPath        string     `json:"location_path,omitempty"`
-	LocationField       string     `json:"location_field,omitempty"`
-	RecordCount         int64      `json:"record_count"`
-	IsPublicAccessible  bool       `json:"is_public_accessible"`
-	IsEncrypted         bool       `json:"is_encrypted"`
-	Title               string     `json:"title"`
-	Description         string     `json:"description,omitempty"`
-	Evidence            string     `json:"evidence,omitempty"`
-	Remediation         string     `json:"remediation,omitempty"`
-	ComplianceViolations []string  `json:"compliance_violations"`
-	ResolvedBy          string     `json:"resolved_by,omitempty"`
-	ResolvedAt          *time.Time `json:"resolved_at,omitempty"`
-	Tags                []string   `json:"tags"`
-	DetectedAt          time.Time  `json:"detected_at"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                   uuid.UUID  `json:"id"`
+	TenantID             uuid.UUID  `json:"tenant_id"`
+	DataStoreID          uuid.UUID  `json:"data_store_id"`
+	ScanJobID            *uuid.UUID `json:"scan_job_id,omitempty"`
+	FindingType          string     `json:"finding_type"`
+	Severity             string     `json:"severity"`
+	Status               string     `json:"status"`
+	LocationPath         string     `json:"location_path,omitempty"`
+	LocationField        string     `json:"location_field,omitempty"`
+	RecordCount          int64      `json:"record_count"`
+	IsPublicAccessible   bool       `json:"is_public_accessible"`
+	IsEncrypted          bool       `json:"is_encrypted"`
+	Title                string     `json:"title"`
+	Description          string     `json:"description,omitempty"`
+	Evidence             string     `json:"evidence,omitempty"`
+	Remediation          string     `json:"remediation,omitempty"`
+	ComplianceViolations []string   `json:"compliance_violations"`
+	ResolvedBy           string     `json:"resolved_by,omitempty"`
+	ResolvedAt           *time.Time `json:"resolved_at,omitempty"`
+	Tags                 []string   `json:"tags"`
+	DetectedAt           time.Time  `json:"detected_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 	// Computed
 	RemediationCount int `json:"remediation_count,omitempty"`
 }
@@ -261,23 +261,23 @@ type UpdateRemediationRequest struct {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 type DSPMStats struct {
-	TotalDataStores     int            `json:"total_data_stores"`
-	UnencryptedStores   int            `json:"unencrypted_stores"`
-	PubliclyAccessible  int            `json:"publicly_accessible"`
-	HighRiskStores      int            `json:"high_risk_stores"`
-	TotalFindings       int            `json:"total_findings"`
-	OpenFindings        int            `json:"open_findings"`
-	CriticalFindings    int            `json:"critical_findings"`
-	PIIExposures        int            `json:"pii_exposures"`
-	PCIExposures        int            `json:"pci_exposures"`
-	TotalScans          int            `json:"total_scans"`
-	ActiveScans         int            `json:"active_scans"`
-	OpenRemediations    int            `json:"open_remediations"`
-	OverdueRemediations int            `json:"overdue_remediations"`
-	StoresByType        map[string]int `json:"stores_by_type"`
-	StoresByRisk        map[string]int `json:"stores_by_risk"`
-	FindingsByType      map[string]int `json:"findings_by_type"`
-	FindingsBySeverity  map[string]int `json:"findings_by_severity"`
+	TotalDataStores     int             `json:"total_data_stores"`
+	UnencryptedStores   int             `json:"unencrypted_stores"`
+	PubliclyAccessible  int             `json:"publicly_accessible"`
+	HighRiskStores      int             `json:"high_risk_stores"`
+	TotalFindings       int             `json:"total_findings"`
+	OpenFindings        int             `json:"open_findings"`
+	CriticalFindings    int             `json:"critical_findings"`
+	PIIExposures        int             `json:"pii_exposures"`
+	PCIExposures        int             `json:"pci_exposures"`
+	TotalScans          int             `json:"total_scans"`
+	ActiveScans         int             `json:"active_scans"`
+	OpenRemediations    int             `json:"open_remediations"`
+	OverdueRemediations int             `json:"overdue_remediations"`
+	StoresByType        map[string]int  `json:"stores_by_type"`
+	StoresByRisk        map[string]int  `json:"stores_by_risk"`
+	FindingsByType      map[string]int  `json:"findings_by_type"`
+	FindingsBySeverity  map[string]int  `json:"findings_by_severity"`
 	TopRiskyStores      []DSPMDataStore `json:"top_risky_stores"`
 	RecentFindings      []DSPMFinding   `json:"recent_findings"`
 }

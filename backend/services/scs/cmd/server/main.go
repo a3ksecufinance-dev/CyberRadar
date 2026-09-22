@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "scs-service").Logger()
 
-	dbURL        := mustEnv("DATABASE_URL")
+	dbURL := mustEnv("DATABASE_URL")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
 	kafkaBrokers := envOrDefault("KAFKA_BROKERS", "localhost:9092")
-	port         := envOrDefault("SERVICE_PORT", "8027")
+	port := envOrDefault("SERVICE_PORT", "8027")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -55,8 +55,8 @@ func main() {
 	defer kw.Close()
 
 	repo := repository.NewSCSRepository(pool)
-	svc  := service.NewSCSService(repo, kw, logger)
-	h    := handler.NewSCSHandler(svc, logger)
+	svc := service.NewSCSService(repo, kw, logger)
+	h := handler.NewSCSHandler(svc, logger)
 
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)

@@ -31,14 +31,14 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "dashboard-service").Logger()
 
-	port     := envOrDefault("SERVICE_PORT", "8015")
+	port := envOrDefault("SERVICE_PORT", "8015")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL    := mustEnv("DATABASE_URL")
-	chURL    := mustEnv("CLICKHOUSE_URL")
-	brokers  := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	chURL := mustEnv("CLICKHOUSE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -67,9 +67,9 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	dashRepo := repository.NewDashboardRepository(pool)
-	kpiRepo  := repository.NewKPIRepository(chConn)
-	dashSvc  := service.NewDashboardService(dashRepo, kpiRepo, logger)
-	dashH    := handler.NewDashboardHandler(dashSvc)
+	kpiRepo := repository.NewKPIRepository(chConn)
+	dashSvc := service.NewDashboardService(dashRepo, kpiRepo, logger)
+	dashH := handler.NewDashboardHandler(dashSvc)
 
 	// ── Kafka consumer: ingest KPI snapshots from all domain services ─────────
 	// Each domain publishes a crp.events.kpi message with:

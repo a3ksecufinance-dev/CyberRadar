@@ -60,22 +60,22 @@ const (
 // ─── Core structs ─────────────────────────────────────────────────────────────
 
 type IGARole struct {
-	ID              uuid.UUID      `json:"id"`
-	TenantID        uuid.UUID      `json:"tenant_id"`
-	Name            string         `json:"name"`
-	Description     string         `json:"description,omitempty"`
-	RoleType        string         `json:"role_type"`
-	Category        string         `json:"category,omitempty"`
-	Owner           string         `json:"owner,omitempty"`
-	RiskLevel       string         `json:"risk_level"`
-	IsActive        bool           `json:"is_active"`
-	RequiresMFA     bool           `json:"requires_mfa"`
-	MaxDurationDays *int           `json:"max_duration_days,omitempty"`
+	ID              uuid.UUID          `json:"id"`
+	TenantID        uuid.UUID          `json:"tenant_id"`
+	Name            string             `json:"name"`
+	Description     string             `json:"description,omitempty"`
+	RoleType        string             `json:"role_type"`
+	Category        string             `json:"category,omitempty"`
+	Owner           string             `json:"owner,omitempty"`
+	RiskLevel       string             `json:"risk_level"`
+	IsActive        bool               `json:"is_active"`
+	RequiresMFA     bool               `json:"requires_mfa"`
+	MaxDurationDays *int               `json:"max_duration_days,omitempty"`
 	Entitlements    []*RoleEntitlement `json:"entitlements,omitempty"`
-	AssignmentCount int            `json:"assignment_count,omitempty"`
-	Metadata        map[string]any `json:"metadata"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	AssignmentCount int                `json:"assignment_count,omitempty"`
+	Metadata        map[string]any     `json:"metadata"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
 type RoleEntitlement struct {
@@ -132,23 +132,23 @@ type Campaign struct {
 }
 
 type ReviewItem struct {
-	ID            uuid.UUID  `json:"id"`
-	TenantID      uuid.UUID  `json:"tenant_id"`
-	CampaignID    uuid.UUID  `json:"campaign_id"`
-	IdentityID    uuid.UUID  `json:"identity_id"`
-	IdentityName  string     `json:"identity_name"`
-	IdentityEmail string     `json:"identity_email,omitempty"`
-	RoleID        *uuid.UUID `json:"role_id,omitempty"`
-	RoleName      string     `json:"role_name"`
-	AssignmentID  *uuid.UUID `json:"assignment_id,omitempty"`
-	Decision      string     `json:"decision,omitempty"`
-	DecisionReason string    `json:"decision_reason,omitempty"`
-	ReviewerID    *uuid.UUID `json:"reviewer_id,omitempty"`
-	ReviewerName  string     `json:"reviewer_name,omitempty"`
-	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
-	RiskFlags     []string   `json:"risk_flags"`
-	RiskScore     int        `json:"risk_score"`
-	CreatedAt     time.Time  `json:"created_at"`
+	ID             uuid.UUID  `json:"id"`
+	TenantID       uuid.UUID  `json:"tenant_id"`
+	CampaignID     uuid.UUID  `json:"campaign_id"`
+	IdentityID     uuid.UUID  `json:"identity_id"`
+	IdentityName   string     `json:"identity_name"`
+	IdentityEmail  string     `json:"identity_email,omitempty"`
+	RoleID         *uuid.UUID `json:"role_id,omitempty"`
+	RoleName       string     `json:"role_name"`
+	AssignmentID   *uuid.UUID `json:"assignment_id,omitempty"`
+	Decision       string     `json:"decision,omitempty"`
+	DecisionReason string     `json:"decision_reason,omitempty"`
+	ReviewerID     *uuid.UUID `json:"reviewer_id,omitempty"`
+	ReviewerName   string     `json:"reviewer_name,omitempty"`
+	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
+	RiskFlags      []string   `json:"risk_flags"`
+	RiskScore      int        `json:"risk_score"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 type SoDPolicy struct {
@@ -191,31 +191,31 @@ type SoDViolation struct {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 type IGAStats struct {
-	TotalRoles         int            `json:"total_roles"`
-	TotalAssignments   int            `json:"total_assignments"`
-	ActiveCampaigns    int            `json:"active_campaigns"`
-	PendingReviews     int            `json:"pending_reviews"`
-	OpenSoDViolations  int            `json:"open_sod_violations"`
-	ExpiringSoon       int            `json:"expiring_soon"`     // within 7 days
-	RolesByType        map[string]int `json:"roles_by_type"`
-	AssignmentsByStatus map[string]int `json:"assignments_by_status"`
+	TotalRoles           int            `json:"total_roles"`
+	TotalAssignments     int            `json:"total_assignments"`
+	ActiveCampaigns      int            `json:"active_campaigns"`
+	PendingReviews       int            `json:"pending_reviews"`
+	OpenSoDViolations    int            `json:"open_sod_violations"`
+	ExpiringSoon         int            `json:"expiring_soon"` // within 7 days
+	RolesByType          map[string]int `json:"roles_by_type"`
+	AssignmentsByStatus  map[string]int `json:"assignments_by_status"`
 	ViolationsBySeverity map[string]int `json:"violations_by_severity"`
-	TopRoles           []*IGARole     `json:"top_roles"`         // most assigned
+	TopRoles             []*IGARole     `json:"top_roles"` // most assigned
 }
 
 // ─── Request models ───────────────────────────────────────────────────────────
 
 type CreateRoleRequest struct {
-	Name            string         `json:"name"      validate:"required"`
-	Description     string         `json:"description"`
-	RoleType        string         `json:"role_type" validate:"required"`
-	Category        string         `json:"category"`
-	Owner           string         `json:"owner"`
-	RiskLevel       string         `json:"risk_level"`
-	RequiresMFA     bool           `json:"requires_mfa"`
-	MaxDurationDays *int           `json:"max_duration_days"`
+	Name            string             `json:"name"      validate:"required"`
+	Description     string             `json:"description"`
+	RoleType        string             `json:"role_type" validate:"required"`
+	Category        string             `json:"category"`
+	Owner           string             `json:"owner"`
+	RiskLevel       string             `json:"risk_level"`
+	RequiresMFA     bool               `json:"requires_mfa"`
+	MaxDurationDays *int               `json:"max_duration_days"`
 	Entitlements    []EntitlementInput `json:"entitlements"`
-	Metadata        map[string]any `json:"metadata"`
+	Metadata        map[string]any     `json:"metadata"`
 }
 
 type EntitlementInput struct {
@@ -252,13 +252,13 @@ type UpdateAssignmentRequest struct {
 }
 
 type CreateCampaignRequest struct {
-	Name         string     `json:"name"          validate:"required"`
-	Description  string     `json:"description"`
-	CampaignType string     `json:"campaign_type" validate:"required"`
-	Scope        string     `json:"scope"`
-	ScopeFilter  string     `json:"scope_filter"`
-	ReviewerType string     `json:"reviewer_type"`
-	DueDate      time.Time  `json:"due_date"      validate:"required"`
+	Name         string    `json:"name"          validate:"required"`
+	Description  string    `json:"description"`
+	CampaignType string    `json:"campaign_type" validate:"required"`
+	Scope        string    `json:"scope"`
+	ScopeFilter  string    `json:"scope_filter"`
+	ReviewerType string    `json:"reviewer_type"`
+	DueDate      time.Time `json:"due_date"      validate:"required"`
 }
 
 type ReviewDecisionRequest struct {

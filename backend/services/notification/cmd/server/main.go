@@ -23,13 +23,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "notification-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8004")
+	port := envOrDefault("SERVICE_PORT", "8004")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
 
-	notifSvc     := service.NewNotificationService(logger)
+	notifSvc := service.NewNotificationService(logger)
 	notifHandler := handler.NewNotificationHandler(notifSvc)
 
 	r := chi.NewRouter()

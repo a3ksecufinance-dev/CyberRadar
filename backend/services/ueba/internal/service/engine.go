@@ -21,7 +21,7 @@ const (
 	topicUEBA = "crp.events.ueba"
 
 	// Baseline thresholds
-	minHoursForBaseline    = 3  // distinct hours before baseline is considered ready
+	minHoursForBaseline     = 3 // distinct hours before baseline is considered ready
 	minCountriesForBaseline = 1
 
 	// Velocity: >N events per entity within 1 minute triggers VELOCITY_SPIKE
@@ -388,10 +388,10 @@ func behaviorEventFrom(ev *event.NormalizedEvent, entityID, entityType string) *
 		DayOfWeek:  uint8(ev.Timestamp.UTC().Weekday()),
 		EventTime:  ev.Timestamp,
 		Attributes: map[string]any{
-			"threat_score":  ev.ThreatScore,
-			"cbs_impact":    ev.CBSImpact,
-			"swift_impact":  ev.SWIFTImpact,
-			"mitre_tactic":  ev.MitreTactic,
+			"threat_score": ev.ThreatScore,
+			"cbs_impact":   ev.CBSImpact,
+			"swift_impact": ev.SWIFTImpact,
+			"mitre_tactic": ev.MitreTactic,
 		},
 	}
 	if ev.IPSource != nil {

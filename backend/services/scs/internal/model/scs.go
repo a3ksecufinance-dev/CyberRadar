@@ -130,12 +130,12 @@ type UpdateComponentRequest struct {
 }
 
 type ListComponentsFilter struct {
-	Ecosystem     string
-	HasVulns      *bool
-	IsEOL         *bool
-	IsDeprecated  *bool
-	Limit         int
-	Offset        int
+	Ecosystem    string
+	HasVulns     *bool
+	IsEOL        *bool
+	IsDeprecated *bool
+	Limit        int
+	Offset       int
 }
 
 // ─── SBOMs ────────────────────────────────────────────────────────────────────
@@ -165,52 +165,52 @@ type SCSSBOM struct {
 }
 
 type CreateSBOMRequest struct {
-	Name       string         `json:"name"`
-	Version    string         `json:"version"`
-	SBOMFormat string         `json:"sbom_format"`
-	Source     string         `json:"source"`
-	SourceRef  string         `json:"source_ref"`
-	RawData    map[string]any `json:"raw_data"`
+	Name       string                   `json:"name"`
+	Version    string                   `json:"version"`
+	SBOMFormat string                   `json:"sbom_format"`
+	Source     string                   `json:"source"`
+	SourceRef  string                   `json:"source_ref"`
+	RawData    map[string]any           `json:"raw_data"`
 	Components []CreateComponentRequest `json:"components"`
 }
 
 // ─── Assessments ──────────────────────────────────────────────────────────────
 
 type SCSAssessment struct {
-	ID              uuid.UUID      `json:"id"`
-	TenantID        uuid.UUID      `json:"tenant_id"`
-	VendorID        uuid.UUID      `json:"vendor_id"`
-	AssessmentType  string         `json:"assessment_type"`
-	Status          string         `json:"status"`
-	Score           *int           `json:"score,omitempty"`
-	MaxScore        int            `json:"max_score"`
-	RiskRating      string         `json:"risk_rating,omitempty"`
-	FindingsCount   int            `json:"findings_count"`
-	CriticalFindings int           `json:"critical_findings"`
-	PlannedAt       *time.Time     `json:"planned_at,omitempty"`
-	StartedAt       *time.Time     `json:"started_at,omitempty"`
-	CompletedAt     *time.Time     `json:"completed_at,omitempty"`
-	DueAt           *time.Time     `json:"due_at,omitempty"`
-	NextDueAt       *time.Time     `json:"next_due_at,omitempty"`
-	Assessor        string         `json:"assessor,omitempty"`
-	AssessorID      *uuid.UUID     `json:"assessor_id,omitempty"`
-	Questionnaire   map[string]any `json:"questionnaire,omitempty"`
-	Findings        []any          `json:"findings"`
-	Recommendations string         `json:"recommendations,omitempty"`
-	Notes           string         `json:"notes,omitempty"`
-	CreatedBy       *uuid.UUID     `json:"created_by,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	ID               uuid.UUID      `json:"id"`
+	TenantID         uuid.UUID      `json:"tenant_id"`
+	VendorID         uuid.UUID      `json:"vendor_id"`
+	AssessmentType   string         `json:"assessment_type"`
+	Status           string         `json:"status"`
+	Score            *int           `json:"score,omitempty"`
+	MaxScore         int            `json:"max_score"`
+	RiskRating       string         `json:"risk_rating,omitempty"`
+	FindingsCount    int            `json:"findings_count"`
+	CriticalFindings int            `json:"critical_findings"`
+	PlannedAt        *time.Time     `json:"planned_at,omitempty"`
+	StartedAt        *time.Time     `json:"started_at,omitempty"`
+	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
+	DueAt            *time.Time     `json:"due_at,omitempty"`
+	NextDueAt        *time.Time     `json:"next_due_at,omitempty"`
+	Assessor         string         `json:"assessor,omitempty"`
+	AssessorID       *uuid.UUID     `json:"assessor_id,omitempty"`
+	Questionnaire    map[string]any `json:"questionnaire,omitempty"`
+	Findings         []any          `json:"findings"`
+	Recommendations  string         `json:"recommendations,omitempty"`
+	Notes            string         `json:"notes,omitempty"`
+	CreatedBy        *uuid.UUID     `json:"created_by,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type CreateAssessmentRequest struct {
-	VendorID       uuid.UUID      `json:"vendor_id"`
-	AssessmentType string         `json:"assessment_type"`
-	Assessor       string         `json:"assessor"`
-	AssessorID     *uuid.UUID     `json:"assessor_id"`
-	DueAt          *time.Time     `json:"due_at"`
-	PlannedAt      *time.Time     `json:"planned_at"`
-	Notes          string         `json:"notes"`
+	VendorID       uuid.UUID  `json:"vendor_id"`
+	AssessmentType string     `json:"assessment_type"`
+	Assessor       string     `json:"assessor"`
+	AssessorID     *uuid.UUID `json:"assessor_id"`
+	DueAt          *time.Time `json:"due_at"`
+	PlannedAt      *time.Time `json:"planned_at"`
+	Notes          string     `json:"notes"`
 }
 
 type UpdateAssessmentRequest struct {
@@ -317,19 +317,19 @@ type UpdatePolicyRequest struct {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 type SCSStats struct {
-	TotalVendors       int            `json:"total_vendors"`
-	HighRiskVendors    int            `json:"high_risk_vendors"`
-	TotalComponents    int            `json:"total_components"`
-	VulnerableComponents int          `json:"vulnerable_components"`
-	EOLComponents      int            `json:"eol_components"`
-	TotalSBOMs         int            `json:"total_sboms"`
-	OpenAlerts         int            `json:"open_alerts"`
-	CriticalAlerts     int            `json:"critical_alerts"`
-	PendingAssessments int            `json:"pending_assessments"`
-	OverdueAssessments int            `json:"overdue_assessments"`
-	AlertsBySeverity   map[string]int `json:"alerts_by_severity"`
-	AlertsByType       map[string]int `json:"alerts_by_type"`
-	VendorsByTier      map[string]int `json:"vendors_by_tier"`
-	TopRiskyVendors    []SCSVendor    `json:"top_risky_vendors"`
-	RecentAlerts       []SCSAlert     `json:"recent_alerts"`
+	TotalVendors         int            `json:"total_vendors"`
+	HighRiskVendors      int            `json:"high_risk_vendors"`
+	TotalComponents      int            `json:"total_components"`
+	VulnerableComponents int            `json:"vulnerable_components"`
+	EOLComponents        int            `json:"eol_components"`
+	TotalSBOMs           int            `json:"total_sboms"`
+	OpenAlerts           int            `json:"open_alerts"`
+	CriticalAlerts       int            `json:"critical_alerts"`
+	PendingAssessments   int            `json:"pending_assessments"`
+	OverdueAssessments   int            `json:"overdue_assessments"`
+	AlertsBySeverity     map[string]int `json:"alerts_by_severity"`
+	AlertsByType         map[string]int `json:"alerts_by_type"`
+	VendorsByTier        map[string]int `json:"vendors_by_tier"`
+	TopRiskyVendors      []SCSVendor    `json:"top_risky_vendors"`
+	RecentAlerts         []SCSAlert     `json:"recent_alerts"`
 }

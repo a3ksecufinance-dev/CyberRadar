@@ -15,42 +15,42 @@ const (
 
 // ── Hunt job types ────────────────────────────────────────────────────────────
 const (
-	HuntTypeThreatHunt        = "threat_hunt"
-	HuntTypeIncidentTriage    = "incident_triage"
+	HuntTypeThreatHunt         = "threat_hunt"
+	HuntTypeIncidentTriage     = "incident_triage"
 	HuntTypeVulnPrioritization = "vuln_prioritization"
-	HuntTypeAttackPathSummary = "attack_path_summary"
-	HuntTypeIOCCorrelation    = "ioc_correlation"
-	HuntTypeEntityProfiling   = "entity_profiling"
+	HuntTypeAttackPathSummary  = "attack_path_summary"
+	HuntTypeIOCCorrelation     = "ioc_correlation"
+	HuntTypeEntityProfiling    = "entity_profiling"
 )
 
 // ── Tool names exposed to Claude ──────────────────────────────────────────────
 const (
-	ToolQueryAlerts      = "query_alerts"
-	ToolLookupIOC        = "lookup_ioc"
-	ToolGetIncident      = "get_incident"
-	ToolQueryAnomalies   = "query_anomalies"
-	ToolQueryVulns       = "query_vulnerabilities"
+	ToolQueryAlerts       = "query_alerts"
+	ToolLookupIOC         = "lookup_ioc"
+	ToolGetIncident       = "get_incident"
+	ToolQueryAnomalies    = "query_anomalies"
+	ToolQueryVulns        = "query_vulnerabilities"
 	ToolAnalyzeAttackPath = "analyze_attack_path"
-	ToolSearchEntities   = "search_entities"
-	ToolGetAsset         = "get_asset"
-	ToolQueryStats       = "query_platform_stats"
-	ToolHuntThreats      = "hunt_threats"
+	ToolSearchEntities    = "search_entities"
+	ToolGetAsset          = "get_asset"
+	ToolQueryStats        = "query_platform_stats"
+	ToolHuntThreats       = "hunt_threats"
 )
 
 // ─── Core models ──────────────────────────────────────────────────────────────
 
 // Session is a multi-turn conversation context.
 type Session struct {
-	ID             uuid.UUID      `json:"id"`
-	TenantID       uuid.UUID      `json:"tenant_id"`
-	UserID         uuid.UUID      `json:"user_id"`
-	Title          string         `json:"title,omitempty"`
-	Context        map[string]any `json:"context,omitempty"`
-	IsActive       bool           `json:"is_active"`
-	MessageCount   int            `json:"message_count"`
-	LastMessageAt  *time.Time     `json:"last_message_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID            uuid.UUID      `json:"id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	UserID        uuid.UUID      `json:"user_id"`
+	Title         string         `json:"title,omitempty"`
+	Context       map[string]any `json:"context,omitempty"`
+	IsActive      bool           `json:"is_active"`
+	MessageCount  int            `json:"message_count"`
+	LastMessageAt *time.Time     `json:"last_message_at,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 // Message is one turn in a copilot session.
@@ -90,11 +90,11 @@ type HuntJob struct {
 
 // CopilotStats is the usage summary.
 type CopilotStats struct {
-	TotalSessions   int `json:"total_sessions"`
-	ActiveSessions  int `json:"active_sessions"`
-	TotalMessages   int `json:"total_messages"`
-	TotalHuntJobs   int `json:"total_hunt_jobs"`
-	PendingJobs     int `json:"pending_jobs"`
+	TotalSessions     int `json:"total_sessions"`
+	ActiveSessions    int `json:"active_sessions"`
+	TotalMessages     int `json:"total_messages"`
+	TotalHuntJobs     int `json:"total_hunt_jobs"`
+	PendingJobs       int `json:"pending_jobs"`
 	TotalInputTokens  int `json:"total_input_tokens"`
 	TotalOutputTokens int `json:"total_output_tokens"`
 }
@@ -109,14 +109,14 @@ type AnthropicMessage struct {
 
 // AnthropicContent is a content block (text or tool_use/tool_result).
 type AnthropicContent struct {
-	Type       string         `json:"type"`
-	Text       string         `json:"text,omitempty"`
-	ID         string         `json:"id,omitempty"`    // tool_use block id
-	Name       string         `json:"name,omitempty"`  // tool name
-	Input      map[string]any `json:"input,omitempty"` // tool input
-	ToolUseID  string         `json:"tool_use_id,omitempty"` // for tool_result
-	Content    string         `json:"content,omitempty"`     // for tool_result
-	IsError    bool           `json:"is_error,omitempty"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`          // tool_use block id
+	Name      string         `json:"name,omitempty"`        // tool name
+	Input     map[string]any `json:"input,omitempty"`       // tool input
+	ToolUseID string         `json:"tool_use_id,omitempty"` // for tool_result
+	Content   string         `json:"content,omitempty"`     // for tool_result
+	IsError   bool           `json:"is_error,omitempty"`
 }
 
 // AnthropicTool defines a tool for Claude tool use.
@@ -137,12 +137,12 @@ type AnthropicRequest struct {
 
 // AnthropicResponse is the response from the Claude Messages API.
 type AnthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Content      []AnthropicContent `json:"content"`
-	StopReason   string             `json:"stop_reason"`
-	Usage        AnthropicUsage     `json:"usage"`
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
+	Role       string             `json:"role"`
+	Content    []AnthropicContent `json:"content"`
+	StopReason string             `json:"stop_reason"`
+	Usage      AnthropicUsage     `json:"usage"`
 }
 
 // AnthropicUsage holds token counts.

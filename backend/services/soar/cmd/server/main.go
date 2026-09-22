@@ -30,13 +30,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "soar-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8014")
+	port := envOrDefault("SERVICE_PORT", "8014")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,8 +50,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	soarRepo := repository.NewSOARRepository(pool)
-	soarSvc  := service.NewSOARService(soarRepo, logger)
-	soarH    := handler.NewSOARHandler(soarSvc)
+	soarSvc := service.NewSOARService(soarRepo, logger)
+	soarH := handler.NewSOARHandler(soarSvc)
 
 	// ── Kafka consumer: auto-trigger playbooks from alerts ────────────────────
 	// Listens on crp.events.alerts (SIEM alerts), crp.events.ueba, crp.events.ti

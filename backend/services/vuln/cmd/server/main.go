@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "vuln-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8011")
+	port := envOrDefault("SERVICE_PORT", "8011")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -47,8 +47,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	vulnRepo := repository.NewVulnRepository(pool)
-	vulnSvc  := service.NewVulnService(vulnRepo, logger)
-	vulnH    := handler.NewVulnHandler(vulnSvc)
+	vulnSvc := service.NewVulnService(vulnRepo, logger)
+	vulnH := handler.NewVulnHandler(vulnSvc)
 
 	// ── Kafka producer (publishes vuln events for SOAR/notification) ──────────
 	_ = pkgkafka.NewProducer(pkgkafka.ProducerConfig{

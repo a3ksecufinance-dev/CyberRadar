@@ -27,13 +27,13 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "fraud-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8020")
+	port := envOrDefault("SERVICE_PORT", "8020")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -57,8 +57,8 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	fraudRepo := repository.NewFraudRepository(pool)
-	fraudSvc  := service.NewFraudService(fraudRepo, producer, logger)
-	fraudH    := handler.NewFraudHandler(fraudSvc)
+	fraudSvc := service.NewFraudService(fraudRepo, producer, logger)
+	fraudH := handler.NewFraudHandler(fraudSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()

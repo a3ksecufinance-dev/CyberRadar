@@ -29,14 +29,14 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "siem-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8008")
+	port := envOrDefault("SERVICE_PORT", "8008")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	chDSN     := mustEnv("CLICKHOUSE_DSN")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	chDSN := mustEnv("CLICKHOUSE_DSN")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,12 +61,12 @@ func main() {
 	defer chConn.Close()
 
 	// ── Repositories ──────────────────────────────────────────────────────────
-	ruleRepo  := repository.NewRuleRepository(pool)
+	ruleRepo := repository.NewRuleRepository(pool)
 	alertRepo := repository.NewAlertRepository(chConn)
-	caseRepo  := repository.NewCaseRepository(pool)
+	caseRepo := repository.NewCaseRepository(pool)
 
 	// ── SIEM service ──────────────────────────────────────────────────────────
-	siemSvc     := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
+	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────

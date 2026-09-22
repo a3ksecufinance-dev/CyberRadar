@@ -148,7 +148,7 @@ func (h *IGAHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeOnly := r.URL.Query().Get("active_only") != "false"
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -343,7 +343,7 @@ func (h *IGAHandler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	campaigns, total, err := h.svc.ListCampaigns(r.Context(), tenantID, r.URL.Query().Get("status"), page, pageSize)
 	if err != nil {
@@ -515,7 +515,7 @@ func (h *IGAHandler) ListSoDViolations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1

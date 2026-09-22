@@ -29,14 +29,14 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "ueba-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8009")
+	port := envOrDefault("SERVICE_PORT", "8009")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("load jwt public key")
 	}
-	dbURL     := mustEnv("DATABASE_URL")
-	chDSN     := mustEnv("CLICKHOUSE_DSN")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	dbURL := mustEnv("DATABASE_URL")
+	chDSN := mustEnv("CLICKHOUSE_DSN")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,11 +61,11 @@ func main() {
 	defer chConn.Close()
 
 	// ── Repositories ──────────────────────────────────────────────────────────
-	profileRepo  := repository.NewProfileRepository(pool)
+	profileRepo := repository.NewProfileRepository(pool)
 	behaviorRepo := repository.NewBehaviorRepository(chConn)
 
 	// ── UEBA service ──────────────────────────────────────────────────────────
-	uebaSvc     := service.NewUEBAService(profileRepo, behaviorRepo, logger)
+	uebaSvc := service.NewUEBAService(profileRepo, behaviorRepo, logger)
 	uebaHandler := handler.NewUEBAHandler(uebaSvc)
 
 	// ── Behavior Engine (Kafka consumer on crp.events.enriched) ───────────────

@@ -464,13 +464,13 @@ func (r *IOCRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.T
 		BySeverity: make(map[string]int),
 	}
 
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1`, tenantID).Scan(&s.TotalIOCs)             //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.ActiveIOCs) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFeeds)           //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1 AND enabled=true`, tenantID).Scan(&s.EnabledFeeds) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '24 hours'`, tenantID).Scan(&s.HitsLast24h) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '7 days'`, tenantID).Scan(&s.HitsLast7d)   //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1`, tenantID).Scan(&s.ThreatActors) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1`, tenantID).Scan(&s.TotalIOCs)                                                                                //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.ActiveIOCs)                                                            //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFeeds)                                                                              //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1 AND enabled=true`, tenantID).Scan(&s.EnabledFeeds)                                                           //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '24 hours'`, tenantID).Scan(&s.HitsLast24h)                                  //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '7 days'`, tenantID).Scan(&s.HitsLast7d)                                     //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1`, tenantID).Scan(&s.ThreatActors)                                                                    //nolint
 	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1 AND (targets_cbs=true OR targets_swift=true OR targets_atm=true)`, tenantID).Scan(&s.BankingThreats) //nolint
 
 	rows, _ := r.db.Query(ctx, `SELECT ioc_type, COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true GROUP BY ioc_type`, tenantID)
