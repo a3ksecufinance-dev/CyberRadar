@@ -16,6 +16,12 @@ vendor/
 .env.*
 !.env.example
 
+# Generated keys and certificates — never commit private key material
+backend/deployments/jwt/
+backend/deployments/certs/
+*.pem
+*.key
+
 # OS
 .DS_Store
 Thumbs.db

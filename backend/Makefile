@@ -18,7 +18,7 @@ infra-up: ## Start all infrastructure containers
 infra-down: ## Stop infrastructure containers
 	$(DOCKER_COMPOSE) down
 
-dev: infra-up migrate ## Start infra + run migrations + start all services
+dev: jwt-keys infra-up migrate ## Start infra + run migrations + start all services
 	$(DOCKER_COMPOSE) up -d tenant-service identity-service audit-service notification-service collector-service pipeline-worker asset-service pam-service siem-service ueba-service ti-service vuln-service attackpath-service knowledgegraph-service soar-service dashboard-service copilot-service apifw-service compliance-service easm-service fraud-service dlp-service netsec-service risk-service iga-service cspm-service ir-service scs-service ot-service mobile-service dspm-service syslog-connector
 
 down: ## Stop all containers
@@ -129,6 +129,9 @@ docker-build: ## Build Docker images for all services
 
 syslog-certs: ## Generate self-signed TLS certs for syslog connector (dev only)
 	./scripts/gen-syslog-certs.sh
+
+jwt-keys: ## Generate the RSA key pair used to sign JWTs (dev only)
+	./scripts/gen-jwt-keys.sh
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 

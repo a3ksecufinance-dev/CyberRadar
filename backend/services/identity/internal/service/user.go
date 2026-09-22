@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/services/identity/internal/model"
 	"github.com/cyberradar/platform/services/identity/internal/repository"
 	"github.com/google/uuid"
@@ -17,18 +18,18 @@ import (
 
 // UserService manages identity lifecycle.
 type UserService struct {
-	repo      *repository.UserRepository
-	roleRepo  *repository.RoleRepository
-	jwtSvc    *JWTService
-	mfaSvc    *MFAService
-	logger    zerolog.Logger
+	repo     *repository.UserRepository
+	roleRepo *repository.RoleRepository
+	jwtSvc   *pkgjwt.Signer
+	mfaSvc   *MFAService
+	logger   zerolog.Logger
 }
 
 // NewUserService creates a UserService.
 func NewUserService(
 	repo *repository.UserRepository,
 	roleRepo *repository.RoleRepository,
-	jwtSvc *JWTService,
+	jwtSvc *pkgjwt.Signer,
 	mfaSvc *MFAService,
 	logger zerolog.Logger,
 ) *UserService {

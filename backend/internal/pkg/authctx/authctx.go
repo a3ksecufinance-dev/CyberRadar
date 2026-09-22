@@ -25,6 +25,11 @@ type Identity struct {
 	Email        string
 	Roles        []string
 	IsSuperAdmin bool
+
+	// Token is the caller's raw bearer token, kept so a service calling another
+	// service on the caller's behalf can forward it and stay within the caller's
+	// own authorization scope. Never log it.
+	Token string
 }
 
 // Parse converts raw JWT claim values into an Identity.
@@ -90,4 +95,11 @@ func IsSuperAdmin(ctx context.Context) bool {
 func Roles(ctx context.Context) []string {
 	id, _ := From(ctx)
 	return id.Roles
+}
+
+// Token returns the caller's raw bearer token, for forwarding to another
+// service on their behalf. Empty on an unauthenticated context.
+func Token(ctx context.Context) string {
+	id, _ := From(ctx)
+	return id.Token
 }

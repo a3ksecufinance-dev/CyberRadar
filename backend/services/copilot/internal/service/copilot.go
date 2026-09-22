@@ -111,7 +111,7 @@ func (s *CopilotService) Chat(ctx context.Context, tenantID, userID, sessionID u
 
 	// Call LLM with agentic tool loop
 	start := time.Now()
-	resp, err := s.llm.Chat(ctx, tenantID, history, req.Content)
+	resp, err := s.llm.Chat(ctx, history, req.Content)
 	if err != nil {
 		s.logger.Error().Err(err).Str("session_id", sessionID.String()).Msg("llm_chat_error")
 		return nil, apierrors.Internal("llm chat", err)
@@ -173,7 +173,7 @@ func (s *CopilotService) runHuntJob(ctx context.Context, tenantID uuid.UUID, job
 	prompt := buildHuntPrompt(job.HuntType, job.Query, extraCtx)
 
 	start := time.Now()
-	resp, err := s.llm.Analyze(ctx, tenantID, prompt)
+	resp, err := s.llm.Analyze(ctx, prompt)
 	if err != nil {
 		s.logger.Error().Err(err).Str("job_id", job.ID.String()).Msg("hunt_job_llm_error")
 		_ = s.repo.UpdateHuntJob(ctx, job.ID, "failed", "", err.Error(), nil, 0, 0)

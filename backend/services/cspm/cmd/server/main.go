@@ -10,15 +10,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/cspm/internal/handler"
 	"github.com/cyberradar/platform/services/cspm/internal/repository"
 	"github.com/cyberradar/platform/services/cspm/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -28,7 +28,10 @@ func main() {
 	logger := log.With().Str("service", "cspm-service").Logger()
 
 	port      := envOrDefault("SERVICE_PORT", "8025")
-	jwtSecret := mustEnv("JWT_SECRET")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
 	dbURL     := mustEnv("DATABASE_URL")
 	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
@@ -62,7 +65,7 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
 		cspmH.RegisterRoutes(r)
 	})
 
@@ -90,47 +93,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("cspm-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, "", claims.Roles, claims.IsAdmin)
-			if claimsErr != nil {
-				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-			ctx := authctx.With(r.Context(), identity)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

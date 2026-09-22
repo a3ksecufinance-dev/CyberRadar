@@ -9,12 +9,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/services/identity/internal/handler"
 	"github.com/cyberradar/platform/services/identity/internal/repository"
 	"github.com/cyberradar/platform/services/identity/internal/service"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
@@ -26,12 +26,15 @@ func main() {
 	logger := log.With().Str("service", "identity-service").Logger()
 
 	// ─── Config ──────────────────────────────────────────────
-	dsn            := mustEnv("DATABASE_URL")
-	port           := envOrDefault("SERVICE_PORT", "8002")
-	jwtSecret      := mustEnv("JWT_SECRET")
-	jwtExpiryMin   := envOrDefaultInt("JWT_EXPIRY_MINUTES", 60)
-	refreshExpHrs  := envOrDefaultInt("JWT_REFRESH_EXPIRY_HOURS", 24)
-	mfaIssuer      := envOrDefault("MFA_ISSUER", "CyberRadar")
+	dsn := mustEnv("DATABASE_URL")
+	port := envOrDefault("SERVICE_PORT", "8002")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	jwtExpiryMin := envOrDefaultInt("JWT_EXPIRY_MINUTES", 60)
+	refreshExpHrs := envOrDefaultInt("JWT_REFRESH_EXPIRY_HOURS", 24)
+	mfaIssuer := envOrDefault("MFA_ISSUER", "CyberRadar")
 
 	// ─── Database ────────────────────────────────────────────
 	ctx := context.Background()
@@ -46,14 +49,18 @@ func main() {
 	userRepo := repository.NewUserRepository(dbPool)
 	roleRepo := repository.NewRoleRepository(dbPool)
 
-	jwtSvc := service.NewJWTService(
-		jwtSecret,
+	// The private key lives only here: identity is the platform's sole token issuer.
+	jwtSigner, err := pkgjwt.NewSignerFromFile(
+		mustEnv("JWT_PRIVATE_KEY_PATH"),
 		time.Duration(jwtExpiryMin)*time.Minute,
 		time.Duration(refreshExpHrs)*time.Hour,
 	)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("load jwt private key")
+	}
 	mfaSvc := service.NewMFAService(mfaIssuer)
 
-	userSvc := service.NewUserService(userRepo, roleRepo, jwtSvc, mfaSvc, logger)
+	userSvc := service.NewUserService(userRepo, roleRepo, jwtSigner, mfaSvc, logger)
 
 	authHandler := handler.NewAuthHandler(userSvc)
 	userHandler := handler.NewUserHandler(userSvc)
@@ -84,7 +91,7 @@ func main() {
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {
-			r.Use(jwtMiddleware(jwtSecret, logger))
+			r.Use(authmw.RequireJWT(jwtVerifier, logger))
 			authHandler.RegisterProtectedRoutes(r)
 			userHandler.RegisterRoutes(r)
 		})
@@ -115,57 +122,6 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("identity-service stopped")
-}
-
-// jwtClaims mirrors platform JWT claims.
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	Email    string   `json:"email"`
-	Roles    []string `json:"roles"`
-	IsAdmin  bool     `json:"is_admin"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization header"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil {
-				logger.Warn().Err(err).Str("path", r.URL.Path).Msg("jwt_invalid")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid or expired token"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			claims, ok := token.Claims.(*jwtClaims)
-			if !ok || !token.Valid || claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			identity, claimsErr := authctx.Parse(claims.TenantID, claims.UserID, claims.Email, claims.Roles, claims.IsAdmin)
-			if claimsErr != nil {
-				logger.Warn().Err(claimsErr).Str("path", r.URL.Path).Msg("jwt_claims_invalid")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-			ctx := authctx.With(r.Context(), identity)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/services/copilot/internal/model"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -64,11 +63,11 @@ func NewLLMClient(apiKey string, dispatcher *ToolDispatcher, logger zerolog.Logg
 
 // Chat sends a conversational message and returns the assistant reply.
 // It implements the agentic loop: call Claude → dispatch tool use → call Claude again.
-func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*model.Message, userContent string) (*model.AnthropicResponse, error) {
+func (c *LLMClient) Chat(ctx context.Context, history []*model.Message, userContent string) (*model.AnthropicResponse, error) {
 	// Build Anthropic message list from persisted history
 	messages := buildAnthropicMessages(history)
 	messages = append(messages, model.AnthropicMessage{
-		Role: model.RoleUser,
+		Role:    model.RoleUser,
 		Content: []model.AnthropicContent{{Type: "text", Text: userContent}},
 	})
 
@@ -96,7 +95,7 @@ func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*mod
 			if block.Type != "tool_use" {
 				continue
 			}
-			result, err := c.dispatcher.Dispatch(ctx, tenantID, block.Name, block.Input)
+			result, err := c.dispatcher.Dispatch(ctx, block.Name, block.Input)
 			if err != nil {
 				c.logger.Warn().Err(err).Str("tool", block.Name).Msg("tool_dispatch_error")
 				toolResults = append(toolResults, model.AnthropicContent{
@@ -126,7 +125,7 @@ func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*mod
 }
 
 // Analyze sends a single-shot analysis prompt (used for async hunt jobs).
-func (c *LLMClient) Analyze(ctx context.Context, tenantID uuid.UUID, prompt string) (*model.AnthropicResponse, error) {
+func (c *LLMClient) Analyze(ctx context.Context, prompt string) (*model.AnthropicResponse, error) {
 	messages := []model.AnthropicMessage{
 		{Role: model.RoleUser, Content: []model.AnthropicContent{{Type: "text", Text: prompt}}},
 	}
@@ -145,7 +144,7 @@ func (c *LLMClient) Analyze(ctx context.Context, tenantID uuid.UUID, prompt stri
 			if block.Type != "tool_use" {
 				continue
 			}
-			result, _ := c.dispatcher.Dispatch(ctx, tenantID, block.Name, block.Input)
+			result, _ := c.dispatcher.Dispatch(ctx, block.Name, block.Input)
 			resultJSON, _ := json.Marshal(result)
 			results = append(results, model.AnthropicContent{
 				Type: "tool_result", ToolUseID: block.ID, Content: string(resultJSON),
@@ -208,12 +207,12 @@ func buildAnthropicMessages(history []*model.Message) []model.AnthropicMessage {
 		switch m.Role {
 		case model.RoleUser:
 			msgs = append(msgs, model.AnthropicMessage{
-				Role: model.RoleUser,
+				Role:    model.RoleUser,
 				Content: []model.AnthropicContent{{Type: "text", Text: m.Content}},
 			})
 		case model.RoleAssistant:
 			msgs = append(msgs, model.AnthropicMessage{
-				Role: model.RoleAssistant,
+				Role:    model.RoleAssistant,
 				Content: []model.AnthropicContent{{Type: "text", Text: m.Content}},
 			})
 		case model.RoleTool:
@@ -259,10 +258,10 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolQueryAlerts,
 			Description: "Query recent SIEM/XDR alerts. Returns a list of alerts matching filters.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"severity":   str("Filter by severity: CRITICAL, HIGH, MEDIUM, LOW"),
-				"status":     str("Filter by alert status: open, acknowledged, resolved"),
-				"limit":      num("Max number of results (default 10)"),
-				"rule_name":  str("Filter by SIEM rule name (partial match)"),
+				"severity":  str("Filter by severity: CRITICAL, HIGH, MEDIUM, LOW"),
+				"status":    str("Filter by alert status: open, acknowledged, resolved"),
+				"limit":     num("Max number of results (default 10)"),
+				"rule_name": str("Filter by SIEM rule name (partial match)"),
 			}),
 		},
 		{
@@ -297,20 +296,20 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolQueryVulns,
 			Description: "Query vulnerability findings. Returns CVE details, CVSS scores, EPSS, and affected assets.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"severity":    str("CRITICAL, HIGH, MEDIUM, LOW"),
-				"asset_id":    str("Filter by asset UUID"),
-				"cve_id":      str("Specific CVE ID (e.g. CVE-2024-1234)"),
+				"severity":     str("CRITICAL, HIGH, MEDIUM, LOW"),
+				"asset_id":     str("Filter by asset UUID"),
+				"cve_id":       str("Specific CVE ID (e.g. CVE-2024-1234)"),
 				"sla_breached": str("true to return only SLA-breached findings"),
-				"limit":       num("Max results (default 10)"),
+				"limit":        num("Max results (default 10)"),
 			}),
 		},
 		{
 			Name:        model.ToolAnalyzeAttackPath,
 			Description: "Query attack path analysis results: discovered lateral movement paths, choke points, and scenario risk scores.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"scenario_id": str("UUID of a specific scenario"),
-				"min_score":   num("Minimum path risk score (0-10)"),
-				"limit":       num("Max paths (default 5)"),
+				"scenario_id":  str("UUID of a specific scenario"),
+				"min_score":    num("Minimum path risk score (0-10)"),
+				"limit":        num("Max paths (default 5)"),
 				"choke_points": str("Set to 'true' to return choke point summary instead of paths"),
 			}),
 		},
@@ -328,9 +327,9 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolGetAsset,
 			Description: "Retrieve asset details by ID or hostname/IP.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"asset_id":  str("UUID of a specific asset"),
-				"hostname":  str("Hostname to search for"),
-				"ip":        str("IP address to search for"),
+				"asset_id": str("UUID of a specific asset"),
+				"hostname": str("Hostname to search for"),
+				"ip":       str("IP address to search for"),
 			}),
 		},
 		{
