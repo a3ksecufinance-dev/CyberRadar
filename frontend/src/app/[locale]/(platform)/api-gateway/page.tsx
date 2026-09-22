@@ -453,7 +453,7 @@ export default function APIGatewayPage() {
           {keysLoading && <LoadingState />}
           {keysError && <ErrorState message="Failed to load API keys" />}
           {!keysLoading && !keysError && keys.length === 0 && (
-            <EmptyState title="No API keys" description="Create your first API key to grant external access to the platform." />
+            <EmptyState message="No API keys yet — create one to grant external access to the platform." />
           )}
           {keys.length > 0 && (
             <Card>
@@ -487,7 +487,7 @@ export default function APIGatewayPage() {
           {whLoading && <LoadingState />}
           {whError && <ErrorState message="Failed to load webhooks" />}
           {!whLoading && !whError && webhooks.length === 0 && (
-            <EmptyState title="No webhooks" description="Configure outbound webhooks to push events to external systems (Slack, SIEM, SOAR...)." />
+            <EmptyState message="No webhooks configured — add one to push events to external systems (Slack, SIEM, SOAR)." />
           )}
           {webhooks.length > 0 && (
             <Card>
