@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    name: Backend — build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Format
+        working-directory: backend
+        run: make fmt-check
+
+      - name: Build
+        working-directory: backend
+        run: make build
+
+      - name: Vet
+        working-directory: backend
+        run: make vet
+
+      - name: Test
+        working-directory: backend
+        run: make test
+
+  migrations:
+    name: Migrations — apply to a clean database
+    runs-on: ubuntu-latest
+    # A reserved word used as a column name shipped unnoticed because nothing
+    # ever ran these files. This job applies all of them to an empty database.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply PostgreSQL migrations
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          for f in migrations/postgres/*.sql; do
+            echo "→ $f"
+            psql -h 127.0.0.1 -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Report schema
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' tables created' FROM information_schema.tables WHERE table_schema='public'"
+
+  frontend:
+    name: Frontend — typecheck, lint, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build
+        working-directory: frontend
+        # next build needs these present; they are not secrets at build time.
+        env:
+          NEXTAUTH_URL: http://localhost:3000
+          NEXTAUTH_SECRET: ci-build-only-not-a-real-secret-000000000
+          KEYCLOAK_CLIENT_ID: ci
+          KEYCLOAK_CLIENT_SECRET: ci
+          KEYCLOAK_ISSUER: http://localhost:8080/realms/cyberradar
+          NEXT_PUBLIC_API_URL: http://localhost:8001
+        run: npm run build
+
+  vulnerabilities:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    # Reports rather than gates, for two reasons, and should be made blocking
+    # once both are cleared:
+    #   - npm audit still reports 1 critical and 4 high, all of which only a
+    #     Next 16 migration resolves. The critical one is a DoS in the Image
+    #     Optimizer, which this app disables (images.unoptimized in
+    #     next.config.mjs), so it is not reachable here.
+    #   - govulncheck could not be run before this landed: the development
+    #     environment cannot reach vuln.go.dev. Its first run needs triage.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          fail=0
+          for m in internal services/*/; do
+            echo "→ $m"
+            (cd "$m" && govulncheck ./...) || fail=1
+          done
+          exit $fail
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
