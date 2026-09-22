@@ -135,41 +135,58 @@ jwt-keys: ## Generate the RSA key pair used to sign JWTs (dev only)
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
+# Each service is its own module, so ./... from the root matches nothing —
+# every target below iterates over the modules listed in go.work.
+MODULES := internal $(patsubst %/,%,$(wildcard services/*/))
+
 test: ## Run all tests
-	go test ./... -v -timeout 60s
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && go test ./... -timeout 120s) || fail=1; \
+	done; exit $$fail
 
 test-tenant: ## Run tenant service tests
-	go test ./services/tenant/... -v
+	cd services/tenant && go test ./... -v
 
 test-identity: ## Run identity service tests
-	go test ./services/identity/... -v
+	cd services/identity && go test ./... -v
 
 test-audit: ## Run audit service tests
-	go test ./services/audit/... -v
+	cd services/audit && go test ./... -v
 
 test-cover: ## Run tests with coverage
-	go test ./... -coverprofile=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
+	@echo "mode: set" > $(CURDIR)/coverage.out
+	@for m in $(MODULES); do \
+		(cd $$m && go test ./... -coverprofile=cover.tmp -covermode=set >/dev/null 2>&1; \
+		 [ -f cover.tmp ] && tail -n +2 cover.tmp >> $(CURDIR)/coverage.out; rm -f cover.tmp) || true; \
+	done
+	go tool cover -html=$(CURDIR)/coverage.out -o coverage.html
 	@echo "Coverage report → coverage.html"
 
 # ─── Code quality ─────────────────────────────────────────────────────────────
 
 lint: ## Run golangci-lint
-	golangci-lint run ./...
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && golangci-lint run ./...) || fail=1; \
+	done; exit $$fail
 
 fmt: ## Format all Go code
 	gofmt -w -s .
-	goimports -w .
+
+fmt-check: ## Fail if any Go file is not gofmt-formatted
+	@out=$$(gofmt -l -s .); \
+	if [ -n "$$out" ]; then echo "not gofmt'd:"; echo "$$out"; exit 1; fi
 
 tidy: ## Tidy all go.mod files
 	go work sync
-	@for d in internal services/tenant services/identity services/audit services/notification services/collector services/pipeline services/asset services/pam services/siem services/ueba services/ti services/vuln services/attackpath services/knowledgegraph services/soar services/dashboard services/copilot services/apifw services/compliance services/easm services/fraud services/dlp services/netsec services/risk services/iga services/cspm services/ir services/scs services/ot; do \
-		echo "  → $$d"; \
-		cd $$d && go mod tidy && cd -; \
+	@for m in $(MODULES); do \
+		echo "  → $$m"; \
+		(cd $$m && go mod tidy); \
 	done
 
 vet: ## Run go vet
-	go vet ./...
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && go vet ./...) || fail=1; \
+	done; exit $$fail
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
