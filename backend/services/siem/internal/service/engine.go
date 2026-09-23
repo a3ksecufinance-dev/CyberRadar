@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/siem/internal/model"
@@ -34,9 +35,10 @@ type RuleEngine struct {
 	logger    zerolog.Logger
 	cache     ruleCache
 
-	// In-memory threshold counters: key = dedup_key → []event_time
-	threshMu       sync.Mutex
-	threshCounters map[string][]time.Time
+	// thresholds counts rule hits across every replica of this service. It
+	// used to be a map in this process, which made a threshold rule fire only
+	// once a single replica had seen the whole burst.
+	thresholds *cache.Window
 }
 
 // NewRuleEngine creates a RuleEngine.
@@ -46,17 +48,18 @@ func NewRuleEngine(
 	caseRepo *repository.CaseRepository,
 	consumer *pkgkafka.Consumer,
 	publisher *pkgkafka.Producer,
+	thresholds *cache.Window,
 	logger zerolog.Logger,
 ) *RuleEngine {
 	return &RuleEngine{
-		ruleRepo:       ruleRepo,
-		alertRepo:      alertRepo,
-		caseRepo:       caseRepo,
-		consumer:       consumer,
-		publisher:      publisher,
-		logger:         logger,
-		cache:          ruleCache{rules: make(map[string][]*model.DetectionRule)},
-		threshCounters: make(map[string][]time.Time),
+		ruleRepo:   ruleRepo,
+		alertRepo:  alertRepo,
+		caseRepo:   caseRepo,
+		consumer:   consumer,
+		publisher:  publisher,
+		logger:     logger,
+		cache:      ruleCache{rules: make(map[string][]*model.DetectionRule)},
+		thresholds: thresholds,
 	}
 }
 
@@ -77,7 +80,7 @@ func (e *RuleEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 
 	rules := e.getRules(ctx, ev.TenantID)
 	for _, rule := range rules {
-		if e.evaluate(rule, &ev) {
+		if e.evaluate(ctx, rule, &ev) {
 			e.fire(ctx, rule, &ev)
 		}
 	}
@@ -85,7 +88,7 @@ func (e *RuleEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 }
 
 // evaluate checks whether an event satisfies a rule's conditions.
-func (e *RuleEngine) evaluate(rule *model.DetectionRule, ev *event.NormalizedEvent) bool {
+func (e *RuleEngine) evaluate(ctx context.Context, rule *model.DetectionRule, ev *event.NormalizedEvent) bool {
 	// 1. All field_matches must pass
 	for _, fm := range rule.Conditions.FieldMatches {
 		if !matchField(fm, ev) {
@@ -95,7 +98,7 @@ func (e *RuleEngine) evaluate(rule *model.DetectionRule, ev *event.NormalizedEve
 
 	// 2. Threshold check (if configured)
 	if t := rule.Conditions.Threshold; t != nil && t.Count > 1 {
-		return e.thresholdMet(rule, ev, t)
+		return e.thresholdMet(ctx, rule, ev, t)
 	}
 
 	return true
@@ -205,34 +208,23 @@ func getField(ev *event.NormalizedEvent, field string) string {
 	return ""
 }
 
-// thresholdMet uses in-memory sliding window counters.
-func (e *RuleEngine) thresholdMet(rule *model.DetectionRule, ev *event.NormalizedEvent, t *model.ThresholdCondition) bool {
-	// Build group key from group_by fields
-	parts := []string{rule.ID.String()}
+// thresholdMet reports whether a rule's group has been hit t.Count times
+// inside its window, counting across every replica.
+func (e *RuleEngine) thresholdMet(ctx context.Context, rule *model.DetectionRule, ev *event.NormalizedEvent, t *model.ThresholdCondition) bool {
+	// The tenant is already implied by the rule, which is loaded per tenant,
+	// but naming it keeps the key readable in a shared Redis and stops two
+	// tenants from ever sharing a counter if rule loading changes.
+	parts := []string{ev.TenantID, rule.ID.String()}
 	for _, gf := range t.GroupBy {
 		parts = append(parts, getField(ev, gf))
 	}
 	groupKey := strings.Join(parts, "|")
 
-	window := time.Duration(t.WindowSeconds) * time.Second
-	now := time.Now().UTC()
-	cutoff := now.Add(-window)
-
-	e.threshMu.Lock()
-	defer e.threshMu.Unlock()
-
-	times := e.threshCounters[groupKey]
-	// Expire old entries
-	fresh := times[:0]
-	for _, ts := range times {
-		if ts.After(cutoff) {
-			fresh = append(fresh, ts)
-		}
-	}
-	fresh = append(fresh, now)
-	e.threshCounters[groupKey] = fresh
-
-	return len(fresh) >= t.Count
+	// A degraded count — one that covers this replica only — is reported by the
+	// window itself, as a throttled log and crp_sliding_window_fallback_total.
+	// Repeating it per event here would flood the log on a busy tenant.
+	count, _ := e.thresholds.Count(ctx, groupKey, time.Duration(t.WindowSeconds)*time.Second)
+	return count >= t.Count
 }
 
 // fire creates an alert for a rule match.

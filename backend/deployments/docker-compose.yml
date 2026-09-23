@@ -925,6 +925,8 @@ services:
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - KAFKA_BROKERS=kafka:9092
+      # Detection counters are shared across replicas; see internal/pkg/cache.
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/8
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
@@ -937,6 +939,8 @@ services:
       clickhouse:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - crp-network
@@ -954,6 +958,8 @@ services:
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - KAFKA_BROKERS=kafka:9092
+      # Detection counters are shared across replicas; see internal/pkg/cache.
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/9
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
@@ -966,6 +972,8 @@ services:
       clickhouse:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - crp-network

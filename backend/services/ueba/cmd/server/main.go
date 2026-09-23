@@ -12,6 +12,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
@@ -71,6 +72,18 @@ func main() {
 	}
 	defer chConn.Close()
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	// Velocity and brute-force counters span every replica, not one process.
+	redisClient, err := cache.NewFromURL(ctx, os.Getenv("REDIS_URL"), logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("redis url invalid")
+	}
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
+	velocity := cache.NewWindow(redisClient, "ueba:velocity", logger)
+	failures := cache.NewWindow(redisClient, "ueba:failures", logger)
+
 	// ── Repositories ──────────────────────────────────────────────────────────
 	profileRepo := repository.NewProfileRepository(pool)
 	behaviorRepo := repository.NewBehaviorRepository(chConn)
@@ -97,7 +110,7 @@ func main() {
 	}, logger)
 	defer anomalyPublisher.Close()
 
-	engine := service.NewBehaviorEngine(profileRepo, behaviorRepo, engineConsumer, anomalyPublisher, logger)
+	engine := service.NewBehaviorEngine(profileRepo, behaviorRepo, engineConsumer, anomalyPublisher, velocity, failures, logger)
 	go func() {
 		if err := engine.Run(ctx); err != nil {
 			logger.Error().Err(err).Msg("ueba_engine_error")

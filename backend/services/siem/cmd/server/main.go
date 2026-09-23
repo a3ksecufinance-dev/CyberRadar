@@ -12,6 +12,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
@@ -71,6 +72,17 @@ func main() {
 	}
 	defer chConn.Close()
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	// Threshold rules count across every replica, not inside one process.
+	redisClient, err := cache.NewFromURL(ctx, os.Getenv("REDIS_URL"), logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("redis url invalid")
+	}
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
+	thresholds := cache.NewWindow(redisClient, "siem:threshold", logger)
+
 	// ── Repositories ──────────────────────────────────────────────────────────
 	ruleRepo := repository.NewRuleRepository(pool)
 	alertRepo := repository.NewAlertRepository(chConn)
@@ -98,7 +110,7 @@ func main() {
 	}, logger)
 	defer alertPublisher.Close()
 
-	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, logger)
+	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, thresholds, logger)
 	go func() {
 		if err := ruleEngine.Run(ctx); err != nil {
 			logger.Error().Err(err).Msg("rule_engine_error")

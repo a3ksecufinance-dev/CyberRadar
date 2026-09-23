@@ -1,12 +1,17 @@
 package service
 
 import (
+	"context"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	"github.com/cyberradar/platform/services/siem/internal/model"
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 )
 
 func strp(s string) *string { return &s }
@@ -104,7 +109,12 @@ func TestGetFieldNilPointersAreEmptyNotPanics(t *testing.T) {
 }
 
 func newEngine() *RuleEngine {
-	return &RuleEngine{threshCounters: make(map[string][]time.Time)}
+	// A window with no Redis counts in process — which is what a unit test
+	// wants, and what the engine falls back to when the cache is unreachable.
+	return &RuleEngine{
+		thresholds: cache.NewWindow(nil, "test:threshold", zerolog.Nop()),
+		logger:     zerolog.Nop(),
+	}
 }
 
 func thresholdRule(count, window int, groupBy ...string) *model.DetectionRule {
@@ -124,7 +134,7 @@ func TestThresholdFiresOnlyAtCount(t *testing.T) {
 	ev := baseEvent()
 
 	for i := 1; i <= 5; i++ {
-		got := e.thresholdMet(rule, ev, rule.Conditions.Threshold)
+		got := e.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold)
 		want := i >= 3
 		if got != want {
 			t.Errorf("event %d: thresholdMet = %v, want %v", i, got, want)
@@ -141,14 +151,14 @@ func TestThresholdIsolatesGroups(t *testing.T) {
 	bob.UserName = strp("bob")
 
 	// One event each: neither group has reached the count of 2.
-	if e.thresholdMet(rule, alice, rule.Conditions.Threshold) {
+	if e.thresholdMet(context.Background(), rule, alice, rule.Conditions.Threshold) {
 		t.Error("alice fired on her first event")
 	}
-	if e.thresholdMet(rule, bob, rule.Conditions.Threshold) {
+	if e.thresholdMet(context.Background(), rule, bob, rule.Conditions.Threshold) {
 		t.Error("bob fired on his first event — counters leaked across groups")
 	}
 	// Alice's second event reaches the count; bob's counter is untouched.
-	if !e.thresholdMet(rule, alice, rule.Conditions.Threshold) {
+	if !e.thresholdMet(context.Background(), rule, alice, rule.Conditions.Threshold) {
 		t.Error("alice did not fire on her second event")
 	}
 }
@@ -159,29 +169,24 @@ func TestThresholdIsolatesRules(t *testing.T) {
 	ruleB := thresholdRule(2, 60, "user_name")
 	ev := baseEvent()
 
-	e.thresholdMet(ruleA, ev, ruleA.Conditions.Threshold)
-	if e.thresholdMet(ruleB, ev, ruleB.Conditions.Threshold) {
+	e.thresholdMet(context.Background(), ruleA, ev, ruleA.Conditions.Threshold)
+	if e.thresholdMet(context.Background(), ruleB, ev, ruleB.Conditions.Threshold) {
 		t.Error("rule B fired on its first event — counters are shared between rules")
 	}
 }
 
 func TestThresholdExpiresOutsideWindow(t *testing.T) {
+	// The shortest window a rule can express is one second, so this test waits
+	// one out rather than reaching into the counter to age it. It is the only
+	// place that proves WindowSeconds reaches the counter as seconds.
 	e := newEngine()
-	rule := thresholdRule(2, 60, "user_name")
+	rule := thresholdRule(2, 1, "user_name")
 	ev := baseEvent()
 
-	e.thresholdMet(rule, ev, rule.Conditions.Threshold)
+	e.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold)
+	time.Sleep(1100 * time.Millisecond)
 
-	// Age the recorded event past the window.
-	for k, v := range e.threshCounters {
-		aged := make([]time.Time, len(v))
-		for i := range v {
-			aged[i] = v[i].Add(-2 * time.Minute)
-		}
-		e.threshCounters[k] = aged
-	}
-
-	if e.thresholdMet(rule, ev, rule.Conditions.Threshold) {
+	if e.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold) {
 		t.Error("fired using an event older than the window")
 	}
 }
@@ -197,13 +202,13 @@ func TestEvaluateRequiresEveryFieldMatch(t *testing.T) {
 			{Field: "action", Op: model.OpEq, Value: "login"},
 		}},
 	}
-	if !e.evaluate(rule, ev) {
+	if !e.evaluate(context.Background(), rule, ev) {
 		t.Error("rule with all conditions satisfied did not evaluate true")
 	}
 
 	rule.Conditions.FieldMatches = append(rule.Conditions.FieldMatches,
 		model.FieldMatch{Field: "severity", Op: model.OpEq, Value: "LOW"})
-	if e.evaluate(rule, ev) {
+	if e.evaluate(context.Background(), rule, ev) {
 		t.Error("rule evaluated true although one condition failed")
 	}
 }
@@ -220,17 +225,17 @@ func TestEvaluateAppliesThresholdAfterFieldMatches(t *testing.T) {
 		},
 	}
 
-	if e.evaluate(rule, ev) {
+	if e.evaluate(context.Background(), rule, ev) {
 		t.Error("fired on the first event despite a threshold of 2")
 	}
-	if !e.evaluate(rule, ev) {
+	if !e.evaluate(context.Background(), rule, ev) {
 		t.Error("did not fire on the second event")
 	}
 
 	// A non-matching event must not advance the counter.
 	other := baseEvent()
 	other.Action = "logout"
-	if e.evaluate(rule, other) {
+	if e.evaluate(context.Background(), rule, other) {
 		t.Error("an event failing the field match still fired")
 	}
 }
@@ -270,5 +275,43 @@ func TestEntityFromPrefersMostSpecific(t *testing.T) {
 	ev.IPSource = nil
 	if typ, val := entityFrom(ev); typ != "source" || val != "gateway-1" {
 		t.Errorf("entityFrom with neither = (%s, %s), want (source, gateway-1)", typ, val)
+	}
+}
+
+func TestThresholdIsSharedBetweenReplicas(t *testing.T) {
+	// The reason the counter left process memory: with two replicas, a rule
+	// needing three hits used to need three hits *on the same replica*. An
+	// attacker load-balanced across them never tripped it.
+	url := os.Getenv("REDIS_TEST_URL")
+	if url == "" {
+		url = "redis://localhost:6379/9"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	client, err := cache.NewFromURL(ctx, url, zerolog.Nop())
+	if err != nil || client == nil {
+		t.Skipf("bad Redis URL %s: %v", url, err)
+	}
+	defer client.Close()
+	if err := client.Ping(ctx); err != nil {
+		t.Skipf("no Redis at %s: %v", url, err)
+	}
+
+	name := fmt.Sprintf("test:siem:%d", time.Now().UnixNano())
+	replicaA := &RuleEngine{thresholds: cache.NewWindow(client, name, zerolog.Nop()), logger: zerolog.Nop()}
+	replicaB := &RuleEngine{thresholds: cache.NewWindow(client, name, zerolog.Nop()), logger: zerolog.Nop()}
+
+	rule := thresholdRule(3, 60, "user_name")
+	ev := baseEvent()
+
+	if replicaA.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold) {
+		t.Fatal("fired on the first hit")
+	}
+	if replicaB.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold) {
+		t.Fatal("fired on the second hit")
+	}
+	if !replicaA.thresholdMet(context.Background(), rule, ev, rule.Conditions.Threshold) {
+		t.Error("three hits spread over two replicas did not reach a threshold of three")
 	}
 }

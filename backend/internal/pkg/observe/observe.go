@@ -67,6 +67,17 @@ func register() {
 	})
 }
 
+// MustRegister adds collectors to the registry that MetricsHandler serves.
+//
+// The platform deliberately does not use the default Prometheus registry, so a
+// metric declared with promauto elsewhere would be collected by nobody. Other
+// packages register through here instead, and their metrics land on the same
+// /metrics endpoint as the HTTP ones.
+func MustRegister(cs ...prometheus.Collector) {
+	register()
+	registry.MustRegister(cs...)
+}
+
 // MetricsHandler serves the platform registry for Prometheus to scrape.
 func MetricsHandler() http.Handler {
 	register()

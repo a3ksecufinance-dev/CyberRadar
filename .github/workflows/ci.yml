@@ -17,6 +17,18 @@ jobs:
   backend:
     name: Backend — build, vet, test
     runs-on: ubuntu-latest
+    # The sliding-window counters behind the SIEM and UEBA thresholds are
+    # backed by Redis. Their tests skip when none is reachable, so without this
+    # service the shared-counter path would pass by never running.
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/9
     steps:
       - uses: actions/checkout@v4
 
