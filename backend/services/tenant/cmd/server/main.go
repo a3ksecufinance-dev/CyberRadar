@@ -12,6 +12,7 @@ import (
 	"github.com/cyberradar/platform/internal/pkg/authmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/tenant/internal/handler"
 	"github.com/cyberradar/platform/services/tenant/internal/repository"
 	"github.com/cyberradar/platform/services/tenant/internal/service"
@@ -29,6 +30,16 @@ func main() {
 	}
 	zerolog.SetGlobalLevel(logLevel)
 	logger := log.With().Str("service", "tenant-service").Logger()
+
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"tenant-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 
 	// ─── Config ──────────────────────────────────────────────
 	dsn := mustEnv("DATABASE_URL")
@@ -56,6 +67,7 @@ func main() {
 	r := chi.NewRouter()
 
 	// Global middleware
+	r.Use(observe.Middleware("tenant-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
@@ -63,6 +75,7 @@ func main() {
 	r.Use(chimiddleware.Compress(5))
 
 	// Health endpoints (no auth required)
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"tenant-service"}`)

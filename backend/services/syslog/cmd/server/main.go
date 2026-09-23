@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/syslog/internal/listener"
 	"github.com/cyberradar/platform/services/syslog/internal/parser"
 	"github.com/cyberradar/platform/services/syslog/internal/publisher"
@@ -114,13 +115,11 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok","service":"syslog-connector","listeners":{"udp":"%s","tcp":"%s","tls":"%s"}}`,
 			udpAddr, tcpAddr, tlsAddr)
 	})
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// Minimal Prometheus-compatible metrics stub
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "# HELP syslog_connector_up Whether the syslog connector is running\n")
-		fmt.Fprintf(w, "# TYPE syslog_connector_up gauge\n")
-		fmt.Fprintf(w, "syslog_connector_up 1\n")
-	})
+	// The connector has no HTTP API to instrument, so it exposes the platform
+	// registry for its Go runtime and process metrics. Ingestion counters —
+	// messages parsed, parse failures per format — belong here too and are not
+	// written yet.
+	http.Handle("/metrics", observe.MetricsHandler())
 
 	go func() {
 		logger.Info().Str("addr", ":"+healthPort).Msg("health endpoint started")
