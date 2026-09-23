@@ -275,9 +275,29 @@ Aucun déploiement production sans cette phase.
   appel réseau, mais un changement de droits ne prend effet qu'au jeton suivant. La durée de vie du
   jeton d'accès (60 min par défaut) borne donc la révocation ; la réduire si le besoin l'exige.
 
-- **Observabilité** : instrumenter OpenTelemetry + Prometheus (les bibliothèques sont déjà déclarées).
-- **Vault** : client réel dans `internal/pkg`, injection des secrets au démarrage.
-- **README** et documentation d'onboarding (absents).
+- **Observabilité** — *fait.* `internal/pkg/observe` fournit un middleware HTTP unique qui produit à la
+  fois un compteur de requêtes, un histogramme de latence dont les seuils encadrent la cible de
+  200 ms, et un span OTLP qui prolonge une trace entrante. Câblé dans les 31 services, monté **avant**
+  l'authentification pour que les requêtes rejetées soient comptées. Le label `route` est le motif
+  chi, jamais le chemin brut ; une requête non routée est étiquetée `unmatched`, de sorte qu'un
+  scanner ne peut pas créer une série temporelle par sonde. `prometheus.yml` listait déjà une cible
+  par service : elles n'avaient simplement rien à scruter.
+
+  Reste : `pipeline-worker` est scruté sur `:9100` mais n'expose aucun serveur HTTP ; et le
+  connecteur syslog n'expose que les métriques Go/process, pas encore ses compteurs d'ingestion
+  (messages traités, échecs de parsing par format) — les plus utiles sur le chemin le plus volumineux.
+
+- **Vault** — *fait.* `internal/pkg/vault` lit un mount KV v2 et résout une valeur depuis Vault quand
+  il est configuré, depuis l'environnement sinon. Un échec de lecture Vault est signalé **même quand
+  le repli réussit**. `identity` y puise son URL de base et sa clé de signature, et journalise la
+  source de chacune.
+
+  Reste : les autres services lisent encore leurs secrets depuis l'environnement, et le jeton racine
+  de dev doit céder la place à AppRole ou à l'authentification Kubernetes, avec une policy par
+  service limitée à son propre chemin `crp/<service>/*`.
+
+- **README** — *fait* (`README.md` à la racine) : démarrage local, structure, conventions
+  d'authentification/autorisation/observabilité, pièges connus et points encore ouverts.
 
 ### Phase 2 — Combler les écarts fonctionnels · 8 à 12 semaines
 
