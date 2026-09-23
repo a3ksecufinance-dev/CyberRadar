@@ -11,6 +11,12 @@ vendor/
 *.test
 *.out
 
+# Compiled service binaries — `make build` writes 1.1 GB here
+backend/bin/
+
+# Redis snapshot, written wherever redis-server is started
+*.rdb
+
 # Env
 .env
 .env.*
