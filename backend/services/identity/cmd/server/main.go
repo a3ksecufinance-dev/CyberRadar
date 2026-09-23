@@ -13,6 +13,7 @@ import (
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/internal/pkg/observe"
+	pkgvault "github.com/cyberradar/platform/internal/pkg/vault"
 	"github.com/cyberradar/platform/services/identity/internal/handler"
 	"github.com/cyberradar/platform/services/identity/internal/repository"
 	"github.com/cyberradar/platform/services/identity/internal/service"
@@ -36,8 +37,23 @@ func main() {
 	}
 	defer func() { _ = shutdownTracing(context.Background()) }()
 
+	// ─── Secrets ─────────────────────────────────────────────
+	// Vault is optional: unconfigured, every value below comes from the
+	// environment exactly as before.
+	vaultClient, vaultErr := pkgvault.NewFromEnv()
+	if vaultErr != nil {
+		logger.Fatal().Err(vaultErr).Msg("vault is configured but unusable")
+	}
+	secrets := pkgvault.NewResolver(vaultClient, envOrDefault("VAULT_SECRET_PREFIX", "crp/identity"))
+	logger.Info().Bool("vault", secrets.Enabled()).Msg("secret source")
+
+	dsn, dsnFrom, err := secrets.Get(context.Background(), "database", "url", "DATABASE_URL")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("resolve database url")
+	}
+	logger.Info().Str("source", string(dsnFrom)).Msg("database url resolved")
+
 	// ─── Config ──────────────────────────────────────────────
-	dsn := mustEnv("DATABASE_URL")
 	port := envOrDefault("SERVICE_PORT", "8002")
 	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
 	if err != nil {
@@ -60,14 +76,29 @@ func main() {
 	userRepo := repository.NewUserRepository(dbPool)
 	roleRepo := repository.NewRoleRepository(dbPool)
 
-	// The private key lives only here: identity is the platform's sole token issuer.
-	jwtSigner, err := pkgjwt.NewSignerFromFile(
-		mustEnv("JWT_PRIVATE_KEY_PATH"),
-		time.Duration(jwtExpiryMin)*time.Minute,
-		time.Duration(refreshExpHrs)*time.Hour,
-	)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("load jwt private key")
+	// The private key lives only here: identity is the platform's sole token
+	// issuer. Vault is preferred because it keeps the key off the filesystem
+	// and out of the container's environment entirely.
+	accessTTL := time.Duration(jwtExpiryMin) * time.Minute
+	refreshTTL := time.Duration(refreshExpHrs) * time.Hour
+
+	var jwtSigner *pkgjwt.Signer
+	if secrets.Enabled() {
+		pem, _, keyErr := secrets.Get(context.Background(), "jwt", "private_key", "")
+		if keyErr != nil {
+			logger.Warn().Err(keyErr).Msg("jwt private key not in vault, falling back to file")
+		} else if jwtSigner, err = pkgjwt.NewSigner([]byte(pem), accessTTL, refreshTTL); err != nil {
+			logger.Fatal().Err(err).Msg("jwt private key from vault is unusable")
+		} else {
+			logger.Info().Str("source", string(pkgvault.FromVault)).Msg("jwt private key loaded")
+		}
+	}
+	if jwtSigner == nil {
+		jwtSigner, err = pkgjwt.NewSignerFromFile(mustEnv("JWT_PRIVATE_KEY_PATH"), accessTTL, refreshTTL)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("load jwt private key")
+		}
+		logger.Info().Str("source", "file").Msg("jwt private key loaded")
 	}
 	mfaSvc := service.NewMFAService(mfaIssuer)
 

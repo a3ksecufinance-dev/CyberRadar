@@ -265,6 +265,7 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=crp-vault-dev-token
+      - VAULT_SECRET_PREFIX=crp/identity
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - JWT_PRIVATE_KEY_PATH=/etc/crp/jwt/private.pem
       - JWT_EXPIRY_MINUTES=60

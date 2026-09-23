@@ -130,6 +130,9 @@ docker-build: ## Build Docker images for all services
 syslog-certs: ## Generate self-signed TLS certs for syslog connector (dev only)
 	./scripts/gen-syslog-certs.sh
 
+vault-seed: ## Load development secrets into Vault (dev only)
+	./scripts/vault-seed.sh
+
 jwt-keys: ## Generate the RSA key pair used to sign JWTs (dev only)
 	./scripts/gen-jwt-keys.sh
 
