@@ -80,12 +80,16 @@ func main() {
 	uebaHandler := handler.NewUEBAHandler(uebaSvc)
 
 	// ── Behavior Engine (Kafka consumer on crp.events.enriched) ───────────────
-	engineConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	engineConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-ueba-engine",
 		StartOffset: -1,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 
 	anomalyPublisher := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,

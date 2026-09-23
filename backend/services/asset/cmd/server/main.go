@@ -63,12 +63,16 @@ func main() {
 	assetHandler := handler.NewAssetHandler(assetSvc)
 
 	// ── Discovery worker (Kafka consumer) ────────────────────────────────────
-	discoveryConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	discoveryConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-asset-discovery",
 		StartOffset: -1, // LastOffset — only new events
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 	discoveryWorker := service.NewDiscoveryWorker(assetSvc, discoveryConsumer, logger)
 
 	go func() {

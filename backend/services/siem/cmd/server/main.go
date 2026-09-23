@@ -81,12 +81,16 @@ func main() {
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────
-	ruleConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	ruleConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-siem-rule-engine",
 		StartOffset: -1,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 
 	alertPublisher := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,

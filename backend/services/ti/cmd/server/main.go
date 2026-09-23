@@ -65,12 +65,16 @@ func main() {
 	tiHandler := handler.NewTIHandler(tiSvc)
 
 	// ── IOC Matcher (Kafka consumer on crp.events.enriched) ──────────────────
-	matcherConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	matcherConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-ti-ioc-matcher",
 		StartOffset: -1,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 
 	hitPublisher := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,

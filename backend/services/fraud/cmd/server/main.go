@@ -12,6 +12,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/observe"
@@ -119,11 +120,15 @@ func main() {
 
 // consumeTopic reads from a Kafka topic and logs events (hook for future parsing).
 func consumeTopic(ctx context.Context, brokers []string, topic, group string, logger zerolog.Logger) {
-	consumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
-		Brokers: brokers,
-		Topic:   topic,
-		GroupID: group,
+	consumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+		Brokers:  brokers,
+		Topic:    topic,
+		GroupID:  group,
+		DLQTopic: event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 	defer consumer.Close()
 
 	_ = consumer.Run(ctx, func(ctx context.Context, msg pkgkafka.Message) error {

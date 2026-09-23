@@ -89,13 +89,17 @@ func main() {
 	go proc.RunFlushLoop(ctx)
 
 	// ── Kafka consumer ────────────────────────────────────────────────────────
-	consumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	consumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicNormalized,
 		GroupID:     groupID,
 		StartOffset: -2, // kafka.FirstOffset
 		MaxBytes:    10 << 20,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 	defer consumer.Close()
 
 	// Graceful shutdown

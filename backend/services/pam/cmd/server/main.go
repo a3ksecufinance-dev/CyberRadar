@@ -63,12 +63,16 @@ func main() {
 	pamHandler := handler.NewPAMHandler(pamSvc)
 
 	// ── Risk Engine (Kafka consumer on crp.events.enriched) ──────────────────
-	riskConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	riskConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-pam-risk-engine",
 		StartOffset: -1, // LastOffset — only new events
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 	riskEngine := service.NewRiskEngine(pamRepo, riskConsumer, logger)
 
 	go func() {
