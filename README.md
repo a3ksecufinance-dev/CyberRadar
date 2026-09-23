@@ -158,6 +158,21 @@ que les requêtes rejetées soient comptées : un pic de 401 est précisément c
 qu'un opérateur doit voir. Le label `route` est toujours le motif chi, jamais le
 chemin brut — sinon un identifiant par requête ferait exploser la cardinalité.
 
+### Compteurs de détection
+
+Les seuils SIEM et les compteurs UEBA (vélocité, brute-force) passent par
+`cache.Window`, adossé à Redis, et non par une map de processus : un seuil doit
+valoir pour le service, pas pour la réplica qui a reçu l'événement.
+
+```go
+count, _ := window.Count(ctx, tenantID+"|"+entityID, 5*time.Minute)
+```
+
+`Count` ne renvoie jamais d'erreur : sans Redis il compte en mémoire plutôt que
+de rendre une erreur qu'un appelant lirait comme « aucun événement ». La
+dégradation se lit dans `crp_sliding_window_fallback_total` — à surveiller, car
+elle signifie que les seuils sont redevenus locaux à chaque réplica.
+
 ### Secrets
 
 `internal/pkg/vault` lit Vault quand il est configuré, l'environnement sinon.
@@ -199,10 +214,12 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
   `block_ip`, `isolate_host` et consorts renvoient des valeurs figées.
 - **Neo4j est absent.** Attack Path et Knowledge Graph tournent sur PostgreSQL.
 - **Pas de magasin vectoriel.** Le Copilot n'a pas de RAG.
-- **Kafka sans DLQ ni backoff.** Une erreur de traitement rejoue indéfiniment ou
-  disparaît. Inacceptable en l'état pour un SIEM.
-- **Les compteurs SIEM/UEBA/PAM sont en mémoire.** Ils ne survivent ni au
-  redémarrage ni à la mise à l'échelle horizontale.
+- **Les compteurs « 7 jours » du PAM ne décroissent jamais.** `Events7d`,
+  `EventsToday` et `AnomalyCount30d` ne sont jamais remis à zéro : ce sont des
+  compteurs à vie présentés à l'analyste comme des fenêtres glissantes.
+- **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
+  de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
+  sous pression mémoire — donc perdre un seuil sans bruit.
 - **Sept pages frontend affichent des données figées** : `ot`, `risk`, `ir`,
   `scs`, `attackpath`, `compliance`, `settings`.
 - **Les appels machine ne sont pas authentifiés individuellement.**

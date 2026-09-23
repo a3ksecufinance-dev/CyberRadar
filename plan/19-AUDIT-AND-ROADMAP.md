@@ -165,8 +165,9 @@ de `govulncheck` / `npm audit` en CI.
 | Gap | Localisation | Impact |
 |---|---|---|
 | **Le SOAR ne remédie rien** | `soar/internal/service/executor.go:108-196` | L'orchestration (séquençage, abort-on-failure, timeouts, persistance) est réelle et bien construite, mais `block_ip`, `disable_user`, `isolate_host`, `add_to_blocklist` retournent des maps figées. Commentaire ligne 106 l'admet. |
-| **Compteurs en mémoire intra-processus** | `siem/engine.go:194-221`, `pam/risk.go`, `ueba/engine.go:44-49` | Seuils, vélocité et brute-force perdus au redémarrage et non partagés entre réplicas. `internal/pkg/cache` (Redis) existe et n'est pas utilisé ici. Bloque la scalabilité horizontale. |
-| **Kafka sans DLQ ni backoff** | `internal/pkg/kafka/consumer.go` | `event.TopicDLQ` et `DLQMessage` sont définis dans `schema.go`, **rien ne publie dedans**. Une erreur de handler provoque soit un retry infini, soit un drop silencieux. Perte de données inacceptable pour un SIEM (valeur probatoire). |
+| ~~**Compteurs en mémoire intra-processus**~~ — *corrigé* | `internal/pkg/cache/window.go` | Seuils SIEM, vélocité et brute-force UEBA comptent désormais dans un sorted set Redis partagé par toutes les réplicas. Voir §3.1. |
+| ~~**Kafka sans DLQ ni backoff**~~ — *corrigé* | `internal/pkg/kafka/consumer.go` | `DLQTopic` est obligatoire : un consumer sans DLQ refuse de se construire. Retry avec backoff exponentiel, puis parking dans `crp.events.dlq`. |
+| **Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais** | `pam/internal/service/risk.go:72-93`, `model/risk.go:35-43` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
 | Neo4j absent | — | Attack Path (D8) et Knowledge Graph (D9) tournent sur PostgreSQL. Les traversées multi-sauts et le plus court chemin d'attaque sont impraticables en SQL relationnel. |
 | pgvector / Qdrant absent | — | Copilot sans RAG sémantique |
 | Enrichissement pipeline | `pipeline/enricher/threat.go:38,104`, `geo.go:37` | GeoIP et matching IOC : stubs TODO |
@@ -175,6 +176,40 @@ de `govulncheck` / `npm audit` en CI.
 | **7 pages frontend en données figées** | `ot`, `risk`, `ir`, `scs`, `attackpath`, `compliance`, `settings` | Tableaux `mockRisks`, `mockIncidents`… définis dans le fichier de page, sans état loading/error. `useOT.ts` existe intégralement mais `ot/page.tsx` ne l'importe jamais. |
 | **Aucun graphique** | `recharts` déclaré, jamais importé | `useKPITimeseries` existe, aucune page ne l'utilise. Produit de dashboards sans visualisation. |
 | **Zéro test, zéro CI/CD** | — | Aucun filet de sécurité sur 32 services. Une CI exécutant `go build`, `tsc --noEmit` et `next build` aurait intercepté les défauts 2.7 et 2.8 au premier commit. |
+
+### 3.1 Compteurs de détection partagés — ce qui a été fait
+
+`internal/pkg/cache.Window` compte les occurrences dans une fenêtre glissante, avec un sorted set
+Redis : un membre par occurrence, scoré par horodatage. Purger la fenêtre est un `ZREMRANGEBYSCORE`,
+compter un `ZCARD`, le tout dans une transaction pour que deux réplicas ne se perdent pas
+d'incrément.
+
+Ce que cela corrige concrètement : une règle « cinq échecs d'authentification en cinq minutes » ne
+se déclenchait pas face à un attaquant réparti par le load balancer à quatre tentatives sur chacune
+de deux réplicas. Un test le démontre — il échoue sur l'ancien compteur intra-processus.
+
+Trois décisions qui méritent d'être connues :
+
+- **Scores en millisecondes, pas en nanosecondes.** Les scores d'un sorted set sont des `float64`,
+  qui cessent de représenter les entiers consécutifs au-delà de 2^53 — seuil qu'un epoch en
+  nanosecondes a franchi en 1970. L'unicité vient du membre (un UUID), pas du score : deux
+  événements dans la même milliseconde comptent bien pour deux.
+- **`Count` ne renvoie jamais d'erreur.** Une panne Redis dégrade vers un comptage intra-processus
+  au lieu de remonter une erreur qu'un appelant pourrait traiter comme « aucun événement ». Un
+  moteur de détection qui cesse de compter quand son cache cligne des yeux est un moteur qui rate
+  l'attaque. La dégradation est en revanche bruyante : log d'erreur limité à un par 30 s (l'échec
+  est par événement — une panne Redis ne doit pas devenir une panne de logs) et compteur
+  `crp_sliding_window_fallback_total`, qui couvre aussi le cas d'un service démarré sans `REDIS_URL`.
+  Une seule alerte suffit donc pour les deux situations.
+- **Le repli en mémoire balaie ses clés.** Les maps remplacées ne supprimaient jamais rien : un seul
+  événement d'une entité y immobilisait sa slice pour la durée du processus.
+
+**Point d'exploitation à trancher avant la production.** Le Redis de développement tourne en
+`--maxmemory-policy allkeys-lru` (`docker-compose.yml`). Sous pression mémoire, cette politique peut
+évincer une clé de comptage — donc faire disparaître silencieusement des seuils de détection. En
+production, les compteurs de détection doivent viser une instance en `noeviction`, distincte du
+cache applicatif. Un numéro de base Redis ne suffit pas : la politique d'éviction est réglée par
+instance, pas par base.
 
 ---
 
@@ -305,8 +340,13 @@ Aucun déploiement production sans cette phase.
   C'est le différenciateur produit le plus important qui manque.
 - **Neo4j** + migration des modèles `attackpath` et `knowledgegraph`. Plus la migration est tardive,
   plus la réécriture des couches repository/service coûte cher.
-- **État partagé Redis** pour les compteurs SIEM/UEBA/PAM — prérequis à la scalabilité horizontale.
-- **DLQ + backoff exponentiel** sur Kafka. Non négociable pour un SIEM.
+- **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
+  partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).
+- **DLQ + backoff exponentiel** sur Kafka — *fait*.
+- **Corriger les compteurs du PAM** : les recalculer par fenêtre depuis les événements déjà stockés
+  (ClickHouse), plutôt que de les incrémenter. Une fenêtre Redis ne convient pas ici : `Events7d`
+  compte *tous* les événements d'une identité sur sept jours, ce qui ferait des millions de membres
+  par identité. Le même passage supprime la perte de mise à jour entre réplicas.
 - **pgvector** (plus simple que Qdrant, déjà sur PostgreSQL) + RAG Copilot.
 - Enrichissement pipeline : GeoIP (MaxMind) + matching IOC contre le service TI.
 - **Multi-tenancy syslog** : mapping IP source / certificat client → tenant.
