@@ -282,19 +282,24 @@ func TestThresholdIsSharedBetweenReplicas(t *testing.T) {
 	// The reason the counter left process memory: with two replicas, a rule
 	// needing three hits used to need three hits *on the same replica*. An
 	// attacker load-balanced across them never tripped it.
-	url := os.Getenv("REDIS_TEST_URL")
-	if url == "" {
+	// Setting REDIS_TEST_URL makes a missing Redis a failure rather than a
+	// skip, so this test cannot pass in CI by never running.
+	url, required := os.LookupEnv("REDIS_TEST_URL")
+	if !required {
 		url = "redis://localhost:6379/9"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	client, err := cache.NewFromURL(ctx, url, zerolog.Nop())
 	if err != nil || client == nil {
-		t.Skipf("bad Redis URL %s: %v", url, err)
+		t.Fatalf("REDIS_TEST_URL %q will not parse: %v", url, err)
 	}
 	defer client.Close()
 	if err := client.Ping(ctx); err != nil {
+		if required {
+			t.Fatalf("REDIS_TEST_URL is set to %s but nothing answers there: %v", url, err)
+		}
 		t.Skipf("no Redis at %s: %v", url, err)
 	}
 

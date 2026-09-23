@@ -106,28 +106,42 @@ func TestLocalCountIsSafeUnderConcurrency(t *testing.T) {
 
 // ─── Redis-backed ─────────────────────────────────────────────────────────────
 
-// redisWindow returns a Redis-backed window, or skips when no Redis is
-// reachable. CI runs a Redis service so this path is never silently skipped
-// there.
-func redisWindow(t *testing.T, name string) *Window {
+// testRedis connects to the Redis these tests need.
+//
+// Skipping when none is reachable keeps the suite usable on a laptop, but a
+// skip is indistinguishable from a pass in CI output — so setting
+// REDIS_TEST_URL turns the skip into a failure. CI sets it, which is what
+// stops the shared-counter path from passing by never running.
+func testRedis(t *testing.T) *Client {
 	t.Helper()
 
-	url := os.Getenv("REDIS_TEST_URL")
-	if url == "" {
+	url, required := os.LookupEnv("REDIS_TEST_URL")
+	if !required {
 		url = "redis://localhost:6379/9"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	c, err := NewFromURL(ctx, url, zerolog.Nop())
 	if err != nil || c == nil {
-		t.Skipf("bad Redis URL %s: %v", url, err)
-	}
-	if err := c.Ping(ctx); err != nil {
-		_ = c.Close()
-		t.Skipf("no Redis at %s: %v", url, err)
+		t.Fatalf("REDIS_TEST_URL %q will not parse: %v", url, err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
+
+	if err := c.Ping(ctx); err != nil {
+		if required {
+			t.Fatalf("REDIS_TEST_URL is set to %s but nothing answers there: %v", url, err)
+		}
+		t.Skipf("no Redis at %s (set REDIS_TEST_URL to require one): %v", url, err)
+	}
+	return c
+}
+
+// redisWindow returns a Redis-backed window named for this test.
+func redisWindow(t *testing.T, name string) *Window {
+	t.Helper()
+
+	c := testRedis(t)
 
 	w := NewWindow(c, name, zerolog.Nop())
 	t.Cleanup(func() {
