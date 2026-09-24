@@ -174,6 +174,7 @@ de `govulncheck` / `npm audit` en CI.
 | Envoi d'e-mail | `notification/internal/service/notification.go:138-145` | Stub, aucun SMTP |
 | Agrégation stats tenant | `tenant/internal/handler/tenant.go:179` | TODO |
 | **7 pages frontend en données figées** | `ot`, `risk`, `ir`, `scs`, `attackpath`, `compliance`, `settings` | Tableaux `mockRisks`, `mockIncidents`… définis dans le fichier de page, sans état loading/error. `useOT.ts` existe intégralement mais `ot/page.tsx` ne l'importe jamais. |
+| **Messages d'erreur incohérents** — *corrigé* | `internal/pkg/response` | `response.NotFound` ajoutait « not found » à ce qu'on lui passait alors que la plupart des 25 appelants passaient déjà un message complet : les réponses sortaient en « X not found not found », préfixées du tag interne `[NOT_FOUND]`. Le helper prend désormais un message, comme `Forbidden` et `Conflict`. |
 | **Aucun graphique** | `recharts` déclaré, jamais importé | `useKPITimeseries` existe, aucune page ne l'utilise. Produit de dashboards sans visualisation. |
 | **Zéro test, zéro CI/CD** | — | Aucun filet de sécurité sur 32 services. Une CI exécutant `go build`, `tsc --noEmit` et `next build` aurait intercepté les défauts 2.7 et 2.8 au premier commit. |
 
@@ -210,6 +211,55 @@ Trois décisions qui méritent d'être connues :
 production, les compteurs de détection doivent viser une instance en `noeviction`, distincte du
 cache applicatif. Un numéro de base Redis ne suffit pas : la politique d'éviction est réglée par
 instance, pas par base.
+
+### 3.2 Identité de service — ce qui a été fait
+
+Jusqu'ici tout appelant était une personne. Les endpoints écrits pour des
+machines — l'ingestion du `collector`, l'API d'écriture de l'`audit` — ne
+pouvaient donc être protégés que par « un jeton valide quelconque » : le jeton
+d'un analyste y passait, et aucune machine ne pouvait être révoquée sans
+désactiver un humain.
+
+Un compte de service est une identité de type `service_account` — le type
+existait déjà dans `identities` sans jamais servir. Rôles et permissions
+viennent de `identity_roles`, donc le catalogue RBAC gouverne les machines sans
+modèle parallèle. La table `service_accounts` (migration `000031`) n'ajoute que
+ce qu'une machine a de particulier : un credential client, une échéance de
+rotation, une portée.
+
+Le credential s'échange contre un jeton de 15 minutes sur
+`POST /api/v1/auth/service-token`, qui porte une revendication `svc`. Pas de
+refresh token : une machine détient un credential et peut redemander un jeton
+quand elle veut, un refresh ne serait qu'un second secret à protéger.
+
+Décisions à connaître :
+
+- **Deux gardes, pas une.** `RequireServiceAccount` **et** la permission. La
+  permission seule ne suffit pas : elle s'accorde à un rôle, et un rôle donné
+  par erreur à une personne ouvrirait la route sans bruit. Vérifié en vrai :
+  un jeton de **super admin** reçoit 403 sur `/events/ingest`.
+- **Tout jeton nomme exactement un tenant.** Un compte `tenant` n'obtient que
+  le sien ; un compte `platform` doit nommer celui pour lequel il agit. Il
+  n'existe pas de jeton « tous tenants », parce qu'un handler qui lit
+  `tenant_id` devrait alors en inventer un — c'est ainsi que l'isolation se
+  perd.
+- **La portée `platform` est un droit large**, donc réservée au super admin à
+  la création et journalisée à chaque émission avec `cross_tenant: true`.
+  C'est elle qui débloquera le SOAR autonome.
+- **Un `client_id` inconnu est comparé à un hash leurre**, pour que « compte
+  inexistant » et « mauvais secret » prennent le même temps : sinon
+  l'endpoint révèle quels `client_id` existent.
+
+**Défaut trouvé en exécutant, pas en relisant.** La validation du `tenant_id`
+était `uuid4`. Or les identifiants de tenant de la plateforme ne sont pas des
+UUID v4 (`00000000-0000-0000-0000-000000000001`), donc toute demande
+légitime d'un compte `platform` échouait en 422 — le mécanisme entier aurait
+été inutilisable, avec un message d'erreur trompeur. Corrigé en `uuid`.
+
+**Reste ouvert.** Les credentials des comptes de service devraient être
+distribués par Vault, pas par variable d'environnement : `internal/pkg/vault`
+existe, le raccordement reste à faire. Et rien n'utilise encore
+`internal/pkg/svcauth` : il attend les actions SOAR réelles.
 
 ---
 
@@ -297,10 +347,9 @@ Aucun déploiement production sans cette phase.
   - `audit` → `audit:read` en lecture, `audit:export` à l'export — l'export d'une piste d'audit
     n'est pas sa consultation.
 
-  **Seule exception : `collector`.** Ses deux routes (`POST /events/ingest`, `/events/heartbeat`)
-  sont des appels machine sans utilisateur derrière. Idem pour `POST /audit/events`, laissée
-  ouverte au sein d'un `audit` par ailleurs protégé. Les deux attendent l'identité de service
-  prévue en Phase 2 ; elles restent couvertes par `RequireJWT`.
+  **`collector` et `POST /audit/events` faisaient exception** — appels machine sans utilisateur
+  derrière, donc protégés par `RequireJWT` seul. Ce n'est plus le cas : ils exigent maintenant un
+  compte de service **et** la permission (`events:ingest`, `audit:write`). Voir §3.2.
 
   **À revoir avant production.** La matrice de `000030` suit les descriptions de rôles seedées en
   `000002` et constitue un point de départ défendable, pas une politique de sécurité arrêtée :
@@ -336,8 +385,11 @@ Aucun déploiement production sans cette phase.
 
 ### Phase 2 — Combler les écarts fonctionnels · 8 à 12 semaines
 
-- **SOAR réel** : les actions appellent les services de remédiation (possible grâce à 0.2).
-  C'est le différenciateur produit le plus important qui manque.
+- **Identité de service** — *fait*, voir §3.2. Débloque `collector`, l'écriture
+  d'audit, et le SOAR autonome (portée `platform`).
+- **SOAR réel** : les actions appellent les services de remédiation, avec
+  `internal/pkg/svcauth` et un compte de service `platform`. C'est le
+  différenciateur produit le plus important qui manque.
 - **Neo4j** + migration des modèles `attackpath` et `knowledgegraph`. Plus la migration est tardive,
   plus la réécriture des couches repository/service coûte cher.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas

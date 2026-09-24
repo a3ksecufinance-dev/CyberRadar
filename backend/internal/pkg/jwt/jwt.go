@@ -34,6 +34,13 @@ type Claims struct {
 	// effect on the next token, so access token lifetime bounds revocation.
 	Perms   []string `json:"perms,omitempty"`
 	IsAdmin bool     `json:"is_admin"`
+
+	// ServiceID names the service account behind a machine-to-machine call,
+	// and is empty for a person's token. A route meant only for machines can
+	// then refuse a human's token outright rather than hope no role grants
+	// the permission by accident.
+	ServiceID string `json:"svc,omitempty"`
+
 	gojwt.RegisteredClaims
 }
 
@@ -45,6 +52,9 @@ type Subject struct {
 	Roles       []string
 	Permissions []string
 	IsAdmin     bool
+
+	// ServiceID is set only for a service account, and names it.
+	ServiceID string
 }
 
 // TokenPair holds an access token and a refresh token.
@@ -150,12 +160,13 @@ func (s *Signer) GenerateTokenPair(sub Subject) (*TokenPair, error) {
 	expiresAt := now.Add(s.accessTokenExpiry)
 
 	accessClaims := &Claims{
-		TenantID: sub.TenantID,
-		UserID:   sub.UserID,
-		Email:    sub.Email,
-		Roles:    sub.Roles,
-		Perms:    sub.Permissions,
-		IsAdmin:  sub.IsAdmin,
+		TenantID:  sub.TenantID,
+		UserID:    sub.UserID,
+		Email:     sub.Email,
+		Roles:     sub.Roles,
+		Perms:     sub.Permissions,
+		IsAdmin:   sub.IsAdmin,
+		ServiceID: sub.ServiceID,
 		RegisteredClaims: gojwt.RegisteredClaims{
 			Subject:   sub.UserID,
 			IssuedAt:  gojwt.NewNumericDate(now),
@@ -189,6 +200,52 @@ func (s *Signer) GenerateTokenPair(sub Subject) (*TokenPair, error) {
 		ExpiresAt:    expiresAt,
 		TokenType:    "Bearer",
 	}, nil
+}
+
+// GenerateServiceToken mints an access token for a service account.
+//
+// There is no refresh token: a machine holds a credential and can ask for a
+// new token whenever it needs one, so a refresh token would only be a second,
+// longer-lived secret to protect. ttl is usually shorter than a person's
+// session for the same reason — re-authenticating costs a machine nothing.
+//
+// It refuses a Subject with no ServiceID. A service token that does not say
+// which service it belongs to cannot be revoked, attributed in an audit trail,
+// or distinguished from a person's by the middleware.
+func (s *Signer) GenerateServiceToken(sub Subject, ttl time.Duration) (*TokenPair, error) {
+	if strings.TrimSpace(sub.ServiceID) == "" {
+		return nil, fmt.Errorf("service token requires a ServiceID")
+	}
+	if ttl <= 0 {
+		ttl = s.accessTokenExpiry
+	}
+
+	now := time.Now()
+	expiresAt := now.Add(ttl)
+
+	claims := &Claims{
+		TenantID:  sub.TenantID,
+		UserID:    sub.UserID,
+		Email:     sub.Email,
+		Roles:     sub.Roles,
+		Perms:     sub.Permissions,
+		IsAdmin:   sub.IsAdmin,
+		ServiceID: sub.ServiceID,
+		RegisteredClaims: gojwt.RegisteredClaims{
+			Subject:   sub.UserID,
+			IssuedAt:  gojwt.NewNumericDate(now),
+			ExpiresAt: gojwt.NewNumericDate(expiresAt),
+			ID:        uuid.NewString(),
+			Issuer:    Issuer,
+		},
+	}
+
+	token, err := gojwt.NewWithClaims(gojwt.SigningMethodRS256, claims).SignedString(s.key)
+	if err != nil {
+		return nil, fmt.Errorf("sign service token: %w", err)
+	}
+
+	return &TokenPair{AccessToken: token, ExpiresAt: expiresAt, TokenType: "Bearer"}, nil
 }
 
 // Validate parses an access token the Signer itself minted.

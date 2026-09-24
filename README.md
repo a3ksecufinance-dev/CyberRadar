@@ -158,6 +158,48 @@ que les requêtes rejetées soient comptées : un pic de 401 est précisément c
 qu'un opérateur doit voir. Le label `route` est toujours le motif chi, jamais le
 chemin brut — sinon un identifiant par requête ferait exploser la cardinalité.
 
+### Identité de service
+
+Les appels machine ne sont plus « un jeton valide quelconque ». Un compte de
+service est une identité de type `service_account` : rôles et permissions
+viennent de `identity_roles`, donc le catalogue RBAC s'applique aux machines
+sans modèle parallèle.
+
+```bash
+# 1. l'administrateur crée le compte — le secret n'est affiché qu'ici
+curl -X POST localhost:8002/api/v1/service-accounts \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"client_id":"collector-agent-bankA","scope":"tenant",
+       "role_ids":["10000000-0000-0000-0000-000000000012"],"expires_in_days":90}'
+
+# 2. la machine échange son credential contre un jeton de 15 minutes
+curl -X POST localhost:8002/api/v1/auth/service-token \
+  -d '{"client_id":"collector-agent-bankA","client_secret":"..."}'
+```
+
+Côté service Go, `internal/pkg/svcauth` s'en charge : il récupère le jeton, le
+met en cache et le renouvelle avant expiration.
+
+Protéger une route réservée aux machines :
+
+```go
+r.Use(authmw.RequireServiceAccount())          // 403 pour un humain
+r.Use(authmw.RequirePermission("events:ingest"))
+```
+
+> Les deux sont nécessaires. La permission seule ne suffit pas : elle s'accorde
+> à un rôle, et un rôle donné par erreur à une personne ouvrirait la route en
+> silence. Exiger que le jeton nomme un compte de service rend cette erreur
+> inexprimable par simple attribution.
+
+**Deux portées.** `tenant` (par défaut) : le jeton est toujours pour le tenant
+du compte — un agent d'ingestion chez une banque ne peut pas écrire pour une
+autre. `platform` : le compte nomme explicitement le tenant pour lequel il agit,
+ce qui permet à un seul SOAR de traiter l'alerte de n'importe quel client. C'est
+un droit large, donc réservé au super admin à la création et journalisé à chaque
+émission (`cross_tenant: true`). **Il n'existe aucun jeton « tous tenants »** :
+tout jeton nomme exactement un tenant.
+
 ### Compteurs de détection
 
 Les seuils SIEM et les compteurs UEBA (vélocité, brute-force) passent par
@@ -222,8 +264,9 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
   sous pression mémoire — donc perdre un seuil sans bruit.
 - **Sept pages frontend affichent des données figées** : `ot`, `risk`, `ir`,
   `scs`, `attackpath`, `compliance`, `settings`.
-- **Les appels machine ne sont pas authentifiés individuellement.**
-  `collector` et `POST /audit/events` attendent une identité de service.
+- **Les agents d'ingestion déployés doivent être re-provisionnés.**
+  `POST /events/ingest`, `/events/heartbeat` et `POST /audit/events` exigent
+  désormais un compte de service ; un jeton utilisateur y reçoit un 403.
 - **La matrice de permissions est un point de départ**, pas une politique
   arrêtée. À revoir avant production.
 

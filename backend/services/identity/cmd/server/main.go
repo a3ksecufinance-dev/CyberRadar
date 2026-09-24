@@ -75,6 +75,7 @@ func main() {
 	// ─── Wiring ──────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(dbPool)
 	roleRepo := repository.NewRoleRepository(dbPool)
+	serviceAccountRepo := repository.NewServiceAccountRepository(dbPool)
 
 	// The private key lives only here: identity is the platform's sole token
 	// issuer. Vault is preferred because it keeps the key off the filesystem
@@ -104,7 +105,10 @@ func main() {
 
 	userSvc := service.NewUserService(userRepo, roleRepo, jwtSigner, mfaSvc, logger)
 
+	serviceAccountSvc := service.NewServiceAccountService(serviceAccountRepo, roleRepo, jwtSigner, logger)
+
 	authHandler := handler.NewAuthHandler(userSvc)
+	serviceAccountHandler := handler.NewServiceAccountHandler(serviceAccountSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 
 	// ─── Router ──────────────────────────────────────────────
@@ -130,13 +134,18 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public auth routes (no JWT required)
+		// Public auth routes: reached with a password or a client credential,
+		// so they cannot sit behind RequireJWT.
 		authHandler.RegisterPublicRoutes(r)
+		serviceAccountHandler.RegisterPublicRoutes(r)
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {
 			r.Use(authmw.RequireJWT(jwtVerifier, logger))
 			authHandler.RegisterProtectedRoutes(r)
+
+			// Machine credentials, gated per route by api_keys:*.
+			serviceAccountHandler.RegisterProtectedRoutes(r)
 
 			// User and identity administration; /auth/me and /auth/logout above
 			// stay reachable by any authenticated caller.

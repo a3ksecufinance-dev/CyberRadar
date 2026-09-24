@@ -40,11 +40,15 @@ func (h *AuditHandler) RegisterRoutes(r chi.Router) {
 		r.With(authmw.RequirePermission("audit:read")).Get("/events/{id}", h.GetByID)
 		r.With(authmw.RequirePermission("audit:export")).Post("/export", h.Export)
 
-		// Written by other CRP services, not by end users, so it carries no
-		// user permission. It stays gated only by RequireJWT until services get
-		// an identity of their own; the handler already checks the payload's
-		// tenant against the token's.
-		r.Post("/events", h.Write)
+		// Written by other CRP services, never by a person. Both gates are
+		// needed: audit:write is the authority, and RequireServiceAccount
+		// stops a human token from reaching it even if some role is granted
+		// audit:write by mistake. Appending to an audit trail from a browser
+		// session is never legitimate.
+		r.With(
+			authmw.RequireServiceAccount(),
+			authmw.RequirePermission("audit:write"),
+		).Post("/events", h.Write)
 	})
 }
 

@@ -220,3 +220,91 @@ func TestVerifierRejectsMalformedPEM(t *testing.T) {
 		t.Fatal("NewVerifier accepted malformed PEM")
 	}
 }
+
+// ─── Service tokens ───────────────────────────────────────────────────────────
+
+func TestServiceTokenCarriesItsServiceID(t *testing.T) {
+	signer, verifier, _ := newPair(t)
+
+	tokens, err := signer.GenerateServiceToken(Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "collector-agent-01",
+		Permissions: []string{"events:ingest"},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+
+	claims, err := verifier.Validate(tokens.AccessToken)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if claims.ServiceID != "collector-agent-01" {
+		t.Errorf("ServiceID = %q, want collector-agent-01", claims.ServiceID)
+	}
+	if claims.TenantID != testTenant {
+		t.Errorf("TenantID = %q, want %s", claims.TenantID, testTenant)
+	}
+}
+
+func TestServiceTokenRequiresAServiceID(t *testing.T) {
+	// A token that does not say which service it belongs to cannot be revoked,
+	// attributed, or told apart from a person's.
+	signer, _, _ := newPair(t)
+	if _, err := signer.GenerateServiceToken(Subject{
+		TenantID: testTenant, UserID: testUser,
+	}, time.Minute); err == nil {
+		t.Error("a service token with no ServiceID was minted")
+	}
+}
+
+func TestServiceTokenHasNoRefreshToken(t *testing.T) {
+	// A machine holds a credential and can re-authenticate at will, so a
+	// refresh token would only be a second long-lived secret to protect.
+	signer, _, _ := newPair(t)
+	tokens, err := signer.GenerateServiceToken(Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "soar",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+	if tokens.RefreshToken != "" {
+		t.Error("a service token came with a refresh token")
+	}
+}
+
+func TestServiceTokenHonoursItsTTL(t *testing.T) {
+	signer, _, _ := newPair(t)
+	const ttl = 90 * time.Second
+
+	tokens, err := signer.GenerateServiceToken(Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "soar",
+	}, ttl)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+
+	// The signer's own access expiry is 15 minutes; the argument must win.
+	if d := time.Until(tokens.ExpiresAt); d > 2*time.Minute {
+		t.Errorf("expires in %v, want about %v — the ttl argument was ignored", d, ttl)
+	}
+}
+
+func TestAUserTokenNamesNoService(t *testing.T) {
+	// RequireServiceAccount relies on this: a person's token must never look
+	// like a machine's.
+	signer, verifier, _ := newPair(t)
+	tokens, err := signer.GenerateTokenPair(Subject{
+		TenantID: testTenant, UserID: testUser, Email: "a@b.c",
+	})
+	if err != nil {
+		t.Fatalf("GenerateTokenPair: %v", err)
+	}
+
+	claims, err := verifier.Validate(tokens.AccessToken)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if claims.ServiceID != "" {
+		t.Errorf("a user token carries ServiceID %q", claims.ServiceID)
+	}
+}

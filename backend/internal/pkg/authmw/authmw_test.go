@@ -263,3 +263,107 @@ func TestForbiddenBodyIsValidJSON(t *testing.T) {
 		t.Errorf("body = %s, want %s", body, want)
 	}
 }
+
+// ─── Service accounts ─────────────────────────────────────────────────────────
+
+// serveChain runs one request through RequireJWT plus extra middleware.
+func serveChain(t *testing.T, verifier *jwt.Verifier, token string, extra ...func(http.Handler) http.Handler) (status int, reached bool) {
+	t.Helper()
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+	for i := len(extra) - 1; i >= 0; i-- {
+		h = extra[i](h)
+	}
+	h = RequireJWT(verifier, zerolog.Nop())(h)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/events/ingest", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code, reached
+}
+
+func TestServiceTokenIdentifiesItsServiceToHandlers(t *testing.T) {
+	signer, verifier := newSignerVerifier(t)
+	tokens, err := signer.GenerateServiceToken(jwt.Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "collector-agent-01",
+		Permissions: []string{"events:ingest"},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+
+	_, reached, seen := serve(t, verifier, "Bearer "+tokens.AccessToken)
+	if !reached {
+		t.Fatal("handler not reached")
+	}
+	if seen.ServiceID != "collector-agent-01" {
+		t.Errorf("ServiceID = %q, want collector-agent-01", seen.ServiceID)
+	}
+}
+
+func TestRequireServiceAccountRejectsAPerson(t *testing.T) {
+	// The point of the middleware: even a person holding events:ingest — by a
+	// role granted in error — must not reach a machine-only route.
+	signer, verifier := newSignerVerifier(t)
+	tokens, err := signer.GenerateTokenPair(jwt.Subject{
+		TenantID: testTenant, UserID: testUser, Email: "analyst@bank.example",
+		Permissions: []string{"events:ingest"},
+	})
+	if err != nil {
+		t.Fatalf("GenerateTokenPair: %v", err)
+	}
+
+	status, reached := serveChain(t, verifier, tokens.AccessToken,
+		RequireServiceAccount(), RequirePermission("events:ingest"))
+
+	if reached {
+		t.Error("a person's token reached a service-account-only route")
+	}
+	if status != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", status, http.StatusForbidden)
+	}
+}
+
+func TestRequireServiceAccountAdmitsAService(t *testing.T) {
+	signer, verifier := newSignerVerifier(t)
+	tokens, err := signer.GenerateServiceToken(jwt.Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "collector-agent-01",
+		Permissions: []string{"events:ingest"},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+
+	status, reached := serveChain(t, verifier, tokens.AccessToken,
+		RequireServiceAccount(), RequirePermission("events:ingest"))
+
+	if !reached {
+		t.Errorf("the service account was turned away with %d", status)
+	}
+}
+
+func TestAServiceStillNeedsThePermission(t *testing.T) {
+	// Being a machine is not authorization. A collector agent must not reach
+	// the audit write API just because it holds a service token.
+	signer, verifier := newSignerVerifier(t)
+	tokens, err := signer.GenerateServiceToken(jwt.Subject{
+		TenantID: testTenant, UserID: testUser, ServiceID: "collector-agent-01",
+		Permissions: []string{"events:ingest"},
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateServiceToken: %v", err)
+	}
+
+	status, reached := serveChain(t, verifier, tokens.AccessToken,
+		RequireServiceAccount(), RequirePermission("audit:write"))
+
+	if reached {
+		t.Error("a service account reached a route it holds no permission for")
+	}
+	if status != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", status, http.StatusForbidden)
+	}
+}

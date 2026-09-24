@@ -27,6 +27,11 @@ type Identity struct {
 	Permissions  []string
 	IsSuperAdmin bool
 
+	// ServiceID names the service account behind this request, and is empty
+	// when a person is calling. Read it through IsService rather than
+	// comparing to "": a route for machines only should say so explicitly.
+	ServiceID string
+
 	// Token is the caller's raw bearer token, kept so a service calling another
 	// service on the caller's behalf can forward it and stay within the caller's
 	// own authorization scope. Never log it.
@@ -61,6 +66,19 @@ func Parse(tenantID, userID, email string, roles []string, isSuperAdmin bool) (I
 		Roles:        roles,
 		IsSuperAdmin: isSuperAdmin,
 	}, nil
+}
+
+// IsService reports whether this request comes from a service account rather
+// than a person.
+func IsService(ctx context.Context) bool {
+	id, _ := From(ctx)
+	return id.ServiceID != ""
+}
+
+// ServiceID returns the calling service account's name, or "" for a person.
+func ServiceID(ctx context.Context) string {
+	id, _ := From(ctx)
+	return id.ServiceID
 }
 
 // With returns a copy of ctx carrying id.

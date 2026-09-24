@@ -50,6 +50,7 @@ func RequireJWT(verifier *jwt.Verifier, logger zerolog.Logger) func(http.Handler
 			}
 			identity.Token = raw
 			identity.Permissions = claims.Perms
+			identity.ServiceID = claims.ServiceID
 
 			next.ServeHTTP(w, r.WithContext(authctx.With(r.Context(), identity)))
 		})
@@ -71,6 +72,29 @@ func RequirePermission(perm string) func(http.Handler) http.Handler {
 				//nolint:errcheck // nothing actionable if the client already hung up
 				fmt.Fprintf(w, `{"error":{"code":"FORBIDDEN","message":%q}}`,
 					"permission required: "+perm)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireServiceAccount rejects any request that is not made by a service
+// account. Mount it after RequireJWT, alongside the permission the route
+// needs.
+//
+// A permission alone is not enough for a machine-only route: permissions are
+// granted to roles, and a role granted to a person one day by mistake would
+// silently open the route. Requiring the token to name a service account makes
+// that mistake impossible to make by grant alone.
+func RequireServiceAccount() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !authctx.IsService(r.Context()) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				//nolint:errcheck // nothing actionable if the client already hung up
+				fmt.Fprint(w, `{"error":{"code":"FORBIDDEN","message":"this endpoint is for service accounts"}}`)
 				return
 			}
 			next.ServeHTTP(w, r)
