@@ -81,10 +81,17 @@ func Forbidden(w http.ResponseWriter, message string) {
 }
 
 // NotFound sends a 404 response.
-func NotFound(w http.ResponseWriter, resource string) {
+// NotFound answers 404 with message as given.
+//
+// It used to take a resource name and append " not found" itself, which none
+// of the other helpers do. Most callers passed a full message instead — a
+// domain error already reading "X not found" — so the answer came out as
+// "X not found not found". It now takes a message, like Unauthorized,
+// Forbidden and Conflict.
+func NotFound(w http.ResponseWriter, message string) {
 	write(w, http.StatusNotFound, Envelope{Error: &Error{
 		Code:    "NOT_FOUND",
-		Message: resource + " not found",
+		Message: message,
 	}})
 }
 

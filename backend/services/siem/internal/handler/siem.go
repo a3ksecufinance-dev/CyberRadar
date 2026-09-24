@@ -392,7 +392,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 func mapError(w http.ResponseWriter, err error) {
 	switch {
 	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
+		response.NotFound(w, "resource not found")
 	case apierrors.IsKind(err, apierrors.KindForbidden):
 		response.Forbidden(w, err.Error())
 	case apierrors.IsKind(err, apierrors.KindBadInput):

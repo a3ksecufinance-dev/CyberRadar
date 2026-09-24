@@ -217,13 +217,13 @@ func mapError(w http.ResponseWriter, err error) error {
 	}
 	switch {
 	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, err.Error())
+		response.NotFound(w, apierrors.Message(err))
 	case apierrors.IsKind(err, apierrors.KindConflict):
-		response.Conflict(w, err.Error())
+		response.Conflict(w, apierrors.Message(err))
 	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
+		response.Forbidden(w, apierrors.Message(err))
 	case apierrors.IsKind(err, apierrors.KindUnauth):
-		response.Unauthorized(w, err.Error())
+		response.Unauthorized(w, apierrors.Message(err))
 	case apierrors.IsKind(err, apierrors.KindBadInput):
 		response.BadRequest(w, "BAD_INPUT", err.Error())
 	default:

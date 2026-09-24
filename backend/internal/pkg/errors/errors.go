@@ -1,6 +1,9 @@
 package errors
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Sentinel errors for domain-layer use.
 // Services return these; handlers map them to HTTP codes.
@@ -31,6 +34,25 @@ func (e *DomainError) Error() string {
 }
 
 func (e *DomainError) Unwrap() error { return e.Err }
+
+// Message returns the error text meant for the caller: the domain message
+// alone, without the [KIND] prefix Error() adds for logs and without any
+// wrapped cause.
+//
+// Handlers must use this rather than Error(). Passing Error() to a response
+// helper put the internal kind tag into API responses, and response.NotFound
+// appends " not found" to what it is given, so a NotFound built by
+// apierrors.NotFound came out as "[NOT_FOUND] thing not found not found".
+func Message(err error) string {
+	var de *DomainError
+	if errors.As(err, &de) {
+		return de.Message
+	}
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
 
 // New creates a DomainError without a wrapped error.
 func New(kind Kind, message string) *DomainError {
