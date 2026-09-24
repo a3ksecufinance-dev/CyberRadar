@@ -224,6 +224,28 @@ Ajouter une action : une méthode dans `dispatcher.go` qui construit un `call`
 configurée désactive les actions qui en dépendent, et elles échouent en le
 disant — plutôt que de rapporter un confinement qui n'a pas eu lieu.
 
+### Activité par fenêtre (PAM)
+
+`identity_activity_daily` tient une ligne par identité et par jour UTC. Les
+chiffres du profil de risque — `events_today`, `events_7d`, `anomaly_count_7d`,
+`anomaly_count_30d`, `priv_sessions_30d` — en sont la somme sur leur fenêtre,
+et non des compteurs incrémentés à vie.
+
+L'incrément se fait **dans la base**, pas en Go :
+
+```sql
+ON CONFLICT (tenant_id, identity_id, day) DO UPDATE SET
+    events = identity_activity_daily.events + EXCLUDED.events
+```
+
+Le profil était auparavant lu, incrémenté en mémoire puis réécrit en entier.
+Mesuré sur cette base : 8 écrivains concurrents × 25 incréments en lecture-
+modification-écriture n'enregistrent que **39 des 200**. L'upsert atomique les
+enregistre tous.
+
+La rétention est de 30 jours — la plus large fenêtre utilisée. Le service PAM
+purge au démarrage puis toutes les 6 heures.
+
 ### Compteurs de détection
 
 Les seuils SIEM et les compteurs UEBA (vélocité, brute-force) passent par
@@ -284,9 +306,6 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
   passe en `log` plutôt que d'être retirée, ce qui laisse la trace.
 - **Neo4j est absent.** Attack Path et Knowledge Graph tournent sur PostgreSQL.
 - **Pas de magasin vectoriel.** Le Copilot n'a pas de RAG.
-- **Les compteurs « 7 jours » du PAM ne décroissent jamais.** `Events7d`,
-  `EventsToday` et `AnomalyCount30d` ne sont jamais remis à zéro : ce sont des
-  compteurs à vie présentés à l'analyste comme des fenêtres glissantes.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.

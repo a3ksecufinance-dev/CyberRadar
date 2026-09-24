@@ -167,7 +167,7 @@ de `govulncheck` / `npm audit` en CI.
 | ~~**Le SOAR ne remédie rien**~~ — *corrigé* | `soar/internal/service/dispatcher.go` | Les quinze actions appellent réellement les services de la plateforme. Voir §3.3. |
 | ~~**Compteurs en mémoire intra-processus**~~ — *corrigé* | `internal/pkg/cache/window.go` | Seuils SIEM, vélocité et brute-force UEBA comptent désormais dans un sorted set Redis partagé par toutes les réplicas. Voir §3.1. |
 | ~~**Kafka sans DLQ ni backoff**~~ — *corrigé* | `internal/pkg/kafka/consumer.go` | `DLQTopic` est obligatoire : un consumer sans DLQ refuse de se construire. Retry avec backoff exponentiel, puis parking dans `crp.events.dlq`. |
-| **Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais** | `pam/internal/service/risk.go:72-93`, `model/risk.go:35-43` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
+| ~~**Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais**~~ — *corrigé* | `migrations/000033`, `pam/internal/repository/pam_postgres.go` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
 | Neo4j absent | — | Attack Path (D8) et Knowledge Graph (D9) tournent sur PostgreSQL. Les traversées multi-sauts et le plus court chemin d'attaque sont impraticables en SQL relationnel. |
 | pgvector / Qdrant absent | — | Copilot sans RAG sémantique |
 | Enrichissement pipeline | `pipeline/enricher/threat.go:38,104`, `geo.go:37` | GeoIP et matching IOC : stubs TODO |
@@ -317,6 +317,46 @@ tenant A.
 Vault. Et `create_ticket` crée un ticket de vulnérabilité faute de service de
 ticketing générique — c'est le magasin le plus proche, pas le bon à terme.
 
+### 3.4 Fenêtres d'activité du PAM — ce qui a été fait
+
+`events_today`, `events_7d`, `anomaly_count_7d`, `anomaly_count_30d` et
+`priv_sessions_30d` étaient incrémentés à chaque événement et jamais remis à
+zéro ni décrus — aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle
+part dans le dépôt. Des totaux à vie portant le nom d'une fenêtre glissante.
+
+La conséquence pratique est dans `ComputeBreakdown` : au-delà de trois
+anomalies sur `anomaly_count_30d`, une identité est étiquetée « risque
+persistant ». Comme le compteur ne redescend jamais, **toute** identité finit
+par porter l'étiquette et ne peut plus s'en défaire. Le signal se dégrade en
+bruit, et un analyste apprend à l'ignorer — ce qui est plus nuisible que de
+n'avoir aucun signal.
+
+`identity_activity_daily` (`000033`) tient une ligne par identité et par jour
+UTC. Les chiffres du profil en sont la somme sur leur fenêtre. Le profil reste
+la surface de lecture de l'API : seules les valeurs qu'il porte deviennent
+vraies.
+
+**Le second défaut a été corrigé dans le même geste.** Le profil était lu,
+incrémenté en mémoire, puis réécrit en entier : deux réplicas traitant la même
+identité s'écrasaient mutuellement. L'incrément se fait maintenant dans la
+base (`ON CONFLICT … SET events = events + EXCLUDED.events`). Mesuré sur une
+base réelle, le motif lecture-modification-écriture n'enregistre que **39 des
+200** incréments concurrents ; l'upsert atomique les enregistre tous les 200.
+Un test l'assure, et la CI monte désormais un PostgreSQL pour que ces tests ne
+puissent pas passer au vert en étant simplement sautés.
+
+**Choix à connaître.** La granularité est le jour UTC, pas l'heure locale du
+tenant : « aujourd'hui » veut dire la même chose pour tout le monde, plutôt que
+de dépendre du fuseau de la réplica qui traite l'événement. La rétention est de
+30 jours — la fenêtre la plus large utilisée — purgée au démarrage puis toutes
+les 6 heures, sans quoi la table croît d'une ligne par identité et par jour
+indéfiniment.
+
+**Coût assumé.** Le chemin chaud passe d'une requête par événement à trois
+(l'upsert du jour, la lecture des fenêtres, l'upsert du profil). La lecture est
+une agrégation indexée sur trente lignes au plus. C'est le prix de chiffres
+exacts, et il est mesurable si jamais il devient gênant.
+
 ---
 
 ## 4. Points forts à préserver
@@ -450,10 +490,10 @@ Aucun déploiement production sans cette phase.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
   partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).
 - **DLQ + backoff exponentiel** sur Kafka — *fait*.
-- **Corriger les compteurs du PAM** : les recalculer par fenêtre depuis les événements déjà stockés
-  (ClickHouse), plutôt que de les incrémenter. Une fenêtre Redis ne convient pas ici : `Events7d`
-  compte *tous* les événements d'une identité sur sept jours, ce qui ferait des millions de membres
-  par identité. Le même passage supprime la perte de mise à jour entre réplicas.
+- **Corriger les compteurs du PAM** — *fait*, voir §3.4. Recalculés par fenêtre depuis une table
+  d'agrégats quotidiens en PostgreSQL plutôt que depuis ClickHouse : le PAM n'a pas de connexion
+  ClickHouse, et une ligne par identité et par jour suffit pour des fenêtres à la journée. Le même
+  passage supprime la perte de mise à jour entre réplicas.
 - **pgvector** (plus simple que Qdrant, déjà sur PostgreSQL) + RAG Copilot.
 - Enrichissement pipeline : GeoIP (MaxMind) + matching IOC contre le service TI.
 - **Multi-tenancy syslog** : mapping IP source / certificat client → tenant.

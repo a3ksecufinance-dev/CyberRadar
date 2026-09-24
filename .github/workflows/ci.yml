@@ -17,9 +17,11 @@ jobs:
   backend:
     name: Backend — build, vet, test
     runs-on: ubuntu-latest
-    # The sliding-window counters behind the SIEM and UEBA thresholds are
-    # backed by Redis. Their tests skip when none is reachable, so without this
-    # service the shared-counter path would pass by never running.
+    # Tests that talk to a real dependency skip when none is reachable, and a
+    # skip is indistinguishable from a pass in CI output. These services, plus
+    # the *_TEST_* variables below, turn those skips into failures — so the
+    # shared detection counters and the PAM activity windows cannot go green by
+    # never running.
     services:
       redis:
         image: redis:7.2-alpine
@@ -27,8 +29,19 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       REDIS_TEST_URL: redis://localhost:6379/9
+      PAM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +49,16 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.work.sum
+
+      - name: Apply migrations
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          for f in migrations/postgres/*.sql; do
+            psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
+          done
 
       - name: Format
         working-directory: backend
