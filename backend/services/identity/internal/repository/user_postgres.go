@@ -294,16 +294,25 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
+// scanIdentity reads one identity row.
+//
+// It returns nil on error rather than a pointer to a half-filled struct.
+// Returning &u alongside the error made every caller that checks the pointer
+// see a user that does not exist: UserService.Create discards the error and
+// tests `existing != nil`, so it reported a conflict for every address and no
+// user could be created through the API at all.
 func scanIdentity(row scannable) (*model.Identity, error) {
 	var u model.Identity
-	err := row.Scan(
+	if err := row.Scan(
 		&u.ID, &u.TenantID, &u.Username, &u.Email, &u.DisplayName, &u.PasswordHash,
 		&u.IdentityType, &u.Department, &u.BusinessUnit, &u.ManagerID,
 		&u.PrivilegeLevel, &u.MFAEnabled, &u.MFASecret, &u.PAMManaged,
 		&u.RiskScore, &u.BehaviorScore, &u.Status, &u.LastActivity, &u.SourceSystems,
 		&u.CreatedAt, &u.UpdatedAt,
-	)
-	return &u, err
+	); err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 func joinSets(sets []string) string {
