@@ -68,7 +68,9 @@ services:
 
   # ─── PostgreSQL ─────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # pgvector, not plain postgres: migration 000034 runs CREATE EXTENSION
+    # vector for the Copilot's knowledge index. Same PostgreSQL 16 underneath.
+    image: pgvector/pgvector:pg16
     container_name: crp-postgres
     restart: unless-stopped
     environment:
@@ -445,6 +447,15 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Retrieval over this tenant's own history. Optional: without it the
+      # Copilot still answers, it just has no recall. Point this at a
+      # self-hosted embeddings server (text-embeddings-inference, vLLM,
+      # Ollama, LocalAI) to keep incident text inside the estate — nothing
+      # here obliges a hosted provider. The model must be 1024-dimensional to
+      # match the index; the service refuses to start if it is not.
+      - EMBEDDINGS_URL=${EMBEDDINGS_URL:-}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}
+      - EMBEDDINGS_API_KEY=${EMBEDDINGS_API_KEY:-}
       - SIEM_SERVICE_URL=http://siem-service:8008
       - UEBA_SERVICE_URL=http://ueba-service:8009
       - TI_SERVICE_URL=http://ti-service:8010

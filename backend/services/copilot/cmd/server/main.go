@@ -76,7 +76,14 @@ func main() {
 	copilotRepo := repository.NewCopilotRepository(pool)
 	dispatcher := service.NewToolDispatcher(serviceURLs)
 	llmClient := service.NewLLMClient(anthropicKey, dispatcher, logger)
-	copilotSvc := service.NewCopilotService(copilotRepo, llmClient, logger)
+
+	// ── Retrieval ─────────────────────────────────────────────────────────────
+	// Optional: with no embeddings server the Copilot still works, it just has
+	// no recall of the tenant's own history. Point EMBEDDINGS_URL at a
+	// self-hosted server to keep incident text inside the estate.
+	embedder := buildEmbedder(ctx, copilotRepo, logger)
+
+	copilotSvc := service.NewCopilotService(copilotRepo, llmClient, embedder, logger)
 	copilotH := handler.NewCopilotHandler(copilotSvc)
 
 	logger.Info().Int("configured_service_urls", len(serviceURLs)).Msg("tool_dispatcher_ready")
@@ -140,4 +147,38 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// buildEmbedder configures retrieval, or returns nil when it is not deployed.
+//
+// It checks the model's width against the column the index is built on before
+// anything is written. A mismatch would otherwise be found one row at a time,
+// at ingestion, long after the deployment looked healthy.
+func buildEmbedder(ctx context.Context, repo *repository.CopilotRepository, logger zerolog.Logger) service.Embedder {
+	url := os.Getenv("EMBEDDINGS_URL")
+	if url == "" {
+		logger.Warn().Msg("no EMBEDDINGS_URL: the copilot will answer without recall of this tenant's history")
+		return nil
+	}
+
+	dimension, err := repo.EmbeddingDimension(ctx)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("cannot read the embedding column's dimension")
+	}
+
+	embedder, err := service.NewHTTPEmbedder(service.EmbedderConfig{
+		URL:       url,
+		Model:     envOrDefault("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5"),
+		APIKey:    os.Getenv("EMBEDDINGS_API_KEY"),
+		Dimension: dimension,
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("embeddings configuration invalid")
+	}
+
+	logger.Info().
+		Str("url", url).
+		Int("dimension", dimension).
+		Msg("retrieval enabled")
+	return embedder
 }

@@ -169,7 +169,7 @@ de `govulncheck` / `npm audit` en CI.
 | ~~**Kafka sans DLQ ni backoff**~~ — *corrigé* | `internal/pkg/kafka/consumer.go` | `DLQTopic` est obligatoire : un consumer sans DLQ refuse de se construire. Retry avec backoff exponentiel, puis parking dans `crp.events.dlq`. |
 | ~~**Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais**~~ — *corrigé* | `migrations/000033`, `pam/internal/repository/pam_postgres.go` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
 | Neo4j absent — **le constat d'origine était inexact** | `attackpath/internal/service/analyzer.go` | L'audit affirmait que « les traversées multi-sauts sont impraticables en SQL relationnel ». C'est faux : le SQL ne sert qu'à charger nœuds et arêtes, la traversée est écrite en Go. Le vrai problème n'était pas le langage de requête mais le parcours lui-même — sept défauts, détaillés en §3.5, tous corrigés et aucun que Neo4j n'aurait réglé de lui-même. |
-| pgvector / Qdrant absent | — | Copilot sans RAG sémantique |
+| ~~pgvector / Qdrant absent~~ — *corrigé* | `migrations/000034`, `copilot/internal/repository/knowledge_postgres.go` | pgvector plutôt que Qdrant : le PostgreSQL est déjà là, déjà sauvegardé, déjà isolé par tenant. Voir §3.6. |
 | Enrichissement pipeline | `pipeline/enricher/threat.go:38,104`, `geo.go:37` | GeoIP et matching IOC : stubs TODO |
 | Envoi d'e-mail | `notification/internal/service/notification.go:138-145` | Stub, aucun SMTP |
 | Agrégation stats tenant | `tenant/internal/handler/tenant.go:179` | TODO |
@@ -442,6 +442,69 @@ qu'il faut filtrer explicitement à chaque `MATCH`, sans le filet du schéma.
 Une base par tenant l'élimine, au prix de la densité — arbitrage à trancher
 avant l'étape 2.
 
+### 3.6 Mémoire du Copilot — ce qui a été fait
+
+Les outils du Copilot répondent à des questions exactes. Ils ne répondent pas à
+« est-ce qu'on a déjà vu ça ? », qui est une question de similarité — et c'est
+celle que pose un analyste devant une alerte à 3h du matin.
+
+`copilot_knowledge` (`000034`) indexe ce que le tenant a déjà écrit, avec
+pgvector : HNSW sur distance cosinus, une ligne par document source, clé
+`(tenant, type, référence)` pour qu'une réindexation **remplace** au lieu
+d'accumuler des quasi-doublons qui matchent tous la même requête.
+
+**pgvector plutôt que Qdrant.** Le PostgreSQL est déjà déployé, déjà sauvegardé,
+déjà soumis à l'isolation tenant qui existe partout ailleurs. Ajouter Qdrant
+aurait introduit un second magasin avec sa propre sauvegarde, sa propre
+isolation à réimplémenter et sa propre surface d'attaque, pour un corpus qui se
+compte en milliers de documents par tenant, pas en milliards.
+
+**Les embeddings ne viennent pas d'Anthropic** : il n'existe pas d'endpoint
+d'embeddings. C'est une décision, et elle compte pour une plateforme dite
+souveraine — envoyer le texte d'un incident bancaire à une API tierce est
+exactement ce que les règles de résidence des données interdisent. `Embedder`
+est donc une interface, et l'implémentation livrée parle l'API compatible
+OpenAI (`/v1/embeddings`) : c'est ce que parlent les serveurs auto-hébergés
+(text-embeddings-inference, vLLM, Ollama, LocalAI) **et** les fournisseurs
+hébergés. Une banque pointe `EMBEDDINGS_URL` sur son propre serveur et rien ne
+sort du périmètre ; un opérateur qui accepte un service hébergé le pointe
+ailleurs. **La plateforme n'impose ni l'un ni l'autre**, et sans variable le
+Copilot fonctionne simplement sans mémoire.
+
+Défauts trouvés en exécutant contre un vrai pgvector, pas en lisant la doc :
+
+- **Un vecteur nul rend la similarité NaN.** La distance cosinus divise par la
+  norme. Plusieurs serveurs d'embeddings renvoient un vecteur nul pour une
+  entrée vide ; stocké, il empoisonne silencieusement l'index — un NaN passe à
+  travers une comparaison `> seuil`. Refusé à l'écriture, et filtré à la
+  lecture par sécurité. Vérifié en base : `similarity` vaut bien `NaN`.
+- **Le filtre tenant doit être dans le `WHERE`**, pas appliqué après le tri :
+  un `ORDER BY` sur l'index suivi d'un filtre renverrait les documents d'un
+  autre client dès qu'ils sont les plus proches. Un test le vérifie.
+- **Les résultats d'embeddings ne reviennent pas forcément dans l'ordre.** La
+  spécification porte un `index` par résultat ; associer silencieusement un
+  vecteur au mauvais document ne se verrait qu'au contexte récupéré incohérent,
+  longtemps après l'indexation.
+- **La largeur du modèle est vérifiée au démarrage** contre la colonne, lue
+  depuis le catalogue. Sinon l'erreur n'apparaît qu'à l'indexation, document par
+  document, sur un déploiement qui paraissait sain.
+
+**Seuil et présentation.** En dessous de 0,35 de similarité cosinus rien n'est
+récupéré : une question sans rapport doit laisser le modèle dire qu'il n'a rien,
+plutôt que recevoir le document le moins hors-sujet du corpus et le traiter
+comme une preuve. Ce qui est récupéré est annoncé comme un **précédent à citer**,
+explicitement pas comme un fait sur la question posée.
+
+**Au passage.** La route `DELETE` nouvelle aurait répondu 403 à tout le monde :
+`copilot:delete` n'existait pas. `000030` ne déclarait `:delete` que pour les
+domaines ayant réellement une route DELETE — le Copilot en a une maintenant,
+donc la permission est créée et accordée à qui peut déjà indexer.
+
+**Reste ouvert.** Rien n'alimente le corpus automatiquement : l'API d'indexation
+existe, mais aucun service ne pousse ses incidents résolus dedans. Le découpage
+en chunks est laissé à l'appelant — un runbook de trente pages indexé d'un bloc
+se récupère d'un bloc.
+
 ---
 
 ## 4. Points forts à préserver
@@ -581,7 +644,8 @@ Aucun déploiement production sans cette phase.
   d'agrégats quotidiens en PostgreSQL plutôt que depuis ClickHouse : le PAM n'a pas de connexion
   ClickHouse, et une ligne par identité et par jour suffit pour des fenêtres à la journée. Le même
   passage supprime la perte de mise à jour entre réplicas.
-- **pgvector** (plus simple que Qdrant, déjà sur PostgreSQL) + RAG Copilot.
+- **pgvector** + RAG Copilot — *fait*, voir §3.6. Reste : alimenter le corpus
+  automatiquement depuis les incidents résolus, et découper les longs documents.
 - Enrichissement pipeline : GeoIP (MaxMind) + matching IOC contre le service TI.
 - **Multi-tenancy syslog** : mapping IP source / certificat client → tenant.
 

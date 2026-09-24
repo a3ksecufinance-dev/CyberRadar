@@ -30,7 +30,9 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
       postgres:
-        image: postgres:16-alpine
+        # pgvector, not plain postgres: migration 000034 creates the extension
+        # and the copilot knowledge tests search a real HNSW index.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: crp_user
           POSTGRES_PASSWORD: crp_password_dev
@@ -42,6 +44,7 @@ jobs:
     env:
       REDIS_TEST_URL: redis://localhost:6379/9
       PAM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      COPILOT_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
@@ -83,7 +86,8 @@ jobs:
     # ever ran these files. This job applies all of them to an empty database.
     services:
       postgres:
-        image: postgres:16-alpine
+        # pgvector, not plain postgres: 000034 runs CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: crp_user
           POSTGRES_PASSWORD: crp_password_dev

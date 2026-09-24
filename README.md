@@ -246,6 +246,40 @@ enregistre tous.
 La rétention est de 30 jours — la plus large fenêtre utilisée. Le service PAM
 purge au démarrage puis toutes les 6 heures.
 
+### Mémoire du Copilot (pgvector)
+
+Les outils du Copilot répondent à des questions exactes — « quelles alertes sont
+critiques », « recherche cet IOC ». Ils ne répondent pas à celle que l'analyste
+pose vraiment à 3h du matin : **« est-ce qu'on a déjà vu ça ? »**. C'est une
+question de similarité, et `copilot_knowledge` l'indexe avec pgvector (HNSW,
+distance cosinus) sur ce que le tenant a déjà écrit : incidents résolus, notes
+de playbook, runbooks.
+
+```bash
+curl -X POST localhost:8016/api/v1/copilot/knowledge \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"source_type":"incident","source_ref":"INC-2024-118",
+       "title":"Credential stuffing sur le portail client",
+       "content":"..."}'
+```
+
+**Les embeddings ne viennent pas d'Anthropic** — il n'y a pas d'endpoint
+d'embeddings. `EMBEDDINGS_URL` attend une API compatible OpenAI
+(`/v1/embeddings`), ce que parlent aussi bien les serveurs auto-hébergés
+(text-embeddings-inference, vLLM, Ollama, LocalAI) que les fournisseurs hébergés.
+**Pour une banque, pointez-le sur votre propre serveur** : le texte d'incident
+ne quitte pas votre périmètre. La plateforme n'impose aucun fournisseur.
+
+Sans `EMBEDDINGS_URL`, le Copilot fonctionne — il n'a simplement aucune mémoire
+de l'historique du tenant. Avec, le service vérifie au démarrage que la largeur
+du modèle correspond à la colonne (1024) et **refuse de démarrer** sinon :
+autrement l'erreur n'apparaîtrait qu'à l'indexation, document par document.
+
+Un chunk récupéré est présenté au modèle comme un **précédent à citer**, pas
+comme un fait sur la question posée. En dessous de 0,35 de similarité cosinus,
+rien n'est récupéré : une question sans rapport ne doit pas se voir servir le
+document le moins hors-sujet du corpus.
+
 ### Compteurs de détection
 
 Les seuils SIEM et les compteurs UEBA (vélocité, brute-force) passent par
@@ -308,7 +342,6 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
   Le préalable est posé — l'analyseur dépend de `service.GraphStore`, pas du
   dépôt — mais l'implémentation Neo4j reste à écrire, et à exécuter au moins
   une fois avant d'être crue. Voir §3.5 de l'audit.
-- **Pas de magasin vectoriel.** Le Copilot n'a pas de RAG.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.
