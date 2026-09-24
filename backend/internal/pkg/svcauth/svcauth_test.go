@@ -159,3 +159,148 @@ func TestAuthorizeSetsTheHeader(t *testing.T) {
 		t.Errorf("Authorization = %q", got)
 	}
 }
+
+// ─── Pool ─────────────────────────────────────────────────────────────────────
+
+// tenantStub records which tenant each token request named.
+func tenantStub(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var seen []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			TenantID string `json:"tenant_id"`
+		}
+		//nolint:errcheck // test stub
+		json.NewDecoder(r.Body).Decode(&body)
+
+		mu.Lock()
+		seen = append(seen, body.TenantID)
+		mu.Unlock()
+
+		//nolint:errcheck // test stub
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+			"access_token": "token-for-" + body.TenantID,
+			"expires_at":   time.Now().Add(time.Hour),
+		}})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
+func pool(t *testing.T, url string) *Pool {
+	t.Helper()
+	p, err := NewPool(Config{IdentityURL: url, ClientID: "soar", ClientSecret: "s3cret"})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	return p
+}
+
+func TestPoolKeepsTenantsApart(t *testing.T) {
+	// The isolation the whole mechanism exists for: a token minted for one
+	// customer must never travel on a request about another.
+	srv, _ := tenantStub(t)
+	p := pool(t, srv.URL)
+
+	for tenant, want := range map[string]string{
+		"tenant-a": "token-for-tenant-a",
+		"tenant-b": "token-for-tenant-b",
+	} {
+		src, err := p.For(tenant)
+		if err != nil {
+			t.Fatalf("For(%s): %v", tenant, err)
+		}
+		got, err := src.Token(context.Background())
+		if err != nil {
+			t.Fatalf("Token: %v", err)
+		}
+		if got != want {
+			t.Errorf("token for %s = %q, want %q", tenant, got, want)
+		}
+	}
+}
+
+func TestPoolCachesPerTenant(t *testing.T) {
+	srv, seen := tenantStub(t)
+	p := pool(t, srv.URL)
+
+	for i := 0; i < 3; i++ {
+		for _, tenant := range []string{"tenant-a", "tenant-b"} {
+			src, err := p.For(tenant)
+			if err != nil {
+				t.Fatalf("For: %v", err)
+			}
+			if _, err := src.Token(context.Background()); err != nil {
+				t.Fatalf("Token: %v", err)
+			}
+		}
+	}
+
+	if len(*seen) != 2 {
+		t.Errorf("identity called %d times for 2 tenants over 3 rounds, want 2: %v", len(*seen), *seen)
+	}
+}
+
+func TestPoolAuthorizeNamesTheTenantsToken(t *testing.T) {
+	srv, _ := tenantStub(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/netsec/policies", nil)
+
+	if err := pool(t, srv.URL).Authorize(context.Background(), "tenant-b", req); err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if got := req.Header.Get("Authorization"); got != "Bearer token-for-tenant-b" {
+		t.Errorf("Authorization = %q", got)
+	}
+}
+
+func TestPoolRefusesAConfigWithATenant(t *testing.T) {
+	// A pool that carried a fixed tenant would hand the same token to every
+	// caller, silently defeating the per-tenant split.
+	if _, err := NewPool(Config{
+		IdentityURL: "http://x", ClientID: "a", ClientSecret: "b", TenantID: "tenant-a",
+	}); err == nil {
+		t.Error("a Pool was built with a fixed tenant")
+	}
+}
+
+func TestPoolRefusesAnEmptyTenant(t *testing.T) {
+	srv, _ := tenantStub(t)
+	if _, err := pool(t, srv.URL).For(""); err == nil {
+		t.Error("For(\"\") was accepted; a token with no tenant is never valid")
+	}
+}
+
+func TestPoolValidatesItsConfigUpFront(t *testing.T) {
+	// A missing credential should fail at startup, not on the first playbook.
+	if _, err := NewPool(Config{IdentityURL: "http://x", ClientID: "a"}); err == nil {
+		t.Error("a Pool was built with no client secret")
+	}
+}
+
+func TestPoolIsSafeUnderConcurrency(t *testing.T) {
+	srv, seen := tenantStub(t)
+	p := pool(t, srv.URL)
+
+	var wg sync.WaitGroup
+	wg.Add(20)
+	for i := 0; i < 20; i++ {
+		go func(i int) {
+			defer wg.Done()
+			tenant := []string{"tenant-a", "tenant-b"}[i%2]
+			src, err := p.For(tenant)
+			if err != nil {
+				t.Errorf("For: %v", err)
+				return
+			}
+			if _, err := src.Token(context.Background()); err != nil {
+				t.Errorf("Token: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if len(*seen) != 2 {
+		t.Errorf("identity called %d times, want 2", len(*seen))
+	}
+}

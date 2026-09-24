@@ -16,6 +16,7 @@ import (
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/observe"
+	"github.com/cyberradar/platform/internal/pkg/svcauth"
 	"github.com/cyberradar/platform/services/soar/internal/handler"
 	"github.com/cyberradar/platform/services/soar/internal/repository"
 	"github.com/cyberradar/platform/services/soar/internal/service"
@@ -59,9 +60,39 @@ func main() {
 	}
 	defer pool.Close()
 
+	// ── Remediation credentials ───────────────────────────────────────────────
+	// The SOAR acts with no user behind it, on alerts belonging to any tenant,
+	// so it authenticates with a platform-scoped service account and takes a
+	// token per tenant. Its actions reach other services with that token and
+	// nothing else — it holds no standing privilege of its own.
+	tokens, err := svcauth.NewPool(svcauth.Config{
+		IdentityURL:  mustEnv("IDENTITY_URL"),
+		ClientID:     mustEnv("SOAR_CLIENT_ID"),
+		ClientSecret: mustEnv("SOAR_CLIENT_SECRET"),
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("service account setup failed")
+	}
+
+	// A service with no URL disables the actions that need it; they then fail
+	// saying which service is unconfigured, rather than reporting a
+	// containment that never happened.
+	endpoints := service.Endpoints{
+		Netsec:       os.Getenv("NETSEC_URL"),
+		Identity:     os.Getenv("IDENTITY_URL"),
+		Asset:        os.Getenv("ASSET_URL"),
+		ThreatIntel:  os.Getenv("TI_URL"),
+		Vuln:         os.Getenv("VULN_URL"),
+		Notification: os.Getenv("NOTIFICATION_URL"),
+		SIEM:         os.Getenv("SIEM_URL"),
+		IR:           os.Getenv("IR_URL"),
+		AttackPath:   os.Getenv("ATTACKPATH_URL"),
+	}
+	dispatcher := service.NewHTTPDispatcher(endpoints, tokens, logger)
+
 	// ── Repositories / services ───────────────────────────────────────────────
 	soarRepo := repository.NewSOARRepository(pool)
-	soarSvc := service.NewSOARService(soarRepo, logger)
+	soarSvc := service.NewSOARService(soarRepo, dispatcher, logger)
 	soarH := handler.NewSOARHandler(soarSvc)
 
 	// ── Kafka consumer: auto-trigger playbooks from alerts ────────────────────

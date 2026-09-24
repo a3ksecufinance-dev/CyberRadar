@@ -164,7 +164,7 @@ de `govulncheck` / `npm audit` en CI.
 
 | Gap | Localisation | Impact |
 |---|---|---|
-| **Le SOAR ne remédie rien** | `soar/internal/service/executor.go:108-196` | L'orchestration (séquençage, abort-on-failure, timeouts, persistance) est réelle et bien construite, mais `block_ip`, `disable_user`, `isolate_host`, `add_to_blocklist` retournent des maps figées. Commentaire ligne 106 l'admet. |
+| ~~**Le SOAR ne remédie rien**~~ — *corrigé* | `soar/internal/service/dispatcher.go` | Les quinze actions appellent réellement les services de la plateforme. Voir §3.3. |
 | ~~**Compteurs en mémoire intra-processus**~~ — *corrigé* | `internal/pkg/cache/window.go` | Seuils SIEM, vélocité et brute-force UEBA comptent désormais dans un sorted set Redis partagé par toutes les réplicas. Voir §3.1. |
 | ~~**Kafka sans DLQ ni backoff**~~ — *corrigé* | `internal/pkg/kafka/consumer.go` | `DLQTopic` est obligatoire : un consumer sans DLQ refuse de se construire. Retry avec backoff exponentiel, puis parking dans `crp.events.dlq`. |
 | **Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais** | `pam/internal/service/risk.go:72-93`, `model/risk.go:35-43` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
@@ -258,8 +258,64 @@ légitime d'un compte `platform` échouait en 422 — le mécanisme entier aurai
 
 **Reste ouvert.** Les credentials des comptes de service devraient être
 distribués par Vault, pas par variable d'environnement : `internal/pkg/vault`
-existe, le raccordement reste à faire. Et rien n'utilise encore
-`internal/pkg/svcauth` : il attend les actions SOAR réelles.
+existe, le raccordement reste à faire. `internal/pkg/svcauth` est en revanche
+utilisé : le SOAR s'en sert pour tenir un jeton par tenant (§3.3).
+
+### 3.3 Remédiation SOAR — ce qui a été fait
+
+L'orchestration était réelle — séquençage, abort-on-failure, timeouts,
+persistance — mais `executeAction` était un `switch` qui renvoyait des maps
+figées (`{"action":"block_ip","status":"blocked"}`) sans contacter quoi que ce
+soit. Deux conséquences que la lecture seule ne rend pas évidentes :
+
+1. **Aucune étape ne pouvait échouer**, donc `on_failure: abort` n'était
+   jamais atteint. Le code du garde-fou existait et n'a jamais pu s'exécuter.
+2. **L'enregistrement d'exécution était une fiction.** Un playbook de
+   confinement rapportait « IP bloquée, hôte isolé, SOC notifié » en n'ayant
+   rien fait. C'est pire que l'absence de SOAR : un analyste qui lit ce
+   rapport croit l'incident traité.
+
+`dispatcher.go` appelle maintenant les services réels, authentifié par le
+compte de service du SOAR (§3.2), avec un jeton par tenant. Un non-2xx fait
+échouer l'étape, et la sortie enregistrée porte le service appelé, le statut
+et la réponse — pas une étiquette figée.
+
+Décisions à connaître :
+
+- **`isolate_host` est une règle réseau, pas un statut.** Les vocabulaires
+  `assets` et `netsec.devices` n'ont pas d'état « isolé » ; marquer un hôte
+  `inactive` aurait enregistré un confinement qui n'a pas eu lieu. L'action
+  pose une règle `deny` sur l'adresse de l'hôte, en résolvant l'actif vers son
+  adresse au besoin — et échoue si l'actif n'a aucune adresse connue.
+- **`tag_entity` relit avant d'écrire.** La mise à jour d'actif remplace la
+  liste de tags : n'écrire que le nouveau aurait effacé tous les autres. Un
+  tag déjà présent n'est pas une erreur, pour qu'un playbook rejoué reste
+  idempotent.
+- **`send_notification` exige un canal.** Il n'y a pas de destinataire par
+  défaut raisonnable pour une alerte de sécurité automatisée.
+- **Un service sans URL configurée désactive ses actions**, qui échouent en le
+  nommant. Le demi-déploiement est le cas dangereux : le playbook ne doit pas
+  rapporter un succès pour un service qu'on ne lui a jamais dit comment
+  joindre.
+- **`unblock_ip` / `unisolate_host` prennent le `policy_id`** renvoyé par
+  l'étape qui a posé la règle. netsec n'a pas de route de suppression : la
+  règle passe en `log`, ce qui laisse la trace.
+
+Le rôle `soar_executor` (`000032`) porte exactement les onze droits utilisés
+par les actions. Il est distinct de `platform_service` volontairement : ce
+sont des droits de **modifier l'environnement d'un client** — désactiver un
+compte, refuser du trafic — et ils doivent se relire seuls.
+
+**Vérifié de bout en bout** contre des services qui tournent : un compte
+`platform` avec le rôle `soar_executor` obtient un jeton pour un tenant,
+appelle `DELETE /api/v1/users/{id}` sur `identity`, et l'utilisateur passe
+réellement de `active` à `disabled` en base. Un compte sans `users:delete`
+reçoit 403 ; un jeton émis pour le tenant B ne voit pas l'utilisateur du
+tenant A.
+
+**Reste ouvert.** Le secret du compte SOAR vient de l'environnement, pas de
+Vault. Et `create_ticket` crée un ticket de vulnérabilité faute de service de
+ticketing générique — c'est le magasin le plus proche, pas le bon à terme.
 
 ---
 
@@ -305,9 +361,9 @@ Coût faible, impact sécurité maximal. Prérequis à tout le reste.
 - **0.2 — propagation plutôt que jeton de service.** Les appels du Copilot sont faits *pour le compte
   d'un utilisateur* : transmettre son propre jeton authentifie l'appel **et** le confine à ce que cet
   utilisateur peut déjà voir. Un jeton de service aurait élargi le périmètre sans nécessité. Les
-  appelants autonomes — les actions SOAR réelles, sans utilisateur derrière — auront besoin d'une
-  identité de service propre ; elle sera introduite avec ces actions en Phase 2, pas avant d'avoir un
-  consommateur.
+  appelants autonomes — les actions SOAR, sans utilisateur derrière — avaient besoin d'une identité
+  de service propre. Elle a été introduite en Phase 2 (§3.2), au moment où un consommateur existait,
+  et le SOAR est ce consommateur (§3.3).
 - **0.3 — RS256 plutôt qu'un secret par service.** Un secret distinct par service aurait résolu la
   latéralisation mais imposé la distribution de N secrets. Avec RS256, il n'existe qu'une clé privée,
   détenue par le seul émetteur. Effet de bord important : la clé publique n'étant pas secrète, un
@@ -387,9 +443,8 @@ Aucun déploiement production sans cette phase.
 
 - **Identité de service** — *fait*, voir §3.2. Débloque `collector`, l'écriture
   d'audit, et le SOAR autonome (portée `platform`).
-- **SOAR réel** : les actions appellent les services de remédiation, avec
-  `internal/pkg/svcauth` et un compte de service `platform`. C'est le
-  différenciateur produit le plus important qui manque.
+- **SOAR réel** — *fait*, voir §3.3. Les quinze actions appellent les services
+  de remédiation ; un échec fait échouer l'étape.
 - **Neo4j** + migration des modèles `attackpath` et `knowledgegraph`. Plus la migration est tardive,
   plus la réécriture des couches repository/service coûte cher.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas

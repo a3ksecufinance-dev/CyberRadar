@@ -821,6 +821,24 @@ services:
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
+      # The SOAR acts with no user behind it, on alerts belonging to any
+      # tenant, so it authenticates with a platform-scoped service account and
+      # takes a token per tenant. Create it once with the soar_executor role
+      # (see README) and put the secret in Vault for anything but dev.
+      - IDENTITY_URL=http://identity-service:8002
+      - SOAR_CLIENT_ID=soar-executor
+      - SOAR_CLIENT_SECRET=change-me-create-the-account-first
+      # Services the playbook actions reach. A service left out disables the
+      # actions that need it, and they then fail saying so — rather than
+      # reporting a containment that never happened.
+      - NETSEC_URL=http://netsec-service:8022
+      - ASSET_URL=http://asset-service:8006
+      - TI_URL=http://ti-service:8010
+      - VULN_URL=http://vuln-service:8011
+      - NOTIFICATION_URL=http://notification-service:8004
+      - SIEM_URL=http://siem-service:8008
+      - IR_URL=http://ir-service:8026
+      - ATTACKPATH_URL=http://attackpath-service:8012
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
     volumes: *jwt-public-key

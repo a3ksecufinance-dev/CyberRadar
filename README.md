@@ -200,6 +200,30 @@ un droit large, donc réservé au super admin à la création et journalisé à 
 émission (`cross_tenant: true`). **Il n'existe aucun jeton « tous tenants »** :
 tout jeton nomme exactement un tenant.
 
+### Remédiation automatisée
+
+Les actions de playbook appellent réellement les services de la plateforme,
+avec le jeton du compte de service du SOAR et rien d'autre. Un échec du
+service cible **fait échouer l'étape** : c'est ce qui rend `on_failure: abort`
+opérant.
+
+```bash
+# créer le compte du SOAR, une fois (super admin requis : portée platform)
+curl -X POST localhost:8002/api/v1/service-accounts \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"client_id":"soar-executor","scope":"platform",
+       "role_ids":["10000000-0000-0000-0000-000000000014"]}'
+```
+
+Le rôle `soar_executor` (migration `000032`) porte exactement les onze droits
+que les actions utilisent, et rien de plus : un credential SOAR capturé ne doit
+pas être un moyen de lire à loisir les alertes ou les actifs d'un client.
+
+Ajouter une action : une méthode dans `dispatcher.go` qui construit un `call`
+(service, méthode, chemin, corps) et le passe à `send`. Un service sans URL
+configurée désactive les actions qui en dépendent, et elles échouent en le
+disant — plutôt que de rapporter un confinement qui n'a pas eu lieu.
+
 ### Compteurs de détection
 
 Les seuils SIEM et les compteurs UEBA (vélocité, brute-force) passent par
@@ -252,8 +276,12 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 À connaître avant de bâtir dessus — le détail et les raisons sont dans
 [`plan/19-AUDIT-AND-ROADMAP.md`](plan/19-AUDIT-AND-ROADMAP.md) :
 
-- **Les actions SOAR sont simulées.** L'orchestration est réelle, mais
-  `block_ip`, `isolate_host` et consorts renvoient des valeurs figées.
+- **Le SOAR a besoin de son compte de service.** Sans `SOAR_CLIENT_ID` /
+  `SOAR_CLIENT_SECRET` valides, chaque étape de playbook échoue — bruyamment,
+  ce qui est le comportement voulu, mais aucune remédiation ne part.
+- **`unblock_ip` et `unisolate_host` attendent le `policy_id`** renvoyé par
+  l'étape qui a posé la règle. netsec n'expose pas de suppression : la règle
+  passe en `log` plutôt que d'être retirée, ce qui laisse la trace.
 - **Neo4j est absent.** Attack Path et Knowledge Graph tournent sur PostgreSQL.
 - **Pas de magasin vectoriel.** Le Copilot n'a pas de RAG.
 - **Les compteurs « 7 jours » du PAM ne décroissent jamais.** `Events7d`,

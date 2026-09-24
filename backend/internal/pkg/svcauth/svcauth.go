@@ -156,3 +156,67 @@ func (s *TokenSource) fetch(ctx context.Context) (string, time.Time, error) {
 	}
 	return token, expiresAt, nil
 }
+
+// ─── Pool ─────────────────────────────────────────────────────────────────────
+
+// A Pool holds one TokenSource per tenant, for a platform-scoped service
+// account acting on behalf of many customers.
+//
+// A TokenSource deliberately holds a token for one tenant only. Sharing a
+// single source across tenants would mean a token minted for one customer
+// being sent on a request about another, which is the isolation failure this
+// whole mechanism exists to prevent. The pool keeps them apart while still
+// caching each.
+type Pool struct {
+	cfg Config
+
+	mu      sync.Mutex
+	sources map[string]*TokenSource
+}
+
+// NewPool builds a Pool. cfg.TenantID must be empty: the tenant is chosen per
+// call, which is the point.
+func NewPool(cfg Config) (*Pool, error) {
+	if cfg.TenantID != "" {
+		return nil, fmt.Errorf("svcauth: a Pool chooses the tenant per call; leave Config.TenantID empty")
+	}
+	// Validate the rest once, here, rather than on the first call at runtime.
+	probe := cfg
+	probe.TenantID = "probe"
+	if _, err := New(probe); err != nil {
+		return nil, err
+	}
+	return &Pool{cfg: cfg, sources: make(map[string]*TokenSource)}, nil
+}
+
+// For returns the TokenSource for one tenant, creating it on first use.
+func (p *Pool) For(tenantID string) (*TokenSource, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("svcauth: tenant is required")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if s, ok := p.sources[tenantID]; ok {
+		return s, nil
+	}
+
+	cfg := p.cfg
+	cfg.TenantID = tenantID
+	s, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	p.sources[tenantID] = s
+	return s, nil
+}
+
+// Authorize sets the Authorization header on req with a token for tenantID.
+func (p *Pool) Authorize(ctx context.Context, tenantID string, req *http.Request) error {
+	s, err := p.For(tenantID)
+	if err != nil {
+		return err
+	}
+	return s.Authorize(ctx, req)
+}
