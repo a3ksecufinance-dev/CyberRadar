@@ -243,6 +243,39 @@ func (r *GraphRepository) ListEdges(ctx context.Context, tenantID uuid.UUID, sou
 	return out, nil
 }
 
+// LoadGraph returns every node and active edge for a tenant.
+//
+// It exists apart from ListNodes because ListNodes is a paged API listing and
+// clamps its limit to 500: a traversal that used it would silently walk part
+// of the graph and report the paths it happened to find. This is the whole
+// graph or an error.
+func (r *GraphRepository) LoadGraph(ctx context.Context, tenantID uuid.UUID) (*model.Graph, error) {
+	rows, err := r.db.Query(ctx, nodeSelect+` WHERE tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load graph nodes: %w", err)
+	}
+	defer rows.Close()
+
+	var nodes []*model.AttackNode
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan graph node: %w", err)
+		}
+		nodes = append(nodes, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load graph nodes: %w", err)
+	}
+
+	edges, err := r.ListEdges(ctx, tenantID, nil, true)
+	if err != nil {
+		return nil, fmt.Errorf("load graph edges: %w", err)
+	}
+
+	return model.NewGraph(nodes, edges), nil
+}
+
 // GetNodesByIDs fetches multiple nodes by their IDs.
 func (r *GraphRepository) GetNodesByIDs(ctx context.Context, tenantID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*model.AttackNode, error) {
 	if len(ids) == 0 {

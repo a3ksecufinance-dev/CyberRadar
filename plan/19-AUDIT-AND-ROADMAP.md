@@ -168,7 +168,7 @@ de `govulncheck` / `npm audit` en CI.
 | ~~**Compteurs en mémoire intra-processus**~~ — *corrigé* | `internal/pkg/cache/window.go` | Seuils SIEM, vélocité et brute-force UEBA comptent désormais dans un sorted set Redis partagé par toutes les réplicas. Voir §3.1. |
 | ~~**Kafka sans DLQ ni backoff**~~ — *corrigé* | `internal/pkg/kafka/consumer.go` | `DLQTopic` est obligatoire : un consumer sans DLQ refuse de se construire. Retry avec backoff exponentiel, puis parking dans `crp.events.dlq`. |
 | ~~**Les compteurs « 7 jours » et « 30 jours » du PAM ne décroissent jamais**~~ — *corrigé* | `migrations/000033`, `pam/internal/repository/pam_postgres.go` | `Events7d`, `EventsToday`, `AnomalyCount7d`, `AnomalyCount30d` sont incrémentés et **jamais remis à zéro ni décrus** : aucune tâche, aucun `UPDATE`, aucun calcul par fenêtre nulle part dans le dépôt. Ce sont des compteurs à vie affichés à l'analyste comme « sur les 7 derniers jours ». Conséquence directe : `AnomalyCount30d > 3` déclenche la mention « risque persistant », que toute identité finit par porter à vie. S'y ajoute une perte de mise à jour : le profil est lu, incrémenté en mémoire puis réécrit en entier, donc deux réplicas qui traitent le même événement en écrasent une. |
-| Neo4j absent | — | Attack Path (D8) et Knowledge Graph (D9) tournent sur PostgreSQL. Les traversées multi-sauts et le plus court chemin d'attaque sont impraticables en SQL relationnel. |
+| Neo4j absent — **le constat d'origine était inexact** | `attackpath/internal/service/analyzer.go` | L'audit affirmait que « les traversées multi-sauts sont impraticables en SQL relationnel ». C'est faux : le SQL ne sert qu'à charger nœuds et arêtes, la traversée est écrite en Go. Le vrai problème n'était pas le langage de requête mais le parcours lui-même — sept défauts, détaillés en §3.5, tous corrigés et aucun que Neo4j n'aurait réglé de lui-même. |
 | pgvector / Qdrant absent | — | Copilot sans RAG sémantique |
 | Enrichissement pipeline | `pipeline/enricher/threat.go:38,104`, `geo.go:37` | GeoIP et matching IOC : stubs TODO |
 | Envoi d'e-mail | `notification/internal/service/notification.go:138-145` | Stub, aucun SMTP |
@@ -357,6 +357,91 @@ indéfiniment.
 une agrégation indexée sur trente lignes au plus. C'est le prix de chiffres
 exacts, et il est mesurable si jamais il devient gênant.
 
+### 3.5 Chemins d'attaque — ce qui a été fait, et la question Neo4j
+
+**Correction d'un constat de cet audit.** J'avais écrit que les traversées
+multi-sauts étaient « impraticables en SQL relationnel ». En lisant le code
+plutôt que le schéma : `buildGraph` charge les arêtes depuis PostgreSQL, puis
+**tout le parcours est en Go**. Le SQL ne traverse rien. Le diagnostic portait
+sur le mauvais composant.
+
+Le parcours lui-même, en revanche, avait sept défauts — dont aucun n'aurait été
+réglé par un changement de base, et dont tous auraient été **transcrits tels
+quels en Cypher** si la migration avait été faite d'abord :
+
+1. **`path_score` récompensait les chemins longs.** La formule multipliait par
+   le nombre de sauts : à coût égal, un chemin de cinq sauts scorait au-dessus
+   d'un chemin d'un saut. La liste que l'analyste dépile par le haut classait
+   donc les attaques les plus difficiles comme les plus dangereuses.
+2. **`impact` valait 7.0 pour tout chemin**, quelle que soit la cible. Le champ
+   ne portait aucune information ; il vient maintenant de la criticité de la
+   cible.
+3. **`has_internet_entry`, `has_exploit_step`, `has_priv_esc` n'étaient jamais
+   calculés.** Déclarés, persistés, relus par l'API — et `false` pour chaque
+   chemin en base. Ce sont précisément les filtres qu'un analyste utilise.
+4. **`include_types` était ignoré.** Stocké, renvoyé par l'API, jamais lu par
+   la traversée : restreindre un scénario à un type de nœud ne changeait rien.
+5. **`path_type` valait `lateral_movement` pour tout chemin.**
+6. **Le plafond de 200 chemins tronquait en silence.** Un scénario enregistrait
+   « 200 chemins » sans qu'on puisse le distinguer d'un graphe qui en a 200.
+7. **`max_hops` était dépassé d'un saut** : la condition d'arrêt testait
+   `> max_hops+1`, donc des chemins d'un saut de trop remontaient.
+
+S'y ajoutait le coût mémoire : le BFS copiait l'ensemble `visited` **et** les
+deux séquences à chaque arête explorée, soit une croissance en nœuds × arêtes.
+Le parcours est maintenant en profondeur avec retour arrière — un seul ensemble
+et deux tranches, déroulés au retour — donc l'empreinte est la profondeur du
+parcours, bornée par `max_hops`.
+
+`ListNodes` plafonne par ailleurs à 500 résultats : une traversée qui s'en
+serait servie aurait parcouru une partie du graphe en rapportant les chemins
+qu'elle aurait trouvés. `LoadGraph` charge le graphe entier ou échoue.
+
+**Le préalable à Neo4j est posé.** L'analyseur dépend désormais de
+`service.GraphStore` — `LoadGraph`, `SetScenarioStatus`, `SavePaths`,
+`UpdateScenarioResult` — et non du dépôt PostgreSQL. Une implémentation Neo4j
+satisfait la même interface sans que la traversée change. Seize tests couvrent
+le parcours sur des graphes construits dans le test, sans base du tout.
+
+**Ce que Neo4j apporterait vraiment**, une fois les défauts ci-dessus corrigés :
+
+- la traversée s'exécute **là où sont les données** au lieu de charger le
+  graphe entier du tenant dans le processus à chaque scénario ;
+- le plus court chemin **pondéré** (Dijkstra, A\*) que le parcours actuel ne
+  fait pas : `weight` est accumulé mais l'ordre reste le nombre de sauts ;
+- des algorithmes de graphe prêts à l'emploi — centralité d'intermédiarité pour
+  les points d'étranglement, au lieu du comptage d'occurrences actuel.
+
+**Pourquoi l'implémentation n'est pas livrée ici.** Neo4j ne peut pas être
+exécuté dans cet environnement : le proxy refuse (403) aussi bien les images
+conteneur que l'archive de distribution. Écrire le pilote, le schéma, les
+requêtes Cypher et la double écriture sans pouvoir les exécuter **une seule
+fois** produirait du code qui compile et dont personne ne sait s'il fonctionne
+— sur le différenciateur produit de la plateforme. C'est exactement le genre de
+livraison « qui a l'air finie » que cet audit reproche au reste du dépôt.
+
+**Plan de migration, à exécuter dans un environnement où Neo4j tourne :**
+
+1. Service `neo4j` dans `docker-compose`, contraintes d'unicité sur
+   `(tenant_id, id)` pour `:AttackNode`, index sur `tenant_id`.
+2. `repository/graph_neo4j.go` implémentant `service.GraphStore`. `LoadGraph`
+   devient d'abord un `MATCH` équivalent, à iso-comportement.
+3. **Double écriture** sur les upserts de nœuds et d'arêtes, PostgreSQL restant
+   la source de vérité, avec une commande de réconciliation qui compare les
+   deux et compte les écarts.
+4. Bascule de la lecture vers Neo4j derrière une variable d'environnement, par
+   tenant, avec les tests de traversée rejoués contre les deux implémentations
+   — ils sont écrits pour ça.
+5. Une fois la parité établie, pousser la traversée dans Cypher
+   (`shortestPath`, `apoc.path.expandConfig`) et retirer `LoadGraph` du chemin
+   chaud.
+
+L'isolation tenant est le point de vigilance : en PostgreSQL elle est une
+colonne présente dans chaque `WHERE`. En Cypher elle devient une propriété
+qu'il faut filtrer explicitement à chaque `MATCH`, sans le filet du schéma.
+Une base par tenant l'élimine, au prix de la densité — arbitrage à trancher
+avant l'étape 2.
+
 ---
 
 ## 4. Points forts à préserver
@@ -485,7 +570,9 @@ Aucun déploiement production sans cette phase.
   d'audit, et le SOAR autonome (portée `platform`).
 - **SOAR réel** — *fait*, voir §3.3. Les quinze actions appellent les services
   de remédiation ; un échec fait échouer l'étape.
-- **Neo4j** + migration des modèles `attackpath` et `knowledgegraph`. Plus la migration est tardive,
+- **Neo4j** — préalable posé (§3.5) : l'analyseur dépend d'une interface `GraphStore`, et les sept
+  défauts du parcours qui auraient été transcrits en Cypher sont corrigés. L'implémentation attend un
+  environnement où Neo4j peut tourner. Migration des modèles `attackpath` et `knowledgegraph` : plus elle est tardive,
   plus la réécriture des couches repository/service coûte cher.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
   partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).

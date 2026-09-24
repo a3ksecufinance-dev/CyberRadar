@@ -305,6 +305,9 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
   l'étape qui a posé la règle. netsec n'expose pas de suppression : la règle
   passe en `log` plutôt que d'être retirée, ce qui laisse la trace.
 - **Neo4j est absent.** Attack Path et Knowledge Graph tournent sur PostgreSQL.
+  Le préalable est posé — l'analyseur dépend de `service.GraphStore`, pas du
+  dépôt — mais l'implémentation Neo4j reste à écrire, et à exécuter au moins
+  une fois avant d'être crue. Voir §3.5 de l'audit.
 - **Pas de magasin vectoriel.** Le Copilot n'a pas de RAG.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
