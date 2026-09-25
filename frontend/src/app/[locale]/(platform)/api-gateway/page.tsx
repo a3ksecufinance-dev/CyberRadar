@@ -53,7 +53,7 @@ function APIKeyRow({ k, onRotate, onRevoke }: { k: APIKey; onRotate: () => void;
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
-          {k.scopes.map(s => <ScopeTag key={s} scope={s} />)}
+          {(k.scopes ?? []).map(s => <ScopeTag key={s} scope={s} />)}
         </div>
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
@@ -112,7 +112,7 @@ function WebhookRow({ wh, onToggle, onTest, onDelete }: {
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
-          {wh.events.map(e => (
+          {(wh.events ?? []).map(e => (
             <span key={e} className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${EVENTS_COLORS[e] ?? 'bg-slate-800 text-slate-400 border-slate-600'}`}>
               {e}
             </span>

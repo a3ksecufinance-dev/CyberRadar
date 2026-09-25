@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { useAssets, useAssetStats } from '@/hooks'
-import { formatDate } from '@/lib/utils'
+import { countOf, criticalityLabel, formatDateOpt } from '@/lib/utils'
 
 const CRIT_VARIANTS: Record<string, string> = { critical: 'critical', high: 'high', medium: 'medium', low: 'low' }
 const FILTERS = ['All', 'Critical', 'High', 'Production'] as const
@@ -21,11 +21,14 @@ export default function AssetsPage() {
   const [search, setSearch] = useState('')
   const [activeFilter, setActiveFilter] = useState('All')
 
+  // The asset service reads `criticality` as an integer (1 low … 4 critical)
+  // and names its text filter `q`. Words and `search` were both ignored, so
+  // neither the filter buttons nor the search box did anything.
   const params: Record<string, string> = { limit: '100' }
-  if (activeFilter === 'Critical') params.criticality = 'critical'
-  if (activeFilter === 'High') params.criticality = 'high'
+  if (activeFilter === 'Critical') params.criticality = '4'
+  if (activeFilter === 'High') params.criticality = '3'
   if (activeFilter === 'Production') params.environment = 'production'
-  if (search.trim()) params.search = search.trim()
+  if (search.trim()) params.q = search.trim()
 
   const { data: assetsData, isLoading, error, mutate } = useAssets(params)
   const { data: stats } = useAssetStats()
@@ -50,9 +53,11 @@ export default function AssetsPage() {
         <div className="grid grid-cols-4 gap-4">
           {[
             { label: 'Total Assets', value: stats.total, color: 'text-slate-200' },
-            { label: 'Critical', value: stats.critical, color: 'text-red-400' },
+            { label: 'Critical', value: countOf(stats.by_criticality, 'critical'), color: 'text-red-400' },
             { label: 'High Risk', value: stats.high_risk, color: 'text-orange-400' },
-            { label: 'Avg Risk Score', value: stats.avg_risk_score?.toFixed(0) ?? '—', color: 'text-amber-400' },
+            // CBS and SWIFT connectivity is what makes an asset a banking
+            // asset; the service counts it, so the page shows it.
+            { label: 'CBS / SWIFT', value: `${stats.cbs_connected} / ${stats.swift_connected}`, color: 'text-cyan-400' },
           ].map((s) => (
             <Card key={s.label}>
               <CardContent className="pt-4">
@@ -113,15 +118,16 @@ export default function AssetsPage() {
                       <p className="text-xs text-slate-500">{a.environment}</p>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-400">{a.asset_type}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{a.ip_address ?? '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-400">{a.ip_addresses?.[0] ?? '—'}</td>
                     <td className="px-4 py-3">
-                      <Badge variant={(CRIT_VARIANTS[a.criticality] ?? 'default') as any}>
-                        {a.criticality.toUpperCase()}
+                      {/* criticality is an int 1–4 on the wire, not a word. */}
+                      <Badge variant={(CRIT_VARIANTS[criticalityLabel(a.criticality)] ?? 'default') as any}>
+                        {criticalityLabel(a.criticality).toUpperCase()}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-400">{a.department ?? '—'}</td>
                     <td className="px-4 py-3"><RiskScore score={a.risk_score} /></td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{formatDate(a.last_seen_at)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{formatDateOpt(a.last_seen_at)}</td>
                   </tr>
                 ))}
               </tbody>

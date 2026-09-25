@@ -1,25 +1,16 @@
-import { getTranslations } from 'next-intl/server'
+'use client'
+import { useTranslations } from 'next-intl'
 import { Cpu, Check, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SeverityBadge } from '@/components/shared/SeverityBadge'
 import { RiskScore } from '@/components/shared/RiskScore'
 import { EmptyState } from '@/components/shared/EmptyState'
-import { formatDate } from '@/lib/utils'
-
-const mockOTAssets = [
-  { id: 'o1', name: 'PLC-HVAC-01', asset_type: 'plc', vendor: 'Siemens', model: 'S7-300', purdue_level: 1, protocol: 'S7comm', is_internet_facing: false, affects_safety: true, is_patched: false, risk_score: 78, last_seen_at: new Date(Date.now() - 600000).toISOString() },
-  { id: 'o2', name: 'RTU-Power-01', asset_type: 'rtu', vendor: 'ABB', model: 'RTU560', purdue_level: 1, protocol: 'IEC 61850', is_internet_facing: false, affects_safety: true, is_patched: true, risk_score: 42, last_seen_at: new Date(Date.now() - 1200000).toISOString() },
-  { id: 'o3', name: 'HMI-DataCenter', asset_type: 'hmi', vendor: 'Rockwell', model: 'FactoryTalk', purdue_level: 2, protocol: 'EtherNet/IP', is_internet_facing: false, affects_safety: false, is_patched: false, risk_score: 65, last_seen_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: 'o4', name: 'SCADA-BMS', asset_type: 'scada', vendor: 'Honeywell', model: 'EBI R530', purdue_level: 2, protocol: 'BACnet', is_internet_facing: true, affects_safety: false, is_patched: false, risk_score: 91, last_seen_at: new Date(Date.now() - 900000).toISOString() },
-  { id: 'o5', name: 'Historian-OT', asset_type: 'historian', vendor: 'OSIsoft', model: 'PI Server', purdue_level: 3, protocol: 'PI-AF', is_internet_facing: false, affects_safety: false, is_patched: true, risk_score: 28, last_seen_at: new Date(Date.now() - 7200000).toISOString() },
-]
-
-const mockOTEvents = [
-  { id: 'oe1', title: 'Unauthorized Modbus READ on HVAC PLC', severity: 'high', source: 'ids', created_at: new Date(Date.now() - 900000).toISOString() },
-  { id: 'oe2', title: 'Abnormal S7comm command sequence detected', severity: 'critical', source: 'ids', created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: 'oe3', title: 'SCADA-BMS external connection attempt', severity: 'medium', source: 'firewall', created_at: new Date(Date.now() - 7200000).toISOString() },
-]
+import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { SeverityBars } from '@/components/charts/SeverityBars'
+import { useOTAssets, useOTEvents, useOTStats } from '@/hooks'
+import { countOf, formatDate } from '@/lib/utils'
 
 const purdueColors: Record<number, string> = {
   0: 'bg-red-950 text-red-400 border-red-800',
@@ -39,12 +30,17 @@ const purdueLabel: Record<number, string> = {
   5: 'L5 Cloud',
 }
 
-const assetTypeIcon = (type: string) => {
-  return <Cpu className="h-4 w-4 text-cyan-500" />
-}
+const UNKNOWN_LEVEL = 'bg-slate-800 text-slate-400 border-slate-700'
 
-export default async function OTPage() {
-  const t = await getTranslations('ot')
+export default function OTPage() {
+  const t = useTranslations('ot')
+
+  const { data: assetsData, isLoading, error, mutate } = useOTAssets({ limit: '100' })
+  const { data: eventsData } = useOTEvents({ limit: '10' })
+  const { data: stats } = useOTStats()
+
+  const assets = assetsData?.items ?? []
+  const events = eventsData?.items ?? []
 
   return (
     <div className="space-y-6">
@@ -56,10 +52,12 @@ export default async function OTPage() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'OT Assets', value: mockOTAssets.length, color: 'text-slate-200' },
-          { label: 'Internet Facing', value: mockOTAssets.filter(a => a.is_internet_facing).length, color: 'text-red-400' },
-          { label: 'Safety Critical', value: mockOTAssets.filter(a => a.affects_safety).length, color: 'text-orange-400' },
-          { label: 'Unpatched', value: mockOTAssets.filter(a => !a.is_patched).length, color: 'text-amber-400' },
+          { label: 'OT Assets', value: stats?.total_assets ?? assets.length, color: 'text-slate-200' },
+          { label: 'Internet Facing', value: stats?.internet_facing_assets ?? 0, color: 'text-red-400' },
+          // Safety impact is recorded on a vulnerability, not on the asset:
+          // an asset is not "safety critical", a flaw in it is.
+          { label: 'Safety-impact Vulns', value: stats?.safety_impact_vulns ?? 0, color: 'text-orange-400' },
+          { label: 'Unpatched', value: stats?.unpatched_assets ?? 0, color: 'text-amber-400' },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -70,34 +68,45 @@ export default async function OTPage() {
         ))}
       </div>
 
-      {/* Purdue Model visual summary */}
+      {/* Purdue distribution — the service counts this itself. */}
       <Card>
         <CardHeader>
           <CardTitle>Purdue Model Distribution</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex gap-3">
-            {[0, 1, 2, 3, 4].map((level) => {
-              const count = mockOTAssets.filter(a => a.purdue_level === level).length
-              return (
-                <div key={level} className="flex flex-1 flex-col items-center gap-2">
-                  <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${purdueColors[level]}`}>
-                    {purdueLabel[level]}
-                  </span>
-                  <span className="text-lg font-bold text-slate-200">{count}</span>
-                </div>
-              )
-            })}
+            {[0, 1, 2, 3, 4, 5].map((level) => (
+              <div key={level} className="flex flex-1 flex-col items-center gap-2">
+                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${purdueColors[level]}`}>
+                  {purdueLabel[level]}
+                </span>
+                <span className="text-lg font-bold text-slate-200">
+                  {/* The service keys this map "level_0".."level_5", not "0".."5". */}
+                  {countOf(stats?.assets_by_purdue, `level_${level}`)}
+                </span>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* OT Assets Table */}
+      {stats && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <SeverityBars title="OT events by severity" breakdown={stats.events_by_severity} />
+          <SeverityBars title="OT vulnerabilities by severity" breakdown={stats.vulns_by_severity} />
+        </div>
+      )}
+
+      {/* OT assets */}
       <div>
         <h2 className="mb-3 text-sm font-semibold text-slate-300">{t('assets')}</h2>
         <Card>
           <CardContent className="p-0">
-            {mockOTAssets.length === 0 ? (
+            {isLoading ? (
+              <LoadingState variant="table" rows={6} />
+            ) : error ? (
+              <ErrorState message={error.message} retry={() => mutate()} />
+            ) : assets.length === 0 ? (
               <EmptyState message={t('noAssets')} />
             ) : (
               <table className="w-full text-sm">
@@ -108,40 +117,42 @@ export default async function OTPage() {
                     <th className="px-4 py-3 text-left">{t('purdueLevel')}</th>
                     <th className="px-4 py-3 text-left">{t('protocol')}</th>
                     <th className="px-4 py-3 text-center">{t('internetFacing')}</th>
-                    <th className="px-4 py-3 text-center">{t('affectsSafety')}</th>
+                    <th className="px-4 py-3 text-center">Criticality</th>
                     <th className="px-4 py-3 text-center">Patched</th>
                     <th className="px-4 py-3 text-left">Risk</th>
-                    <th className="px-4 py-3 text-left">Last Seen</th>
+                    <th className="px-4 py-3 text-left">Updated</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/40">
-                  {mockOTAssets.map((asset) => (
-                    <tr key={asset.id} className="hover:bg-slate-800/40 cursor-pointer transition-colors">
+                  {assets.map((asset) => (
+                    <tr key={asset.id} className="cursor-pointer transition-colors hover:bg-slate-800/40">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          {assetTypeIcon(asset.asset_type)}
+                          <Cpu className="h-4 w-4 text-cyan-500" />
                           <div>
                             <p className="font-medium text-slate-200">{asset.name}</p>
-                            <p className="text-xs text-slate-500">{asset.vendor} {asset.model}</p>
+                            <p className="text-xs text-slate-500">
+                              {[asset.vendor, asset.model].filter(Boolean).join(' ') || asset.zone || '—'}
+                            </p>
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-400">{asset.asset_type.toUpperCase()}</td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${purdueColors[asset.purdue_level]}`}>
-                          {purdueLabel[asset.purdue_level]}
+                        <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${purdueColors[asset.purdue_level] ?? UNKNOWN_LEVEL}`}>
+                          {purdueLabel[asset.purdue_level] ?? `L${asset.purdue_level}`}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-400">{asset.protocol}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-400">
+                        {asset.protocol?.join(', ') || '—'}
+                      </td>
                       <td className="px-4 py-3 text-center">
                         {asset.is_internet_facing
                           ? <Badge variant="critical" className="text-[10px]">YES</Badge>
                           : <span className="text-xs text-slate-500">No</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {asset.affects_safety
-                          ? <Badge variant="high" className="text-[10px]">YES</Badge>
-                          : <span className="text-xs text-slate-500">No</span>}
+                        <SeverityBadge severity={asset.criticality} />
                       </td>
                       <td className="px-4 py-3 text-center">
                         {asset.is_patched
@@ -149,7 +160,7 @@ export default async function OTPage() {
                           : <X className="mx-auto h-4 w-4 text-red-400" />}
                       </td>
                       <td className="px-4 py-3"><RiskScore score={asset.risk_score} /></td>
-                      <td className="px-4 py-3 text-xs text-slate-500">{formatDate(asset.last_seen_at)}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{formatDate(asset.updated_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -159,23 +170,33 @@ export default async function OTPage() {
         </Card>
       </div>
 
-      {/* Recent Events */}
+      {/* Recent events */}
       <div>
         <h2 className="mb-3 text-sm font-semibold text-slate-300">{t('events')}</h2>
-        <div className="space-y-2">
-          {mockOTEvents.map((ev) => (
-            <Card key={ev.id}>
-              <CardContent className="flex items-center justify-between py-3">
-                <div className="flex items-center gap-3">
-                  <SeverityBadge severity={ev.severity} />
-                  <p className="text-sm text-slate-200">{ev.title}</p>
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">{ev.source}</span>
-                </div>
-                <span className="text-xs text-slate-500">{formatDate(ev.created_at)}</span>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        {events.length === 0 ? (
+          <Card>
+            <CardContent className="py-6 text-center text-xs text-slate-500">
+              No OT events recorded
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {events.map((ev) => (
+              <Card key={ev.id}>
+                <CardContent className="flex items-center justify-between py-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <SeverityBadge severity={ev.severity} />
+                    <p className="truncate text-sm text-slate-200">{ev.title}</p>
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                      {ev.detected_by ?? ev.event_type}
+                    </span>
+                  </div>
+                  <span className="whitespace-nowrap text-xs text-slate-500">{formatDate(ev.event_time)}</span>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

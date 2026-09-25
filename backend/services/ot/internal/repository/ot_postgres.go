@@ -671,9 +671,12 @@ func (r *OTRepository) CreateEvent(ctx context.Context, tenantID uuid.UUID, req 
 		 (tenant_id,asset_id,zone_id,event_type,severity,title,description,
 		  source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,event_time,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		           source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		           acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		           COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		           COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		           COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		           COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		           COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		           event_time,tags,created_at,updated_at`,
 		tenantID, req.AssetID, req.ZoneID, req.EventType, req.Severity,
 		req.Title, req.Description, req.SourceIP, req.DestIP, req.Protocol,
@@ -719,9 +722,12 @@ func (r *OTRepository) ListEvents(ctx context.Context, tenantID uuid.UUID, f mod
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		        source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		        acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		        COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		        COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		        COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		        COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		        COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		        event_time,tags,created_at,updated_at
 		 FROM ot_events WHERE `+where+
 			fmt.Sprintf(` ORDER BY event_time DESC LIMIT $%d OFFSET $%d`, n, n+1),
@@ -776,9 +782,12 @@ func (r *OTRepository) UpdateEvent(ctx context.Context, tenantID, id uuid.UUID, 
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_events SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		           source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		           acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		           COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		           COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		           COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		           COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		           COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		           event_time,tags,created_at,updated_at`,
 		args...,
 	).Scan(&e.ID, &e.TenantID, &e.AssetID, &e.ZoneID, &e.EventType, &e.Severity, &e.Status,
@@ -1141,9 +1150,12 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 
 	// Recent critical events
 	erows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		        source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		        acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		        COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		        COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		        COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		        COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		        COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		        event_time,tags,created_at,updated_at
 		 FROM ot_events WHERE tenant_id=$1 AND status='open'
 		 ORDER BY event_time DESC LIMIT 5`, tenantID)

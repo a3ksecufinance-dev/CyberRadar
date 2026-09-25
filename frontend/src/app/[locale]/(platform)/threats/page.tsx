@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { useIOCs, useTIStats } from '@/hooks'
-import { formatDate } from '@/lib/utils'
+import { countOf, formatDateOpt } from '@/lib/utils'
 
 const iocTypeColors: Record<string, string> = {
   ip: 'bg-orange-950 text-orange-400 border-orange-800',
@@ -30,8 +30,9 @@ export default function ThreatsPage() {
   const t = useTranslations('threats')
   const [search, setSearch] = useState('')
 
+  // ListIOCs names its text filter `q`; `search` was ignored.
   const params: Record<string, string> = { limit: '100' }
-  if (search.trim()) params.search = search.trim()
+  if (search.trim()) params.q = search.trim()
 
   const { data: iocsData, isLoading, error, mutate } = useIOCs(params)
   const { data: stats } = useTIStats()
@@ -54,8 +55,8 @@ export default function ThreatsPage() {
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: 'Active IOCs', value: stats?.active_iocs ?? iocs.length, color: 'text-red-400' },
-          { label: 'Critical IOCs', value: stats?.critical_iocs ?? iocs.filter(i => i.severity === 'critical').length, color: 'text-red-400' },
-          { label: 'Matched Events', value: stats?.matched_events ?? 0, color: 'text-orange-400' },
+          { label: 'Critical IOCs', value: countOf(stats?.by_severity, 'critical'), color: 'text-red-400' },
+          { label: 'Hits (24h)', value: stats?.hits_last_24h ?? 0, color: 'text-orange-400' },
           { label: 'Total IOCs', value: stats?.total_iocs ?? iocsData?.meta?.total ?? iocs.length, color: 'text-slate-200' },
         ].map((s) => (
           <Card key={s.label}>
@@ -91,10 +92,10 @@ export default function ThreatsPage() {
                   <th className="px-4 py-3 text-left">{t('iocType')}</th>
                   <th className="px-4 py-3 text-left">{t('iocValue')}</th>
                   <th className="px-4 py-3 text-left">Tags</th>
-                  <th className="px-4 py-3 text-left">{t('source')}</th>
+                  <th className="px-4 py-3 text-left">Actor / Family</th>
                   <th className="px-4 py-3 text-left">{t('confidence')}</th>
                   <th className="px-4 py-3 text-left">Severity</th>
-                  <th className="px-4 py-3 text-left">{t('lastSeen')}</th>
+                  <th className="px-4 py-3 text-left">Last hit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/40">
@@ -108,12 +109,12 @@ export default function ThreatsPage() {
                     <td className="px-4 py-3 font-mono text-xs text-slate-300 max-w-xs truncate">{ioc.value}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1">
-                        {ioc.tags.map((tag) => (
+                        {(ioc.tags ?? []).map((tag) => (
                           <Badge key={tag} variant="outline" className="text-[10px]">{tag}</Badge>
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{ioc.source}</td>
+                    <td className="px-4 py-3 text-xs text-slate-400">{ioc.threat_actor ?? ioc.malware_family ?? '—'}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 rounded-full bg-slate-700">
@@ -123,7 +124,7 @@ export default function ThreatsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3"><SeverityBadge severity={ioc.severity} /></td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{formatDate(ioc.last_seen_at)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{formatDateOpt(ioc.last_hit_at)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -295,6 +295,49 @@ de rendre une erreur qu'un appelant lirait comme « aucun événement ». La
 dégradation se lit dans `crp_sliding_window_fallback_total` — à surveiller, car
 elle signifie que les seuils sont redevenus locaux à chaque réplica.
 
+### Lire l'API depuis le frontend
+
+Tout chemin vit dans la table `ROUTES` de `frontend/src/lib/api.ts` — jamais en
+dur dans un hook ou une page. Les hooks de domaine la lisent :
+
+```ts
+export function useIncidents(params?: Record<string, string>) {
+  return useApiList<Incident>('ir', ROUTES.ir.incidents, params)
+}
+```
+
+Deux règles qui coûtent cher à ignorer :
+
+**Les interfaces de `src/types` sont transcrites des tags `json:` des structs
+Go.** Un champ absent de la struct est absent du type. Inventer un champ pour
+arranger un écran donne une cellule vide en production plutôt qu'une erreur de
+compilation — c'est exactement ce qui a produit sept pages muettes. Les modèles
+sont dans `backend/services/<svc>/internal/model/`.
+
+**La forme des réponses n'est pas uniforme.** Trois coexistent : enveloppe avec
+tableau nu, enveloppe avec tableau nommé, et pas d'enveloppe du tout (dspm, ir,
+mobile, ot, scs écrivent leur JSON eux-mêmes). `payloadOf` et `itemsOf` les
+réconcilient dans `lib/api.ts`, donc un hook n'a pas à savoir laquelle il
+reçoit. Ne pas contourner l'adaptateur ; l'alignement des services sur
+`response.OKWithMeta` est le vrai correctif, listé en Phase 3.
+
+Vérifier qu'un paramètre de filtre est bien lu par le handler avant de
+l'envoyer : un paramètre inconnu est ignoré en silence, et la page semble ne
+rien filtrer sans afficher d'erreur.
+
+### Graphiques
+
+`recharts`, avec les composants de `src/components/charts/`. La sévérité est une
+échelle de **statut** : elle reprend les couleurs de `SeverityBadge` pour qu'un
+graphique et un badge côte à côte ne montrent jamais deux rouges différents, et
+chaque barre porte son nom en étiquette directe — la couleur ne porte jamais
+seule l'information.
+
+Les répartitions viennent des `map[string]int` que les services calculent déjà
+(`by_severity`, `by_status`, `assets_by_purdue`…). Les lire avec `countOf`, qui
+ignore la casse : le SIEM renvoie `CRITICAL`, les domaines Postgres `critical`.
+Attention aux clés préfixées — `assets_by_purdue` est clé `level_1`, pas `1`.
+
 ### Secrets
 
 `internal/pkg/vault` lit Vault quand il est configuré, l'environnement sinon.
@@ -324,6 +367,11 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Le frontend a besoin de Keycloak | Sans lui, `/login` renvoie une erreur de configuration NextAuth. |
 | `next.config` doit rester `.mjs` | Next 14 ne supporte pas une configuration TypeScript. |
 | Les clés et certificats ne sont pas versionnés | `.gitignore` exclut `*.pem` et `*.key`. Les générer localement. |
+| Trois formes de réponse d'API | Enveloppe/tableau nu, enveloppe/tableau nommé, ou pas d'enveloppe. `lib/api.ts` les réconcilie côté frontend. |
+| `asset.criticality` est un entier | 1 faible … 4 critique. `Criticality` est un `int` Go sans `MarshalJSON`. |
+| Les sévérités du SIEM sont en majuscules | `Enum8('LOW'…'CRITICAL')` côté ClickHouse ; les domaines Postgres écrivent en minuscules. |
+| Le rôle `super_admin` n'accorde rien | Le contournement vient de `identities.privilege_level`, pas du rôle. |
+| Une valeur d'énumération invalide renvoie 500 | Les contraintes CHECK remontent en erreur interne, pas en 422. |
 
 ---
 
@@ -345,8 +393,20 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.
-- **Sept pages frontend affichent des données figées** : `ot`, `risk`, `ir`,
-  `scs`, `attackpath`, `compliance`, `settings`.
+- **Rien ne publie de `KPISnapshot`.** `/dashboard/kpi/timeseries` et
+  `/kpi/snapshot` lisent ClickHouse, alimenté par un consommateur Kafka, mais
+  aucun service n'émet l'événement : ces endpoints renvoient toujours vide. Pas
+  de série temporelle dans l'interface tant que le producteur n'existe pas.
+- **Les réponses de liste n'ont pas une forme unique.** Cinq services
+  (`dspm`, `ir`, `mobile`, `ot`, `scs`) n'émettent aucune enveloppe et neuf
+  emballent leur tableau sous une clé nommée. Le frontend réconcilie les trois
+  formes ; un autre client de l'API devra faire de même.
+- **La page Réglages ne peut rien écrire.** Aucun endpoint de réglages du tenant
+  n'existe ; elle liste les utilisateurs réels et dit ce qui se configure
+  ailleurs.
+- **Le rôle `super_admin` n'accorde aucune permission.** Seul
+  `identities.privilege_level = 'super_admin'` ouvre le contournement. Les deux
+  notions devraient être unifiées.
 - **Les agents d'ingestion déployés doivent être re-provisionnés.**
   `POST /events/ingest`, `/events/heartbeat` et `POST /audit/events` exigent
   désormais un compte de service ; un jeton utilisateur y reçoit un 403.

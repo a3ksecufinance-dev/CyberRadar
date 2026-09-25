@@ -505,6 +505,120 @@ existe, mais aucun service ne pousse ses incidents résolus dedans. Le découpag
 en chunks est laissé à l'appelant — un runbook de trente pages indexé d'un bloc
 se récupère d'un bloc.
 
+### 3.7 Le frontend — ce qui a été fait
+
+Les sept pages sur données codées en dur étaient le symptôme visible. Le
+diagnostic est plus large : **la couche de données du frontend décrivait une API
+imaginaire**. Les interfaces de `src/types` ne correspondaient à aucune struct Go,
+quatre chemins pointaient vers des routes inexistantes, et le lecteur de listes
+supposait une forme de réponse que la majorité des services n'émet pas. Une page
+« branchée » affichait donc des cellules vides sans la moindre erreur.
+
+**Trois formes de réponse coexistent.** Le contrat documenté est
+`{"data": …, "meta": …, "error": null}`. Dans les faits :
+
+| Forme | Exemple | Services |
+|---|---|---|
+| Enveloppe, tableau nu | `{"data":[…],"meta":{…}}` | identity (seul à utiliser `OKWithMeta`) |
+| Enveloppe, tableau nommé | `{"data":{"alerts":[…],"total":12}}` | siem, ti, vuln, attackpath, compliance, apifw, dashboard, copilot |
+| Aucune enveloppe | `{"incidents":[…],"total":12}` | **dspm, ir, mobile, ot, scs** |
+
+Cinq services écrivent leur JSON eux-mêmes au lieu de passer par
+`internal/pkg/response` ; quatre autres (cspm, iga, netsec, risk) mélangent les
+deux. Aucun client ne peut écrire un seul analyseur. La réconciliation est faite
+une fois, dans `lib/api.ts` (`payloadOf` / `itemsOf`), plutôt que dans chaque
+hook. **La vraie correction est de normaliser les services sur `OKWithMeta`** —
+c'est du travail backend, listé en Phase 3 ci-dessous ; l'adaptateur tient
+jusque-là.
+
+**Quatre chemins n'existaient pas.** `/api/v1/incidents` (réel :
+`/api/v1/ir/incidents`), `/api/v1/stats` (réel : `/api/v1/ir/stats`),
+`/api/v1/vulnerabilities` (réel : `/api/v1/vuln/vulnerabilities`) et
+`/api/v1/mobile/devices/stats` (réel : `/api/v1/mobile/stats`). Le Copilot
+postait vers `/api/v1/copilot/chat`, qui n'existe pas : le service adresse une
+session (`POST /copilot/sessions/{id}/chat`) et attend `{content}`, pas
+`{message, session_id}`. Le `catch` de la page présentait chaque échec comme
+« service indisponible » — c'est ainsi qu'un 404 permanent a pu passer pour une
+panne. Les chemins vivent désormais dans une table `ROUTES` unique, et le
+Copilot ouvre une vraie session avant son premier message.
+
+**Les types décrivaient autre chose.** `Vulnerability` déclarait `severity`,
+`affected_component`, `remediation_status`, `asset_count`, `exploit_in_wild`,
+`first_seen_at` : aucun de ces champs n'existe. Le vrai modèle porte
+`cvss_severity`, `affected_products`, `is_exploited`, `epss_score`,
+`published_at` — et le statut de remédiation appartient à un *finding* (une
+vulnérabilité sur un actif), pas au CVE. `AssetStats` annonçait `critical`,
+`online`, `avg_risk_score` ; le service renvoie `by_criticality`, `by_status`,
+`cbs_connected`, `swift_connected`. Chaque interface est maintenant transcrite
+des tags `json:` de sa struct, ce qui transforme une cellule vide en erreur de
+compilation.
+
+Deux pièges de sérialisation que seuls des appels réels ont révélés :
+
+- **`asset.criticality` est un entier 1–4**, pas un mot — `Criticality` est un
+  `int` sans `MarshalJSON`. La page appelait `.toUpperCase()` dessus : plantage
+  à la première ligne de données.
+- **Les sévérités du SIEM sont en majuscules** (`Enum8('LOW','MEDIUM','HIGH',
+  'CRITICAL')` côté ClickHouse), celles des domaines Postgres en minuscules.
+  `countOf` lit donc les répartitions sans tenir compte de la casse, et le
+  filtre de sévérité de la page SIEM envoie la valeur en majuscules — en
+  minuscules il ne correspondait à rien et vidait le tableau sans erreur.
+- **`assets_by_purdue` est clé `level_1`, pas `1`** (idem `vendors_by_tier` →
+  `tier_1`). La distribution Purdue affichait zéro partout.
+
+**Des filtres qui ne filtraient rien.** La page actifs envoyait
+`criticality=critical` là où le service lit un entier, et `search=` là où il lit
+`q=`. La page menaces envoyait `search=` pour un `q=`. La page SIEM offrait une
+recherche plein texte qu'aucun paramètre ne porte : elle restreint maintenant la
+page déjà chargée et le dit.
+
+**Deux bugs backend découverts en exécutant.** `POST /ir/incidents` renvoyait
+500 sur *tout* incident : `estimated_impact`, `lead_name`, `description`,
+`source`, `source_ref` et `attack_vector` sont des colonnes nullables sans
+défaut, lues dans des `string` Go qui ne peuvent pas porter NULL
+(`cannot scan NULL into *string`). Aucun incident ne pouvait être créé — le
+domaine IR était mort. Même classe dans `POST /ot/events`
+(`acknowledged_by`, `resolved_by`). C'est la famille du bug de login corrigé en
+Phase 0. Les colonnes sont `COALESCE`-ées dans chaque requête qui lit la ligne,
+et `services/ir/.../incident_null_test.go` crée un incident sans aucun champ
+texte optionnel — le cas exact qui échouait. La CI le rend obligatoire via
+`IR_TEST_DSN`.
+
+**Les graphiques.** `recharts` était déclaré depuis le début et jamais importé.
+Il sert maintenant les répartitions que les API calculent déjà (sévérité,
+statut, niveau de risque, tier fournisseur) sur le dashboard, IR, OT, SCS,
+risque et vulnérabilités. La palette de sévérité du projet échoue le contrôle
+*catégoriel* (critical contre high mesurent ΔE 10,6 en vision normale) : c'est
+une échelle de **statut**, pas d'identité, les couleurs sont celles des badges
+pour ne pas afficher deux rouges différents côte à côte, et chaque barre porte
+son nom en étiquette directe — la couleur ne porte jamais seule l'information.
+
+**Pas de graphique de série temporelle.** `/dashboard/kpi/timeseries` lit
+ClickHouse, alimenté par un consommateur Kafka — mais **aucun service ne publie
+de `KPISnapshot`**. L'endpoint renverra toujours vide. Un widget condamné au
+vide n'a pas été livré ; le producteur manquant est le travail à faire.
+
+**Ce qui a été retiré plutôt que branché.** La page réglages listait six
+intégrations (« Keycloak SSO 24.0.1 », « MISP 2.4.188 », toutes « connected »)
+et des bascules « Imposer le MFA », « Liste d'IP autorisées ». Aucun endpoint ne
+sert ni n'accepte quoi que ce soit de tout cela : les versions étaient des
+littéraux et les bascules n'écrivaient nulle part. Une console qui affiche des
+contrôles non appliqués est pire qu'une console qui dit ne pas savoir. Les
+utilisateurs viennent d'`/api/v1/users` ; le reste est remplacé par ce qui est
+réellement configurable, et où.
+
+**Le rôle `super_admin` n'accorde rien.** `is_admin` — le contournement de
+vérification — vient de `identities.privilege_level`, tandis que le rôle nommé
+`super_admin` est délibérément absent de la matrice `000029`. Attribuer ce rôle
+à quelqu'un lui donne donc zéro permission. C'est fail-closed, donc pas
+dangereux, mais un administrateur qui accorde « super_admin » n'obtient pas ce
+qu'il croit. Les deux notions d'administrateur devraient être une seule.
+
+**Une valeur d'énumération invalide renvoie 500.** `incident_type`,
+`event_type`, `vendor_type` sont protégés par des contraintes CHECK ; une valeur
+hors liste remonte en erreur 500 au lieu d'un 422. L'utilisateur voit « erreur
+interne » pour une saisie invalide.
+
 ---
 
 ## 4. Points forts à préserver
@@ -651,9 +765,28 @@ Aucun déploiement production sans cette phase.
 
 ### Phase 3 — Complétude produit · 6 à 8 semaines
 
-- Câbler les 7 pages en données figées sur leurs hooks (`useOT` existe déjà : travail de raccordement).
-- **Intégrer recharts** : séries temporelles, heatmap MITRE ATT&CK, courbes de tendance.
+Fait (§3.7) : les 7 pages figées sont branchées, les types alignés sur les
+structs Go, les chemins et filtres corrigés, recharts introduit sur les
+répartitions que les API calculent.
+
+Reste :
+
+- **Normaliser les réponses des services sur `response.OKWithMeta`.** Cinq
+  services n'émettent aucune enveloppe et neuf emballent leurs listes sous une
+  clé nommée ; `lib/api.ts` réconcilie les trois formes en attendant. C'est la
+  dette la plus visible pour tout client tiers de l'API.
+- **Publier des `KPISnapshot`.** `/dashboard/kpi/*` lit ClickHouse via Kafka,
+  mais aucun service ne produit d'événement : les séries temporelles sont
+  impossibles tant que le producteur n'existe pas.
+- **Mapper les violations de contrainte CHECK sur 422**, pas 500.
+- **Unifier les deux notions d'administrateur** : le rôle `super_admin` n'accorde
+  aucune permission, seul `privilege_level` compte.
+- Auditer les autres services pour la lecture de colonnes nullables dans des
+  `string` Go — deux occurrences trouvées (IR, OT) en exécutant six services ;
+  vingt-quatre n'ont pas été exercés.
+- Endpoint de réglages du tenant, pour que la page Réglages puisse écrire.
 - Visualisation du graphe d'attaque (Cytoscape.js ou react-force-graph).
+- Heatmap MITRE ATT&CK.
 - Tests end-to-end Playwright sur les parcours critiques.
 
 ### Phase 4 — Production readiness · 6 à 8 semaines
