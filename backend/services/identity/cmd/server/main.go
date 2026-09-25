@@ -9,11 +9,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
+	pkgvault "github.com/cyberradar/platform/internal/pkg/vault"
 	"github.com/cyberradar/platform/services/identity/internal/handler"
 	"github.com/cyberradar/platform/services/identity/internal/repository"
 	"github.com/cyberradar/platform/services/identity/internal/service"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
@@ -24,13 +27,41 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "identity-service").Logger()
 
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"identity-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	// ─── Secrets ─────────────────────────────────────────────
+	// Vault is optional: unconfigured, every value below comes from the
+	// environment exactly as before.
+	vaultClient, vaultErr := pkgvault.NewFromEnv()
+	if vaultErr != nil {
+		logger.Fatal().Err(vaultErr).Msg("vault is configured but unusable")
+	}
+	secrets := pkgvault.NewResolver(vaultClient, envOrDefault("VAULT_SECRET_PREFIX", "crp/identity"))
+	logger.Info().Bool("vault", secrets.Enabled()).Msg("secret source")
+
+	dsn, dsnFrom, err := secrets.Get(context.Background(), "database", "url", "DATABASE_URL")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("resolve database url")
+	}
+	logger.Info().Str("source", string(dsnFrom)).Msg("database url resolved")
+
 	// ─── Config ──────────────────────────────────────────────
-	dsn            := mustEnv("DATABASE_URL")
-	port           := envOrDefault("SERVICE_PORT", "8002")
-	jwtSecret      := mustEnv("JWT_SECRET")
-	jwtExpiryMin   := envOrDefaultInt("JWT_EXPIRY_MINUTES", 60)
-	refreshExpHrs  := envOrDefaultInt("JWT_REFRESH_EXPIRY_HOURS", 24)
-	mfaIssuer      := envOrDefault("MFA_ISSUER", "CyberRadar")
+	port := envOrDefault("SERVICE_PORT", "8002")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	jwtExpiryMin := envOrDefaultInt("JWT_EXPIRY_MINUTES", 60)
+	refreshExpHrs := envOrDefaultInt("JWT_REFRESH_EXPIRY_HOURS", 24)
+	mfaIssuer := envOrDefault("MFA_ISSUER", "CyberRadar")
 
 	// ─── Database ────────────────────────────────────────────
 	ctx := context.Background()
@@ -44,26 +75,51 @@ func main() {
 	// ─── Wiring ──────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(dbPool)
 	roleRepo := repository.NewRoleRepository(dbPool)
+	serviceAccountRepo := repository.NewServiceAccountRepository(dbPool)
 
-	jwtSvc := service.NewJWTService(
-		jwtSecret,
-		time.Duration(jwtExpiryMin)*time.Minute,
-		time.Duration(refreshExpHrs)*time.Hour,
-	)
+	// The private key lives only here: identity is the platform's sole token
+	// issuer. Vault is preferred because it keeps the key off the filesystem
+	// and out of the container's environment entirely.
+	accessTTL := time.Duration(jwtExpiryMin) * time.Minute
+	refreshTTL := time.Duration(refreshExpHrs) * time.Hour
+
+	var jwtSigner *pkgjwt.Signer
+	if secrets.Enabled() {
+		pem, _, keyErr := secrets.Get(context.Background(), "jwt", "private_key", "")
+		if keyErr != nil {
+			logger.Warn().Err(keyErr).Msg("jwt private key not in vault, falling back to file")
+		} else if jwtSigner, err = pkgjwt.NewSigner([]byte(pem), accessTTL, refreshTTL); err != nil {
+			logger.Fatal().Err(err).Msg("jwt private key from vault is unusable")
+		} else {
+			logger.Info().Str("source", string(pkgvault.FromVault)).Msg("jwt private key loaded")
+		}
+	}
+	if jwtSigner == nil {
+		jwtSigner, err = pkgjwt.NewSignerFromFile(mustEnv("JWT_PRIVATE_KEY_PATH"), accessTTL, refreshTTL)
+		if err != nil {
+			logger.Fatal().Err(err).Msg("load jwt private key")
+		}
+		logger.Info().Str("source", "file").Msg("jwt private key loaded")
+	}
 	mfaSvc := service.NewMFAService(mfaIssuer)
 
-	userSvc := service.NewUserService(userRepo, roleRepo, jwtSvc, mfaSvc, logger)
+	userSvc := service.NewUserService(userRepo, roleRepo, jwtSigner, mfaSvc, logger)
+
+	serviceAccountSvc := service.NewServiceAccountService(serviceAccountRepo, roleRepo, jwtSigner, logger)
 
 	authHandler := handler.NewAuthHandler(userSvc)
+	serviceAccountHandler := handler.NewServiceAccountHandler(serviceAccountSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("identity-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"identity-service"}`)
@@ -78,14 +134,25 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// Public auth routes (no JWT required)
+		// Public auth routes: reached with a password or a client credential,
+		// so they cannot sit behind RequireJWT.
 		authHandler.RegisterPublicRoutes(r)
+		serviceAccountHandler.RegisterPublicRoutes(r)
 
 		// Authenticated routes
 		r.Group(func(r chi.Router) {
-			r.Use(jwtMiddleware(jwtSecret, logger))
+			r.Use(authmw.RequireJWT(jwtVerifier, logger))
 			authHandler.RegisterProtectedRoutes(r)
-			userHandler.RegisterRoutes(r)
+
+			// Machine credentials, gated per route by api_keys:*.
+			serviceAccountHandler.RegisterProtectedRoutes(r)
+
+			// User and identity administration; /auth/me and /auth/logout above
+			// stay reachable by any authenticated caller.
+			r.Group(func(r chi.Router) {
+				r.Use(authmw.RequirePermissionByMethod("users"))
+				userHandler.RegisterRoutes(r)
+			})
 		})
 	})
 
@@ -114,53 +181,6 @@ func main() {
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("identity-service stopped")
-}
-
-// jwtClaims mirrors platform JWT claims.
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	Email    string   `json:"email"`
-	Roles    []string `json:"roles"`
-	IsAdmin  bool     `json:"is_admin"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization header"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil {
-				logger.Warn().Err(err).Str("path", r.URL.Path).Msg("jwt_invalid")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid or expired token"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			claims, ok := token.Claims.(*jwtClaims)
-			if !ok || !token.Valid || claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token claims"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			ctx = context.WithValue(ctx, "roles", claims.Roles)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

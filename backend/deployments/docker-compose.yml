@@ -20,6 +20,11 @@ volumes:
   vault-data:
   keycloak-data:
 
+# Every service verifies tokens with the public key alone; only identity-service
+# is given the private key, so no other service can mint a token.
+x-jwt-public-key: &jwt-public-key
+  - ./jwt/public.pem:/etc/crp/jwt/public.pem:ro
+
 services:
 
   # ─── Keycloak (Identity Provider) ───────────────────────
@@ -63,7 +68,9 @@ services:
 
   # ─── PostgreSQL ─────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    # pgvector, not plain postgres: migration 000034 runs CREATE EXTENSION
+    # vector for the Copilot's knowledge index. Same PostgreSQL 16 underneath.
+    image: pgvector/pgvector:pg16
     container_name: crp-postgres
     restart: unless-stopped
     environment:
@@ -232,9 +239,10 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=crp-vault-dev-token
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8001:8001"
     depends_on:
@@ -259,12 +267,17 @@ services:
       - KAFKA_BROKERS=kafka:9092
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=crp-vault-dev-token
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - VAULT_SECRET_PREFIX=crp/identity
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
+      - JWT_PRIVATE_KEY_PATH=/etc/crp/jwt/private.pem
       - JWT_EXPIRY_MINUTES=60
       - JWT_REFRESH_EXPIRY_HOURS=24
       - MFA_ISSUER=CyberRadar
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes:
+      - ./jwt/public.pem:/etc/crp/jwt/public.pem:ro
+      - ./jwt/private.pem:/etc/crp/jwt/private.pem:ro
     ports:
       - "8002:8002"
     depends_on:
@@ -286,9 +299,10 @@ services:
       - SERVICE_PORT=8003
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8003:8003"
     depends_on:
@@ -308,12 +322,13 @@ services:
       - SERVICE_PORT=8004
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - SMTP_HOST=localhost
       - SMTP_PORT=1025
       - SMTP_FROM=noreply@cyberradar.io
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8004:8004"
     depends_on:
@@ -333,9 +348,10 @@ services:
       - SERVICE_NAME=collector-service
       - SERVICE_PORT=8005
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8005:8005"
     depends_on:
@@ -377,9 +393,10 @@ services:
       - SERVICE_PORT=8007
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8007:8007"
     depends_on:
@@ -402,9 +419,10 @@ services:
       - SERVICE_PORT=8011
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8011:8011"
     depends_on:
@@ -427,8 +445,17 @@ services:
       - SERVICE_PORT=8016
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Retrieval over this tenant's own history. Optional: without it the
+      # Copilot still answers, it just has no recall. Point this at a
+      # self-hosted embeddings server (text-embeddings-inference, vLLM,
+      # Ollama, LocalAI) to keep incident text inside the estate — nothing
+      # here obliges a hosted provider. The model must be 1024-dimensional to
+      # match the index; the service refuses to start if it is not.
+      - EMBEDDINGS_URL=${EMBEDDINGS_URL:-}
+      - EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}
+      - EMBEDDINGS_API_KEY=${EMBEDDINGS_API_KEY:-}
       - SIEM_SERVICE_URL=http://siem-service:8008
       - UEBA_SERVICE_URL=http://ueba-service:8009
       - TI_SERVICE_URL=http://ti-service:8010
@@ -440,6 +467,7 @@ services:
       - ASSET_SERVICE_URL=http://asset-service:8006
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8016:8016"
     depends_on:
@@ -460,9 +488,10 @@ services:
       - SERVICE_PORT=8021
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8021:8021"
     depends_on:
@@ -485,9 +514,10 @@ services:
       - SERVICE_PORT=8025
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8025:8025"
     depends_on:
@@ -510,9 +540,10 @@ services:
       - SERVICE_PORT=8028
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKER=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8028:8028"
     depends_on:
@@ -535,9 +566,10 @@ services:
       - SERVICE_PORT=8027
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKER=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8027:8027"
     depends_on:
@@ -560,9 +592,10 @@ services:
       - SERVICE_PORT=8026
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKER=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8026:8026"
     depends_on:
@@ -585,9 +618,10 @@ services:
       - SERVICE_PORT=8024
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8024:8024"
     depends_on:
@@ -610,9 +644,10 @@ services:
       - SERVICE_PORT=8023
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8023:8023"
     depends_on:
@@ -635,9 +670,10 @@ services:
       - SERVICE_PORT=8022
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8022:8022"
     depends_on:
@@ -660,9 +696,10 @@ services:
       - SERVICE_PORT=8020
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8020:8020"
     depends_on:
@@ -685,9 +722,10 @@ services:
       - SERVICE_PORT=8019
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8019:8019"
     depends_on:
@@ -710,9 +748,10 @@ services:
       - SERVICE_PORT=8017
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8017:8017"
     depends_on:
@@ -735,9 +774,10 @@ services:
       - SERVICE_PORT=8018
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8018:8018"
     depends_on:
@@ -763,9 +803,10 @@ services:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8015:8015"
     depends_on:
@@ -790,9 +831,28 @@ services:
       - SERVICE_PORT=8014
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
+      # The SOAR acts with no user behind it, on alerts belonging to any
+      # tenant, so it authenticates with a platform-scoped service account and
+      # takes a token per tenant. Create it once with the soar_executor role
+      # (see README) and put the secret in Vault for anything but dev.
+      - IDENTITY_URL=http://identity-service:8002
+      - SOAR_CLIENT_ID=soar-executor
+      - SOAR_CLIENT_SECRET=change-me-create-the-account-first
+      # Services the playbook actions reach. A service left out disables the
+      # actions that need it, and they then fail saying so — rather than
+      # reporting a containment that never happened.
+      - NETSEC_URL=http://netsec-service:8022
+      - ASSET_URL=http://asset-service:8006
+      - TI_URL=http://ti-service:8010
+      - VULN_URL=http://vuln-service:8011
+      - NOTIFICATION_URL=http://notification-service:8004
+      - SIEM_URL=http://siem-service:8008
+      - IR_URL=http://ir-service:8026
+      - ATTACKPATH_URL=http://attackpath-service:8012
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8014:8014"
     depends_on:
@@ -815,9 +875,10 @@ services:
       - SERVICE_PORT=8013
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8013:8013"
     depends_on:
@@ -840,9 +901,10 @@ services:
       - SERVICE_PORT=8012
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8012:8012"
     depends_on:
@@ -865,9 +927,10 @@ services:
       - SERVICE_PORT=8010
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8010:8010"
     depends_on:
@@ -891,9 +954,12 @@ services:
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      # Detection counters are shared across replicas; see internal/pkg/cache.
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/8
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8009:8009"
     depends_on:
@@ -902,6 +968,8 @@ services:
       clickhouse:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - crp-network
@@ -919,9 +987,12 @@ services:
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      # Detection counters are shared across replicas; see internal/pkg/cache.
+      - REDIS_URL=redis://:crp_redis_dev@redis:6379/9
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8008:8008"
     depends_on:
@@ -930,6 +1001,8 @@ services:
       clickhouse:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - crp-network
@@ -946,9 +1019,10 @@ services:
       - SERVICE_PORT=8029
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8029:8029"
     depends_on:
@@ -971,9 +1045,10 @@ services:
       - SERVICE_PORT=8030
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8030:8030"
     depends_on:
@@ -1032,9 +1107,10 @@ services:
       - SERVICE_PORT=8006
       - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
       - KAFKA_BROKERS=kafka:9092
-      - JWT_SECRET=dev-jwt-secret-change-in-production-min-32-chars
+      - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
+    volumes: *jwt-public-key
     ports:
       - "8006:8006"
     depends_on:

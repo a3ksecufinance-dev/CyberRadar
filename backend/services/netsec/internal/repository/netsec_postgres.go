@@ -26,8 +26,12 @@ func NewNetSecRepository(db *pgxpool.Pool) *NetSecRepository {
 // ─── Zones ────────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) CreateZone(ctx context.Context, tenantID uuid.UUID, req *model.CreateZoneRequest) (*model.NetSecZone, error) {
-	if req.CIDRBlocks == nil { req.CIDRBlocks = []string{} }
-	if req.Color == "" { req.Color = "#6B7280" }
+	if req.CIDRBlocks == nil {
+		req.CIDRBlocks = []string{}
+	}
+	if req.Color == "" {
+		req.Color = "#6B7280"
+	}
 	meta, _ := json.Marshal(req.Metadata)
 	var z model.NetSecZone
 	var metaRaw []byte
@@ -42,7 +46,9 @@ func (r *NetSecRepository) CreateZone(ctx context.Context, tenantID uuid.UUID, r
 		tenantID, req.Name, req.Description, req.ZoneType, req.TrustLevel, req.CIDRBlocks, req.Color, meta,
 	).Scan(&z.ID, &z.TenantID, &z.Name, &z.Description, &z.ZoneType, &z.TrustLevel,
 		&z.CIDRBlocks, &z.Color, &z.IsActive, &metaRaw, &z.CreatedAt, &z.UpdatedAt)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &z.Metadata)
 	return &z, nil
 }
@@ -56,20 +62,28 @@ func (r *NetSecRepository) GetZone(ctx context.Context, tenantID, zoneID uuid.UU
 		FROM netsec_zones WHERE id=$1 AND tenant_id=$2`, zoneID, tenantID,
 	).Scan(&z.ID, &z.TenantID, &z.Name, &z.Description, &z.ZoneType, &z.TrustLevel,
 		&z.CIDRBlocks, &z.Color, &z.IsActive, &metaRaw, &z.CreatedAt, &z.UpdatedAt)
-	if err == pgx.ErrNoRows { return nil, nil }
-	if err != nil { return nil, err }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &z.Metadata)
 	return &z, nil
 }
 
 func (r *NetSecRepository) ListZones(ctx context.Context, tenantID uuid.UUID, activeOnly bool) ([]*model.NetSecZone, error) {
 	where := "tenant_id=$1"
-	if activeOnly { where += " AND is_active=TRUE" }
+	if activeOnly {
+		where += " AND is_active=TRUE"
+	}
 	rows, err := r.db.Query(ctx, `
 		SELECT id, tenant_id, name, COALESCE(description,''), zone_type, trust_level,
 		       COALESCE(cidr_blocks,'{}'), color, is_active, metadata, created_at, updated_at
 		FROM netsec_zones WHERE `+where+` ORDER BY trust_level DESC, name`, tenantID)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var zones []*model.NetSecZone
 	for rows.Next() {
@@ -89,12 +103,37 @@ func (r *NetSecRepository) UpdateZone(ctx context.Context, tenantID, zoneID uuid
 	sets := []string{"updated_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.Description != "" { sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++ }
-	if req.TrustLevel != nil { sets = append(sets, fmt.Sprintf("trust_level=$%d", n)); args = append(args, *req.TrustLevel); n++ }
-	if req.CIDRBlocks != nil { sets = append(sets, fmt.Sprintf("cidr_blocks=$%d", n)); args = append(args, req.CIDRBlocks); n++ }
-	if req.Color != "" { sets = append(sets, fmt.Sprintf("color=$%d", n)); args = append(args, req.Color); n++ }
-	if req.IsActive != nil { sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++ }
-	if req.Metadata != nil { meta, _ := json.Marshal(req.Metadata); sets = append(sets, fmt.Sprintf("metadata=$%d", n)); args = append(args, meta); n++ }
+	if req.Description != "" {
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
+	}
+	if req.TrustLevel != nil {
+		sets = append(sets, fmt.Sprintf("trust_level=$%d", n))
+		args = append(args, *req.TrustLevel)
+		n++
+	}
+	if req.CIDRBlocks != nil {
+		sets = append(sets, fmt.Sprintf("cidr_blocks=$%d", n))
+		args = append(args, req.CIDRBlocks)
+		n++
+	}
+	if req.Color != "" {
+		sets = append(sets, fmt.Sprintf("color=$%d", n))
+		args = append(args, req.Color)
+		n++
+	}
+	if req.IsActive != nil {
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
+	}
+	if req.Metadata != nil {
+		meta, _ := json.Marshal(req.Metadata)
+		sets = append(sets, fmt.Sprintf("metadata=$%d", n))
+		args = append(args, meta)
+		n++
+	}
 	args = append(args, zoneID, tenantID)
 	var z model.NetSecZone
 	var metaRaw []byte
@@ -105,8 +144,12 @@ func (r *NetSecRepository) UpdateZone(ctx context.Context, tenantID, zoneID uuid
 		strings.Join(sets, ","), n, n+1), args...,
 	).Scan(&z.ID, &z.TenantID, &z.Name, &z.Description, &z.ZoneType, &z.TrustLevel,
 		&z.CIDRBlocks, &z.Color, &z.IsActive, &metaRaw, &z.CreatedAt, &z.UpdatedAt)
-	if err == pgx.ErrNoRows { return nil, nil }
-	if err != nil { return nil, err }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &z.Metadata)
 	return &z, nil
 }
@@ -114,9 +157,15 @@ func (r *NetSecRepository) UpdateZone(ctx context.Context, tenantID, zoneID uuid
 // ─── Policies ─────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, req *model.CreatePolicyRequest, createdBy uuid.UUID) (*model.NetSecPolicy, error) {
-	if req.Protocol == "" { req.Protocol = "any" }
-	if req.Priority == 0 { req.Priority = 100 }
-	if req.Ports == nil { req.Ports = []string{} }
+	if req.Protocol == "" {
+		req.Protocol = "any"
+	}
+	if req.Priority == 0 {
+		req.Priority = 100
+	}
+	if req.Ports == nil {
+		req.Ports = []string{}
+	}
 	var p model.NetSecPolicy
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO netsec_policies
@@ -135,14 +184,28 @@ func (r *NetSecRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID,
 }
 
 func (r *NetSecRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, srcZoneID, dstZoneID *uuid.UUID, activeOnly bool, page, pageSize int) ([]*model.NetSecPolicy, int, error) {
-	if pageSize <= 0 { pageSize = 50 }
-	if page <= 0 { page = 1 }
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
 	conds := []string{"p.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if srcZoneID != nil { conds = append(conds, fmt.Sprintf("p.src_zone_id=$%d", n)); args = append(args, *srcZoneID); n++ }
-	if dstZoneID != nil { conds = append(conds, fmt.Sprintf("p.dst_zone_id=$%d", n)); args = append(args, *dstZoneID); n++ }
-	if activeOnly { conds = append(conds, "p.is_active=TRUE") }
+	if srcZoneID != nil {
+		conds = append(conds, fmt.Sprintf("p.src_zone_id=$%d", n))
+		args = append(args, *srcZoneID)
+		n++
+	}
+	if dstZoneID != nil {
+		conds = append(conds, fmt.Sprintf("p.dst_zone_id=$%d", n))
+		args = append(args, *dstZoneID)
+		n++
+	}
+	if activeOnly {
+		conds = append(conds, "p.is_active=TRUE")
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_policies p WHERE "+where, args...).Scan(&total)
@@ -157,7 +220,9 @@ func (r *NetSecRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID,
 		LEFT JOIN netsec_zones sz ON sz.id=p.src_zone_id
 		LEFT JOIN netsec_zones dz ON dz.id=p.dst_zone_id
 		WHERE %s ORDER BY p.priority ASC, p.hit_count DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var policies []*model.NetSecPolicy
 	for rows.Next() {
@@ -191,7 +256,9 @@ func (r *NetSecRepository) GetPolicy(ctx context.Context, tenantID, policyID uui
 		&p.SrcCIDR, &p.DstCIDR, &p.Protocol, &p.Ports,
 		&p.Action, &p.Priority, &p.IsActive, &p.HitCount, &p.LastHitAt,
 		&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
-	if err == pgx.ErrNoRows { return nil, nil }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 	return &p, err
 }
 
@@ -199,17 +266,47 @@ func (r *NetSecRepository) UpdatePolicy(ctx context.Context, tenantID, policyID 
 	sets := []string{"updated_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.Name != "" { sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, req.Name); n++ }
-	if req.Description != "" { sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++ }
-	if req.Protocol != "" { sets = append(sets, fmt.Sprintf("protocol=$%d", n)); args = append(args, req.Protocol); n++ }
-	if req.Ports != nil { sets = append(sets, fmt.Sprintf("ports=$%d", n)); args = append(args, req.Ports); n++ }
-	if req.Action != "" { sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, req.Action); n++ }
-	if req.Priority != nil { sets = append(sets, fmt.Sprintf("priority=$%d", n)); args = append(args, *req.Priority); n++ }
-	if req.IsActive != nil { sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++ }
+	if req.Name != "" {
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, req.Name)
+		n++
+	}
+	if req.Description != "" {
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
+	}
+	if req.Protocol != "" {
+		sets = append(sets, fmt.Sprintf("protocol=$%d", n))
+		args = append(args, req.Protocol)
+		n++
+	}
+	if req.Ports != nil {
+		sets = append(sets, fmt.Sprintf("ports=$%d", n))
+		args = append(args, req.Ports)
+		n++
+	}
+	if req.Action != "" {
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, req.Action)
+		n++
+	}
+	if req.Priority != nil {
+		sets = append(sets, fmt.Sprintf("priority=$%d", n))
+		args = append(args, *req.Priority)
+		n++
+	}
+	if req.IsActive != nil {
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
+	}
 	args = append(args, policyID, tenantID)
 	_, err := r.db.Exec(ctx, fmt.Sprintf("UPDATE netsec_policies SET %s WHERE id=$%d AND tenant_id=$%d",
 		strings.Join(sets, ","), n, n+1), args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return r.GetPolicy(ctx, tenantID, policyID)
 }
 
@@ -222,7 +319,9 @@ func (r *NetSecRepository) IncrementPolicyHit(ctx context.Context, policyID uuid
 
 func (r *NetSecRepository) IngestFlow(ctx context.Context, tenantID uuid.UUID, req *model.IngestFlowRequest, srcZoneID, dstZoneID *uuid.UUID) (*model.NetSecFlow, error) {
 	action := req.Action
-	if action == "" { action = "allowed" }
+	if action == "" {
+		action = "allowed"
+	}
 	var f model.NetSecFlow
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO netsec_flows
@@ -245,17 +344,45 @@ func (r *NetSecRepository) IngestFlow(ctx context.Context, tenantID uuid.UUID, r
 }
 
 func (r *NetSecRepository) ListFlows(ctx context.Context, tenantID uuid.UUID, f model.ListFlowsFilter) ([]*model.NetSecFlow, int, error) {
-	if f.PageSize <= 0 { f.PageSize = 50 }
-	if f.Page <= 0 { f.Page = 1 }
+	if f.PageSize <= 0 {
+		f.PageSize = 50
+	}
+	if f.Page <= 0 {
+		f.Page = 1
+	}
 	conds := []string{"fl.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if f.SrcIP != "" { conds = append(conds, fmt.Sprintf("fl.src_ip::TEXT=$%d", n)); args = append(args, f.SrcIP); n++ }
-	if f.DstIP != "" { conds = append(conds, fmt.Sprintf("fl.dst_ip::TEXT=$%d", n)); args = append(args, f.DstIP); n++ }
-	if f.SrcZoneID != nil { conds = append(conds, fmt.Sprintf("fl.src_zone_id=$%d", n)); args = append(args, *f.SrcZoneID); n++ }
-	if f.DstZoneID != nil { conds = append(conds, fmt.Sprintf("fl.dst_zone_id=$%d", n)); args = append(args, *f.DstZoneID); n++ }
-	if f.Action != "" { conds = append(conds, fmt.Sprintf("fl.action=$%d", n)); args = append(args, f.Action); n++ }
-	if f.MinScore != nil { conds = append(conds, fmt.Sprintf("fl.anomaly_score>=$%d", n)); args = append(args, *f.MinScore); n++ }
+	if f.SrcIP != "" {
+		conds = append(conds, fmt.Sprintf("fl.src_ip::TEXT=$%d", n))
+		args = append(args, f.SrcIP)
+		n++
+	}
+	if f.DstIP != "" {
+		conds = append(conds, fmt.Sprintf("fl.dst_ip::TEXT=$%d", n))
+		args = append(args, f.DstIP)
+		n++
+	}
+	if f.SrcZoneID != nil {
+		conds = append(conds, fmt.Sprintf("fl.src_zone_id=$%d", n))
+		args = append(args, *f.SrcZoneID)
+		n++
+	}
+	if f.DstZoneID != nil {
+		conds = append(conds, fmt.Sprintf("fl.dst_zone_id=$%d", n))
+		args = append(args, *f.DstZoneID)
+		n++
+	}
+	if f.Action != "" {
+		conds = append(conds, fmt.Sprintf("fl.action=$%d", n))
+		args = append(args, f.Action)
+		n++
+	}
+	if f.MinScore != nil {
+		conds = append(conds, fmt.Sprintf("fl.anomaly_score>=$%d", n))
+		args = append(args, *f.MinScore)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_flows fl WHERE "+where, args...).Scan(&total)
@@ -269,7 +396,9 @@ func (r *NetSecRepository) ListFlows(ctx context.Context, tenantID uuid.UUID, f 
 		LEFT JOIN netsec_zones sz ON sz.id=fl.src_zone_id
 		LEFT JOIN netsec_zones dz ON dz.id=fl.dst_zone_id
 		WHERE %s ORDER BY fl.flow_start DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var flows []*model.NetSecFlow
 	for rows.Next() {
@@ -295,7 +424,9 @@ func (r *NetSecRepository) UpdateFlowAnomaly(ctx context.Context, flowID uuid.UU
 
 func (r *NetSecRepository) CreateAnomaly(ctx context.Context, tenantID uuid.UUID, req *model.CreateAnomalyRequest) (*model.NetSecAnomaly, error) {
 	ev, _ := json.Marshal(req.Evidence)
-	if req.FlowIDs == nil { req.FlowIDs = []uuid.UUID{} }
+	if req.FlowIDs == nil {
+		req.FlowIDs = []uuid.UUID{}
+	}
 	var a model.NetSecAnomaly
 	var evRaw []byte
 	err := r.db.QueryRow(ctx, `
@@ -312,20 +443,38 @@ func (r *NetSecRepository) CreateAnomaly(ctx context.Context, tenantID uuid.UUID
 		&a.SrcIP, &a.DstIP, &a.SrcZoneID, &a.DstZoneID,
 		&a.FlowIDs, &a.Description, &evRaw,
 		&a.Status, &a.ResolvedAt, &a.DetectedAt, &a.CreatedAt)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(evRaw, &a.Evidence)
 	return &a, nil
 }
 
 func (r *NetSecRepository) ListAnomalies(ctx context.Context, tenantID uuid.UUID, f model.ListAnomaliesFilter) ([]*model.NetSecAnomaly, int, error) {
-	if f.PageSize <= 0 { f.PageSize = 20 }
-	if f.Page <= 0 { f.Page = 1 }
+	if f.PageSize <= 0 {
+		f.PageSize = 20
+	}
+	if f.Page <= 0 {
+		f.Page = 1
+	}
 	conds := []string{"tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if f.AnomalyType != "" { conds = append(conds, fmt.Sprintf("anomaly_type=$%d", n)); args = append(args, f.AnomalyType); n++ }
-	if f.Severity != "" { conds = append(conds, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++ }
-	if f.Status != "" { conds = append(conds, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++ }
+	if f.AnomalyType != "" {
+		conds = append(conds, fmt.Sprintf("anomaly_type=$%d", n))
+		args = append(args, f.AnomalyType)
+		n++
+	}
+	if f.Severity != "" {
+		conds = append(conds, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
+	}
+	if f.Status != "" {
+		conds = append(conds, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_anomalies WHERE "+where, args...).Scan(&total)
@@ -336,7 +485,9 @@ func (r *NetSecRepository) ListAnomalies(ctx context.Context, tenantID uuid.UUID
 		       COALESCE(flow_ids,'{}'), description, evidence,
 		       status, resolved_at, detected_at, created_at
 		FROM netsec_anomalies WHERE %s ORDER BY detected_at DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var anomalies []*model.NetSecAnomaly
 	for rows.Next() {
@@ -374,8 +525,12 @@ func (r *NetSecRepository) UpdateAnomaly(ctx context.Context, tenantID, anomalyI
 		&a.SrcIP, &a.DstIP, &a.SrcZoneID, &a.DstZoneID,
 		&a.FlowIDs, &a.Description, &evRaw,
 		&a.Status, &a.ResolvedAt, &a.DetectedAt, &a.CreatedAt)
-	if err == pgx.ErrNoRows { return nil, nil }
-	if err != nil { return nil, err }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(evRaw, &a.Evidence)
 	return &a, nil
 }
@@ -384,7 +539,9 @@ func (r *NetSecRepository) UpdateAnomaly(ctx context.Context, tenantID, anomalyI
 
 func (r *NetSecRepository) RegisterDevice(ctx context.Context, tenantID uuid.UUID, req *model.RegisterDeviceRequest) (*model.NetSecDevice, error) {
 	managed := true
-	if req.IsManaged != nil { managed = *req.IsManaged }
+	if req.IsManaged != nil {
+		managed = *req.IsManaged
+	}
 	meta, _ := json.Marshal(req.Metadata)
 	var d model.NetSecDevice
 	var metaRaw []byte
@@ -402,19 +559,33 @@ func (r *NetSecRepository) RegisterDevice(ctx context.Context, tenantID uuid.UUI
 		req.Vendor, req.Model, req.Firmware, managed, meta,
 	).Scan(&d.ID, &d.TenantID, &d.Name, &d.DeviceType, &d.IPAddress, &d.ZoneID, &d.ZoneName,
 		&d.Vendor, &d.Model, &d.Firmware, &d.IsManaged, &d.LastSeenAt, &d.Status, &metaRaw, &d.CreatedAt, &d.UpdatedAt)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &d.Metadata)
 	return &d, nil
 }
 
 func (r *NetSecRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, deviceType string, zoneID *uuid.UUID, page, pageSize int) ([]*model.NetSecDevice, int, error) {
-	if pageSize <= 0 { pageSize = 50 }
-	if page <= 0 { page = 1 }
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
 	conds := []string{"d.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if deviceType != "" { conds = append(conds, fmt.Sprintf("d.device_type=$%d", n)); args = append(args, deviceType); n++ }
-	if zoneID != nil { conds = append(conds, fmt.Sprintf("d.zone_id=$%d", n)); args = append(args, *zoneID); n++ }
+	if deviceType != "" {
+		conds = append(conds, fmt.Sprintf("d.device_type=$%d", n))
+		args = append(args, deviceType)
+		n++
+	}
+	if zoneID != nil {
+		conds = append(conds, fmt.Sprintf("d.zone_id=$%d", n))
+		args = append(args, *zoneID)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_devices d WHERE "+where, args...).Scan(&total)
@@ -426,7 +597,9 @@ func (r *NetSecRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 		FROM netsec_devices d
 		LEFT JOIN netsec_zones z ON z.id=d.zone_id
 		WHERE %s ORDER BY d.device_type, d.name LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var devices []*model.NetSecDevice
 	for rows.Next() {
@@ -446,12 +619,37 @@ func (r *NetSecRepository) UpdateDevice(ctx context.Context, tenantID, deviceID 
 	sets := []string{"updated_at=NOW()", "last_seen_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.ZoneID != nil { sets = append(sets, fmt.Sprintf("zone_id=$%d", n)); args = append(args, *req.ZoneID); n++ }
-	if req.Vendor != "" { sets = append(sets, fmt.Sprintf("vendor=$%d", n)); args = append(args, req.Vendor); n++ }
-	if req.Model != "" { sets = append(sets, fmt.Sprintf("model=$%d", n)); args = append(args, req.Model); n++ }
-	if req.Firmware != "" { sets = append(sets, fmt.Sprintf("firmware=$%d", n)); args = append(args, req.Firmware); n++ }
-	if req.Status != "" { sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, req.Status); n++ }
-	if req.Metadata != nil { meta, _ := json.Marshal(req.Metadata); sets = append(sets, fmt.Sprintf("metadata=$%d", n)); args = append(args, meta); n++ }
+	if req.ZoneID != nil {
+		sets = append(sets, fmt.Sprintf("zone_id=$%d", n))
+		args = append(args, *req.ZoneID)
+		n++
+	}
+	if req.Vendor != "" {
+		sets = append(sets, fmt.Sprintf("vendor=$%d", n))
+		args = append(args, req.Vendor)
+		n++
+	}
+	if req.Model != "" {
+		sets = append(sets, fmt.Sprintf("model=$%d", n))
+		args = append(args, req.Model)
+		n++
+	}
+	if req.Firmware != "" {
+		sets = append(sets, fmt.Sprintf("firmware=$%d", n))
+		args = append(args, req.Firmware)
+		n++
+	}
+	if req.Status != "" {
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, req.Status)
+		n++
+	}
+	if req.Metadata != nil {
+		meta, _ := json.Marshal(req.Metadata)
+		sets = append(sets, fmt.Sprintf("metadata=$%d", n))
+		args = append(args, meta)
+		n++
+	}
 	args = append(args, deviceID, tenantID)
 	var d model.NetSecDevice
 	var metaRaw []byte
@@ -463,8 +661,12 @@ func (r *NetSecRepository) UpdateDevice(ctx context.Context, tenantID, deviceID 
 		strings.Join(sets, ","), n, n+1), args...,
 	).Scan(&d.ID, &d.TenantID, &d.Name, &d.DeviceType, &d.IPAddress, &d.ZoneID, &d.ZoneName,
 		&d.Vendor, &d.Model, &d.Firmware, &d.IsManaged, &d.LastSeenAt, &d.Status, &metaRaw, &d.CreatedAt, &d.UpdatedAt)
-	if err == pgx.ErrNoRows { return nil, nil }
-	if err != nil { return nil, err }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &d.Metadata)
 	return &d, nil
 }
@@ -473,11 +675,17 @@ func (r *NetSecRepository) UpdateDevice(ctx context.Context, tenantID, deviceID 
 
 func (r *NetSecRepository) GetTopology(ctx context.Context, tenantID uuid.UUID) (*model.ZoneTopology, error) {
 	zones, err := r.ListZones(ctx, tenantID, true)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	devices, _, err := r.ListDevices(ctx, tenantID, "", nil, 1, 500)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	policies, _, err := r.ListPolicies(ctx, tenantID, nil, nil, true, 1, 500)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return &model.ZoneTopology{Zones: zones, Devices: devices, Policies: policies}, nil
 }
 
@@ -499,10 +707,26 @@ func (r *NetSecRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*mode
 	).Scan(&stats.FlowsLast24h, &stats.BlockedFlows24h)
 
 	rows, _ := r.db.Query(ctx, "SELECT severity, COUNT(*) FROM netsec_anomalies WHERE tenant_id=$1 GROUP BY severity", tenantID)
-	if rows != nil { defer rows.Close(); for rows.Next() { var s string; var c int; _ = rows.Scan(&s, &c); stats.AnomaliesBySev[s] = c } }
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			var c int
+			_ = rows.Scan(&s, &c)
+			stats.AnomaliesBySev[s] = c
+		}
+	}
 
 	rows2, _ := r.db.Query(ctx, "SELECT anomaly_type, COUNT(*) FROM netsec_anomalies WHERE tenant_id=$1 AND status='open' GROUP BY anomaly_type", tenantID)
-	if rows2 != nil { defer rows2.Close(); for rows2.Next() { var s string; var c int; _ = rows2.Scan(&s, &c); stats.AnomaliesByType[s] = c } }
+	if rows2 != nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var s string
+			var c int
+			_ = rows2.Scan(&s, &c)
+			stats.AnomaliesByType[s] = c
+		}
+	}
 
 	rows3, _ := r.db.Query(ctx, `
 		SELECT src_ip::TEXT, COUNT(*), SUM(bytes_sent)
@@ -534,6 +758,8 @@ func (r *NetSecRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*mode
 
 // nullInet returns nil if s is empty (to allow NULL in INET column)
 func nullInet(s string) interface{} {
-	if s == "" { return nil }
+	if s == "" {
+		return nil
+	}
 	return s
 }

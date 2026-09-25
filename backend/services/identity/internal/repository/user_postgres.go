@@ -22,15 +22,29 @@ func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 	return &UserRepository{db: db}
 }
 
+// identityColumns is the column list every identity query selects.
+//
+// display_name, password_hash, department, business_unit and mfa_secret are
+// nullable in the schema but scan into plain strings, so they are coalesced
+// here. Without this a NULL fails the scan, and Login reports the resulting
+// error as "invalid credentials" — so a user with no department could never
+// sign in, whatever their password.
+const identityColumns = `id, tenant_id, username, email,
+	COALESCE(display_name, '') AS display_name,
+	COALESCE(password_hash, '') AS password_hash,
+	identity_type,
+	COALESCE(department, '') AS department,
+	COALESCE(business_unit, '') AS business_unit,
+	manager_id, privilege_level, mfa_enabled,
+	COALESCE(mfa_secret, '') AS mfa_secret,
+	pam_managed, risk_score, behavior_score, status, last_activity, source_systems,
+	created_at, updated_at`
+
 // GetByEmail retrieves a user by email within a specific tenant.
 // tenant_id is mandatory — no cross-tenant lookup is possible.
 func (r *UserRepository) GetByEmail(ctx context.Context, tenantID uuid.UUID, email string) (*model.Identity, error) {
 	const q = `
-		SELECT id, tenant_id, username, email, display_name, password_hash,
-		       identity_type, department, business_unit, manager_id,
-		       privilege_level, mfa_enabled, mfa_secret, pam_managed,
-		       risk_score, behavior_score, status, last_activity, source_systems,
-		       created_at, updated_at
+		SELECT ` + identityColumns + `
 		FROM identities
 		WHERE tenant_id = $1 AND email = $2 AND deleted_at IS NULL`
 
@@ -42,11 +56,7 @@ func (r *UserRepository) GetByEmail(ctx context.Context, tenantID uuid.UUID, ema
 // Note: tenantID enforcement happens in the service layer after this call.
 func (r *UserRepository) GetByID(ctx context.Context, userID uuid.UUID) (*model.Identity, error) {
 	const q = `
-		SELECT id, tenant_id, username, email, display_name, password_hash,
-		       identity_type, department, business_unit, manager_id,
-		       privilege_level, mfa_enabled, mfa_secret, pam_managed,
-		       risk_score, behavior_score, status, last_activity, source_systems,
-		       created_at, updated_at
+		SELECT ` + identityColumns + `
 		FROM identities
 		WHERE id = $1 AND deleted_at IS NULL`
 
@@ -75,11 +85,7 @@ func (r *UserRepository) Create(ctx context.Context, tenantID uuid.UUID, req *mo
 			identity_type, department, business_unit,
 			privilege_level, status, source_systems
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', '[]')
-		RETURNING id, tenant_id, username, email, display_name, password_hash,
-		          identity_type, department, business_unit, manager_id,
-		          privilege_level, mfa_enabled, mfa_secret, pam_managed,
-		          risk_score, behavior_score, status, last_activity, source_systems,
-		          created_at, updated_at`
+		RETURNING ` + identityColumns + ``
 
 	row := r.db.QueryRow(ctx, q,
 		tenantID, req.Username, req.Email,
@@ -123,11 +129,7 @@ func (r *UserRepository) List(ctx context.Context, f *model.ListUsersFilter) ([]
 	}
 
 	listQ := fmt.Sprintf(`
-		SELECT id, tenant_id, username, email, display_name, password_hash,
-		       identity_type, department, business_unit, manager_id,
-		       privilege_level, mfa_enabled, mfa_secret, pam_managed,
-		       risk_score, behavior_score, status, last_activity, source_systems,
-		       created_at, updated_at
+		SELECT `+identityColumns+`
 		FROM identities
 		WHERE %s
 		ORDER BY created_at DESC
@@ -190,11 +192,7 @@ func (r *UserRepository) Update(ctx context.Context, userID uuid.UUID, req *mode
 	query := fmt.Sprintf(`
 		UPDATE identities SET %s
 		WHERE id = $%d AND deleted_at IS NULL
-		RETURNING id, tenant_id, username, email, display_name, password_hash,
-		          identity_type, department, business_unit, manager_id,
-		          privilege_level, mfa_enabled, mfa_secret, pam_managed,
-		          risk_score, behavior_score, status, last_activity, source_systems,
-		          created_at, updated_at`,
+		RETURNING `+identityColumns+``,
 		joinSets(sets), argN)
 
 	args = append(args, userID)
@@ -296,16 +294,25 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
+// scanIdentity reads one identity row.
+//
+// It returns nil on error rather than a pointer to a half-filled struct.
+// Returning &u alongside the error made every caller that checks the pointer
+// see a user that does not exist: UserService.Create discards the error and
+// tests `existing != nil`, so it reported a conflict for every address and no
+// user could be created through the API at all.
 func scanIdentity(row scannable) (*model.Identity, error) {
 	var u model.Identity
-	err := row.Scan(
+	if err := row.Scan(
 		&u.ID, &u.TenantID, &u.Username, &u.Email, &u.DisplayName, &u.PasswordHash,
 		&u.IdentityType, &u.Department, &u.BusinessUnit, &u.ManagerID,
 		&u.PrivilegeLevel, &u.MFAEnabled, &u.MFASecret, &u.PAMManaged,
 		&u.RiskScore, &u.BehaviorScore, &u.Status, &u.LastActivity, &u.SourceSystems,
 		&u.CreatedAt, &u.UpdatedAt,
-	)
-	return &u, err
+	); err != nil {
+		return nil, err
+	}
+	return &u, nil
 }
 
 func joinSets(sets []string) string {

@@ -11,15 +11,18 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/event"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/siem/internal/handler"
 	"github.com/cyberradar/platform/services/siem/internal/repository"
 	"github.com/cyberradar/platform/services/siem/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -28,11 +31,24 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "siem-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8008")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	chDSN     := mustEnv("CLICKHOUSE_DSN")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"siem-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8008")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	chDSN := mustEnv("CLICKHOUSE_DSN")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -56,22 +72,37 @@ func main() {
 	}
 	defer chConn.Close()
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	// Threshold rules count across every replica, not inside one process.
+	redisClient, err := cache.NewFromURL(ctx, os.Getenv("REDIS_URL"), logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("redis url invalid")
+	}
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
+	thresholds := cache.NewWindow(redisClient, "siem:threshold", logger)
+
 	// ── Repositories ──────────────────────────────────────────────────────────
-	ruleRepo  := repository.NewRuleRepository(pool)
+	ruleRepo := repository.NewRuleRepository(pool)
 	alertRepo := repository.NewAlertRepository(chConn)
-	caseRepo  := repository.NewCaseRepository(pool)
+	caseRepo := repository.NewCaseRepository(pool)
 
 	// ── SIEM service ──────────────────────────────────────────────────────────
-	siemSvc     := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
+	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────
-	ruleConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	ruleConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-siem-rule-engine",
 		StartOffset: -1,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 
 	alertPublisher := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,
@@ -79,7 +110,7 @@ func main() {
 	}, logger)
 	defer alertPublisher.Close()
 
-	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, logger)
+	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, thresholds, logger)
 	go func() {
 		if err := ruleEngine.Run(ctx); err != nil {
 			logger.Error().Err(err).Msg("rule_engine_error")
@@ -88,18 +119,20 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("siem-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"siem-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
 		siemHandler.RegisterRoutes(r)
 	})
 
@@ -127,42 +160,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("siem-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

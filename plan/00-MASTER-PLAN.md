@@ -125,3 +125,4 @@ Phase 5 — Delivery (Domaines 11-14)    : ~12-16 sprints
 | `16-TECH-STACK.md` | Stack technique détaillée |
 | `17-DATA-MODEL.md` | Modèles de données |
 | `18-API-CATALOG.md` | Catalogue APIs |
+| `19-AUDIT-AND-ROADMAP.md` | Audit de code & roadmap production (Phase 0→4) |

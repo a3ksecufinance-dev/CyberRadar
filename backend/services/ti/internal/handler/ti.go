@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/ti/internal/model"
@@ -281,9 +282,7 @@ func (h *TIHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -299,7 +298,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 func mapError(w http.ResponseWriter, err error) {
 	switch {
 	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
+		response.NotFound(w, "resource not found")
 	case apierrors.IsKind(err, apierrors.KindForbidden):
 		response.Forbidden(w, "access denied")
 	case apierrors.IsKind(err, apierrors.KindBadInput):

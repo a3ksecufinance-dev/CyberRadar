@@ -9,13 +9,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/tenant/internal/handler"
 	"github.com/cyberradar/platform/services/tenant/internal/repository"
 	"github.com/cyberradar/platform/services/tenant/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -29,10 +31,23 @@ func main() {
 	zerolog.SetGlobalLevel(logLevel)
 	logger := log.With().Str("service", "tenant-service").Logger()
 
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"tenant-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	// ─── Config ──────────────────────────────────────────────
 	dsn := mustEnv("DATABASE_URL")
 	port := envOrDefault("SERVICE_PORT", "8001")
-	jwtSecret := mustEnv("JWT_SECRET")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
 
 	// ─── Database ────────────────────────────────────────────
 	ctx := context.Background()
@@ -52,6 +67,7 @@ func main() {
 	r := chi.NewRouter()
 
 	// Global middleware
+	r.Use(observe.Middleware("tenant-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
@@ -59,6 +75,7 @@ func main() {
 	r.Use(chimiddleware.Compress(5))
 
 	// Health endpoints (no auth required)
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"tenant-service"}`)
@@ -74,7 +91,8 @@ func main() {
 
 	// API routes (JWT auth middleware applied)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("tenants"))
 		tenantHandler.RegisterRoutes(r)
 	})
 
@@ -108,67 +126,6 @@ func main() {
 		logger.Error().Err(err).Msg("shutdown error")
 	}
 	logger.Info().Msg("tenant-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func validateJWT(tokenStr, secret string) (*jwtClaims, error) {
-	token, err := gojwt.ParseWithClaims(tokenStr, &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-		return []byte(secret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, err
-	}
-	claims, ok := token.Claims.(*jwtClaims)
-	if !ok {
-		return nil, gojwt.ErrTokenInvalidClaims
-	}
-	return claims, nil
-}
-
-// jwtMiddleware validates JWT and injects tenant_id + roles into request context.
-// SECURITY: tenant_id MUST come from the JWT — never from request body or query params.
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing or invalid Authorization header"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			tokenStr := auth[7:]
-			claims, err := validateJWT(tokenStr, secret)
-			if err != nil {
-				logger.Warn().Err(err).Str("path", r.URL.Path).Msg("jwt_invalid")
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid or expired token"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			// Inject into context — downstream code reads from context only
-			ctx := r.Context()
-			ctx = contextWithValue(ctx, "tenant_id", claims.TenantID)
-			ctx = contextWithValue(ctx, "user_id", claims.UserID)
-			ctx = contextWithValue(ctx, "is_super_admin", claims.IsAdmin)
-			ctx = contextWithValue(ctx, "roles", claims.Roles)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
-func contextWithValue(ctx context.Context, key, val any) context.Context {
-	return context.WithValue(ctx, key, val)
 }
 
 // ─── Config helpers ───────────────────────────────────────────────────────────

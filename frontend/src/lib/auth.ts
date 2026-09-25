@@ -1,5 +1,9 @@
 import NextAuth, { type DefaultSession } from 'next-auth'
 import Keycloak from 'next-auth/providers/keycloak'
+// Imported so the `declare module 'next-auth/jwt'` augmentation below resolves;
+// without it TypeScript cannot see the module and every token field falls back
+// to `unknown`.
+import type { JWT } from 'next-auth/jwt'
 
 // ─── Type augmentation ──────────────────────────────────────
 declare module 'next-auth' {

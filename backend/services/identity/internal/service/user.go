@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/services/identity/internal/model"
 	"github.com/cyberradar/platform/services/identity/internal/repository"
 	"github.com/google/uuid"
@@ -17,18 +18,18 @@ import (
 
 // UserService manages identity lifecycle.
 type UserService struct {
-	repo      *repository.UserRepository
-	roleRepo  *repository.RoleRepository
-	jwtSvc    *JWTService
-	mfaSvc    *MFAService
-	logger    zerolog.Logger
+	repo     *repository.UserRepository
+	roleRepo *repository.RoleRepository
+	jwtSvc   *pkgjwt.Signer
+	mfaSvc   *MFAService
+	logger   zerolog.Logger
 }
 
 // NewUserService creates a UserService.
 func NewUserService(
 	repo *repository.UserRepository,
 	roleRepo *repository.RoleRepository,
-	jwtSvc *JWTService,
+	jwtSvc *pkgjwt.Signer,
 	mfaSvc *MFAService,
 	logger zerolog.Logger,
 ) *UserService {
@@ -85,13 +86,19 @@ func (s *UserService) Login(ctx context.Context, tenantID uuid.UUID, req *model.
 	isSuperAdmin := user.PrivilegeLevel == "super_admin"
 
 	// Issue tokens
-	pair, err := s.jwtSvc.GenerateTokenPair(
-		user.TenantID.String(),
-		user.ID.String(),
-		user.Email,
-		roles,
-		isSuperAdmin,
-	)
+	perms, permErr := s.roleRepo.GetPermissionsByUser(ctx, user.ID)
+	if permErr != nil {
+		s.logger.Warn().Err(permErr).Str("user_id", user.ID.String()).Msg("failed to load permissions")
+	}
+
+	pair, err := s.jwtSvc.GenerateTokenPair(pkgjwt.Subject{
+		TenantID:    user.TenantID.String(),
+		UserID:      user.ID.String(),
+		Email:       user.Email,
+		Roles:       roles,
+		Permissions: perms,
+		IsAdmin:     isSuperAdmin,
+	})
 	if err != nil {
 		return nil, apierrors.Internal("generate tokens", err)
 	}
@@ -137,13 +144,19 @@ func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*model.
 	roles, _ := s.roleRepo.GetRoleNamesByUser(ctx, uid)
 	isSuperAdmin := user.PrivilegeLevel == "super_admin"
 
-	pair, err := s.jwtSvc.GenerateTokenPair(
-		user.TenantID.String(),
-		user.ID.String(),
-		user.Email,
-		roles,
-		isSuperAdmin,
-	)
+	perms, permErr := s.roleRepo.GetPermissionsByUser(ctx, user.ID)
+	if permErr != nil {
+		s.logger.Warn().Err(permErr).Str("user_id", user.ID.String()).Msg("failed to load permissions")
+	}
+
+	pair, err := s.jwtSvc.GenerateTokenPair(pkgjwt.Subject{
+		TenantID:    user.TenantID.String(),
+		UserID:      user.ID.String(),
+		Email:       user.Email,
+		Roles:       roles,
+		Permissions: perms,
+		IsAdmin:     isSuperAdmin,
+	})
 	if err != nil {
 		return nil, apierrors.Internal("generate tokens", err)
 	}

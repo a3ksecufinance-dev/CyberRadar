@@ -10,13 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/dspm/internal/handler"
 	"github.com/cyberradar/platform/services/dspm/internal/repository"
 	"github.com/cyberradar/platform/services/dspm/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	kafka "github.com/segmentio/kafka-go"
@@ -26,10 +28,23 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "dspm-service").Logger()
 
-	dbURL        := mustEnv("DATABASE_URL")
-	jwtSecret    := mustEnv("JWT_SECRET")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"dspm-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	dbURL := mustEnv("DATABASE_URL")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
 	kafkaBrokers := envOrDefault("KAFKA_BROKERS", "localhost:9092")
-	port         := envOrDefault("SERVICE_PORT", "8030")
+	port := envOrDefault("SERVICE_PORT", "8030")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -52,22 +67,25 @@ func main() {
 	defer kw.Close()
 
 	repo := repository.NewDSPMRepository(pool, logger)
-	svc  := service.NewDSPMService(repo, kw, topic, logger)
-	h    := handler.NewDSPMHandler(svc, logger)
+	svc := service.NewDSPMService(repo, kw, topic, logger)
+	h := handler.NewDSPMHandler(svc, logger)
 
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("dspm-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"dspm-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("dspm"))
 		r.Mount("/dspm", h.Routes())
 	})
 
@@ -95,42 +113,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("dspm-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

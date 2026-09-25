@@ -11,14 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/observe"
+	"github.com/cyberradar/platform/internal/pkg/svcauth"
 	"github.com/cyberradar/platform/services/soar/internal/handler"
 	"github.com/cyberradar/platform/services/soar/internal/repository"
 	"github.com/cyberradar/platform/services/soar/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -29,10 +32,23 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "soar-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8014")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"soar-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8014")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,10 +60,40 @@ func main() {
 	}
 	defer pool.Close()
 
+	// ── Remediation credentials ───────────────────────────────────────────────
+	// The SOAR acts with no user behind it, on alerts belonging to any tenant,
+	// so it authenticates with a platform-scoped service account and takes a
+	// token per tenant. Its actions reach other services with that token and
+	// nothing else — it holds no standing privilege of its own.
+	tokens, err := svcauth.NewPool(svcauth.Config{
+		IdentityURL:  mustEnv("IDENTITY_URL"),
+		ClientID:     mustEnv("SOAR_CLIENT_ID"),
+		ClientSecret: mustEnv("SOAR_CLIENT_SECRET"),
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("service account setup failed")
+	}
+
+	// A service with no URL disables the actions that need it; they then fail
+	// saying which service is unconfigured, rather than reporting a
+	// containment that never happened.
+	endpoints := service.Endpoints{
+		Netsec:       os.Getenv("NETSEC_URL"),
+		Identity:     os.Getenv("IDENTITY_URL"),
+		Asset:        os.Getenv("ASSET_URL"),
+		ThreatIntel:  os.Getenv("TI_URL"),
+		Vuln:         os.Getenv("VULN_URL"),
+		Notification: os.Getenv("NOTIFICATION_URL"),
+		SIEM:         os.Getenv("SIEM_URL"),
+		IR:           os.Getenv("IR_URL"),
+		AttackPath:   os.Getenv("ATTACKPATH_URL"),
+	}
+	dispatcher := service.NewHTTPDispatcher(endpoints, tokens, logger)
+
 	// ── Repositories / services ───────────────────────────────────────────────
 	soarRepo := repository.NewSOARRepository(pool)
-	soarSvc  := service.NewSOARService(soarRepo, logger)
-	soarH    := handler.NewSOARHandler(soarSvc)
+	soarSvc := service.NewSOARService(soarRepo, dispatcher, logger)
+	soarH := handler.NewSOARHandler(soarSvc)
 
 	// ── Kafka consumer: auto-trigger playbooks from alerts ────────────────────
 	// Listens on crp.events.alerts (SIEM alerts), crp.events.ueba, crp.events.ti
@@ -63,18 +109,21 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("soar-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"soar-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("soar"))
 		soarH.RegisterRoutes(r)
 	})
 
@@ -163,42 +212,6 @@ func consumeTopic(ctx context.Context, brokers []string, topic string, soarSvc *
 		}
 
 		soarSvc.AutoTriggerFromEvent(ctx, tenantID, triggerType, ev.Severity, ev.SourceService, triggerEvent)
-	}
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
 	}
 }
 

@@ -10,15 +10,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/event"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/pam/internal/handler"
 	"github.com/cyberradar/platform/services/pam/internal/repository"
 	"github.com/cyberradar/platform/services/pam/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -27,10 +29,23 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "pam-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8007")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"pam-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8007")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -43,17 +58,21 @@ func main() {
 	defer pool.Close()
 
 	// ── Service stack ─────────────────────────────────────────────────────────
-	pamRepo     := repository.NewPAMRepository(pool)
-	pamSvc      := service.NewPAMService(pamRepo, logger)
-	pamHandler  := handler.NewPAMHandler(pamSvc)
+	pamRepo := repository.NewPAMRepository(pool)
+	pamSvc := service.NewPAMService(pamRepo, logger)
+	pamHandler := handler.NewPAMHandler(pamSvc)
 
 	// ── Risk Engine (Kafka consumer on crp.events.enriched) ──────────────────
-	riskConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+	riskConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-pam-risk-engine",
 		StartOffset: -1, // LastOffset — only new events
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 	riskEngine := service.NewRiskEngine(pamRepo, riskConsumer, logger)
 
 	go func() {
@@ -64,18 +83,21 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("pam-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"pam-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("pam"))
 		pamHandler.RegisterRoutes(r)
 	})
 
@@ -106,43 +128,6 @@ func main() {
 }
 
 // ─── JWT middleware ───────────────────────────────────────────────────────────
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			ctx = context.WithValue(ctx, "roles", claims.Roles)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)

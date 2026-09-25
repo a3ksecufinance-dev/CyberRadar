@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/ueba/internal/model"
@@ -21,7 +21,7 @@ const (
 	topicUEBA = "crp.events.ueba"
 
 	// Baseline thresholds
-	minHoursForBaseline    = 3  // distinct hours before baseline is considered ready
+	minHoursForBaseline     = 3 // distinct hours before baseline is considered ready
 	minCountriesForBaseline = 1
 
 	// Velocity: >N events per entity within 1 minute triggers VELOCITY_SPIKE
@@ -41,12 +41,12 @@ type BehaviorEngine struct {
 	publisher    *pkgkafka.Producer
 	logger       zerolog.Logger
 
-	// In-memory sliding window counters keyed by "tenantID|entityID"
-	velocityMu       sync.Mutex
-	velocityCounters map[string][]time.Time
-
-	failureMu       sync.Mutex
-	failureCounters map[string][]time.Time
+	// velocity and failures count across every replica of this service. They
+	// used to be maps in this process, so an attacker spreading four failed
+	// logins over each of two replicas stayed under a five-failure threshold
+	// that a single counter would have tripped.
+	velocity *cache.Window
+	failures *cache.Window
 }
 
 // NewBehaviorEngine creates a BehaviorEngine.
@@ -55,16 +55,18 @@ func NewBehaviorEngine(
 	behaviorRepo *repository.BehaviorRepository,
 	consumer *pkgkafka.Consumer,
 	publisher *pkgkafka.Producer,
+	velocity *cache.Window,
+	failures *cache.Window,
 	logger zerolog.Logger,
 ) *BehaviorEngine {
 	return &BehaviorEngine{
-		profileRepo:      profileRepo,
-		behaviorRepo:     behaviorRepo,
-		consumer:         consumer,
-		publisher:        publisher,
-		logger:           logger,
-		velocityCounters: make(map[string][]time.Time),
-		failureCounters:  make(map[string][]time.Time),
+		profileRepo:  profileRepo,
+		behaviorRepo: behaviorRepo,
+		consumer:     consumer,
+		publisher:    publisher,
+		logger:       logger,
+		velocity:     velocity,
+		failures:     failures,
 	}
 }
 
@@ -110,10 +112,10 @@ func (e *BehaviorEngine) handle(ctx context.Context, msg pkgkafka.Message) error
 
 	// Track velocity and failure counters (always — before baseline check)
 	counterKey := ev.TenantID + "|" + entityIDStr
-	vel := e.velocityCount(counterKey)
+	vel := e.velocityCount(ctx, counterKey)
 	var failCnt int
 	if ev.Outcome == "failure" {
-		failCnt = e.failureCount(counterKey)
+		failCnt = e.failureCount(ctx, counterKey)
 	}
 
 	// Detect anomalies
@@ -334,31 +336,18 @@ func recomputeScores(p *model.EntityProfile, anomalies []*model.Anomaly) {
 
 // ─── Sliding window counters ──────────────────────────────────────────────────
 
-func (e *BehaviorEngine) velocityCount(key string) int {
-	e.velocityMu.Lock()
-	defer e.velocityMu.Unlock()
-	return slidingCount(&e.velocityCounters, key, velocityWindow)
+// A degraded count — one that covers this replica only — is reported by the
+// window itself, as a throttled log and crp_sliding_window_fallback_total, so
+// neither of these repeats it per event.
+
+func (e *BehaviorEngine) velocityCount(ctx context.Context, key string) int {
+	n, _ := e.velocity.Count(ctx, key, velocityWindow)
+	return n
 }
 
-func (e *BehaviorEngine) failureCount(key string) int {
-	e.failureMu.Lock()
-	defer e.failureMu.Unlock()
-	return slidingCount(&e.failureCounters, key, bruteForceWindow)
-}
-
-func slidingCount(m *map[string][]time.Time, key string, window time.Duration) int {
-	now := time.Now().UTC()
-	cutoff := now.Add(-window)
-	times := (*m)[key]
-	fresh := times[:0]
-	for _, ts := range times {
-		if ts.After(cutoff) {
-			fresh = append(fresh, ts)
-		}
-	}
-	fresh = append(fresh, now)
-	(*m)[key] = fresh
-	return len(fresh)
+func (e *BehaviorEngine) failureCount(ctx context.Context, key string) int {
+	n, _ := e.failures.Count(ctx, key, bruteForceWindow)
+	return n
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -388,10 +377,10 @@ func behaviorEventFrom(ev *event.NormalizedEvent, entityID, entityType string) *
 		DayOfWeek:  uint8(ev.Timestamp.UTC().Weekday()),
 		EventTime:  ev.Timestamp,
 		Attributes: map[string]any{
-			"threat_score":  ev.ThreatScore,
-			"cbs_impact":    ev.CBSImpact,
-			"swift_impact":  ev.SWIFTImpact,
-			"mitre_tactic":  ev.MitreTactic,
+			"threat_score": ev.ThreatScore,
+			"cbs_impact":   ev.CBSImpact,
+			"swift_impact": ev.SWIFTImpact,
+			"mitre_tactic": ev.MitreTactic,
 		},
 	}
 	if ev.IPSource != nil {

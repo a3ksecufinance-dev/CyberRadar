@@ -101,13 +101,13 @@ func (s *NotificationService) sendWebhook(ctx context.Context, cfg map[string]an
 
 	payload := map[string]any{
 		"event":         "crp.notification",
-		"tenant_id":    req.TenantID,
-		"title":        req.Title,
-		"body":         req.Body,
-		"severity":     req.Severity,
+		"tenant_id":     req.TenantID,
+		"title":         req.Title,
+		"body":          req.Body,
+		"severity":      req.Severity,
 		"resource_type": req.ResourceType,
-		"resource_id":  req.ResourceID,
-		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+		"resource_id":   req.ResourceID,
+		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	}
 
 	return s.postJSON(ctx, url, payload)

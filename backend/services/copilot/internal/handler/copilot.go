@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/copilot/internal/model"
@@ -42,8 +45,64 @@ func (h *CopilotHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/copilot/hunt-jobs", h.CreateHuntJob)
 	r.Get("/copilot/hunt-jobs/{jobID}", h.GetHuntJob)
 
+	// Knowledge index — what the Copilot retrieves from. Writing to it is a
+	// separate authority from chatting: it changes what every later answer in
+	// the tenant is grounded on.
+	r.With(authmw.RequirePermission("copilot:read")).Get("/copilot/knowledge", h.SearchKnowledge)
+	r.With(authmw.RequirePermission("copilot:write")).Post("/copilot/knowledge", h.IndexKnowledge)
+	r.With(authmw.RequirePermission("copilot:delete")).Delete("/copilot/knowledge/{sourceType}/{sourceRef}", h.DeleteKnowledge)
+
 	// Stats
 	r.Get("/copilot/stats", h.Stats)
+}
+
+// SearchKnowledge handles GET /copilot/knowledge?q=... — it shows an analyst
+// exactly what the Copilot would have been handed for a question.
+func (h *CopilotHandler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if strings.TrimSpace(query) == "" {
+		response.BadRequest(w, "MISSING_QUERY", "q is required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	chunks, err := h.svc.SearchKnowledge(r.Context(), mustTenantID(r), query, limit)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.OK(w, chunks)
+}
+
+// IndexKnowledge handles POST /copilot/knowledge.
+func (h *CopilotHandler) IndexKnowledge(w http.ResponseWriter, r *http.Request) {
+	var req model.IndexKnowledgeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.BadRequest(w, "INVALID_JSON", "Invalid request body")
+		return
+	}
+	if err := h.validate.Struct(&req); err != nil {
+		response.UnprocessableEntity(w, err.Error())
+		return
+	}
+
+	chunk, err := h.svc.IndexKnowledge(r.Context(), mustTenantID(r), &req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.Created(w, chunk)
+}
+
+// DeleteKnowledge handles DELETE /copilot/knowledge/{sourceType}/{sourceRef}.
+func (h *CopilotHandler) DeleteKnowledge(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.DeleteKnowledge(r.Context(), mustTenantID(r),
+		chi.URLParam(r, "sourceType"), chi.URLParam(r, "sourceRef"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.NoContent(w)
 }
 
 // ─── Sessions ─────────────────────────────────────────────────────────────────
@@ -221,15 +280,11 @@ func (h *CopilotHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -245,7 +300,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 func mapError(w http.ResponseWriter, err error) {
 	switch {
 	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
+		response.NotFound(w, "resource not found")
 	case apierrors.IsKind(err, apierrors.KindForbidden):
 		response.Forbidden(w, "access denied")
 	case apierrors.IsKind(err, apierrors.KindBadInput):

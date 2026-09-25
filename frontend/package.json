@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "14.2.3",
+    "next": "14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "next-auth": "^5.0.0-beta.19",
@@ -42,7 +42,7 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "eslint": "^8.57.0",
-    "eslint-config-next": "14.2.3",
+    "eslint-config-next": "14.2.35",
     "@tailwindcss/forms": "^0.5.7"
   }
 }

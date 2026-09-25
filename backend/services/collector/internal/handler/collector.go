@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/collector/internal/model"
 	"github.com/cyberradar/platform/services/collector/internal/service"
@@ -23,9 +25,21 @@ func NewCollectorHandler(svc *service.CollectorService) *CollectorHandler {
 }
 
 // RegisterRoutes mounts collector routes.
+//
+// Both are machine endpoints: an agent or connector submits events and reports
+// liveness, and no person ever calls either. They were reachable by any valid
+// token because there was no way to say "a machine" — so an analyst's token
+// could inject events into the detection pipeline. Now they need a service
+// account holding events:ingest, and the tenant comes from that account's
+// token, so an agent at one customer cannot write events for another.
 func (h *CollectorHandler) RegisterRoutes(r chi.Router) {
-	r.Post("/events/ingest", h.Ingest)
-	r.Post("/events/heartbeat", h.Heartbeat)
+	r.Group(func(r chi.Router) {
+		r.Use(authmw.RequireServiceAccount())
+		r.Use(authmw.RequirePermission("events:ingest"))
+
+		r.Post("/events/ingest", h.Ingest)
+		r.Post("/events/heartbeat", h.Heartbeat)
+	})
 }
 
 // Ingest handles POST /events/ingest
@@ -78,6 +92,8 @@ func (h *CollectorHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 // mustTenantID extracts the tenant_id injected by the JWT middleware.
 func mustTenantID(r *http.Request) string {
-	v, _ := r.Context().Value("tenant_id").(string)
-	return v
+	if id, ok := authctx.From(r.Context()); ok {
+		return id.TenantID.String()
+	}
+	return ""
 }

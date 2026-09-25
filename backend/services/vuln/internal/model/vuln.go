@@ -124,53 +124,53 @@ type ScanJob struct {
 
 // RemediationTicket groups related findings for tracking.
 type RemediationTicket struct {
-	ID               uuid.UUID  `json:"id"`
-	TenantID         uuid.UUID  `json:"tenant_id"`
-	Title            string     `json:"title"`
-	Description      string     `json:"description,omitempty"`
-	Status           string     `json:"status"`
-	Priority         int        `json:"priority"`
-	AssigneeID       *uuid.UUID `json:"assignee_id,omitempty"`
-	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
-	FindingCount     int        `json:"finding_count"`
-	AffectedAssets   int        `json:"affected_asset_count"`
-	SLADueAt         *time.Time `json:"sla_due_at,omitempty"`
-	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
-	ExternalID       string     `json:"external_id,omitempty"`
-	ExternalURL      string     `json:"external_url,omitempty"`
-	Tags             []string   `json:"tags"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	TenantID       uuid.UUID  `json:"tenant_id"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description,omitempty"`
+	Status         string     `json:"status"`
+	Priority       int        `json:"priority"`
+	AssigneeID     *uuid.UUID `json:"assignee_id,omitempty"`
+	CreatedBy      *uuid.UUID `json:"created_by,omitempty"`
+	FindingCount   int        `json:"finding_count"`
+	AffectedAssets int        `json:"affected_asset_count"`
+	SLADueAt       *time.Time `json:"sla_due_at,omitempty"`
+	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
+	ExternalID     string     `json:"external_id,omitempty"`
+	ExternalURL    string     `json:"external_url,omitempty"`
+	Tags           []string   `json:"tags"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // ExposureScore is a per-asset aggregated vulnerability posture.
 type ExposureScore struct {
-	AssetID        uuid.UUID `json:"asset_id"`
-	TotalFindings  int       `json:"total_findings"`
-	OpenFindings   int       `json:"open_findings"`
-	CriticalCount  int       `json:"critical_count"`
-	HighCount      int       `json:"high_count"`
-	MediumCount    int       `json:"medium_count"`
-	LowCount       int       `json:"low_count"`
-	AvgCVSS        float64   `json:"avg_cvss"`
-	MaxCVSS        float64   `json:"max_cvss"`
-	ExposureScore  float64   `json:"exposure_score"`   // 0-10
-	SLABreached    int       `json:"sla_breached"`
-	HasKEV         bool      `json:"has_kev"`           // Known Exploited Vulnerability
+	AssetID       uuid.UUID `json:"asset_id"`
+	TotalFindings int       `json:"total_findings"`
+	OpenFindings  int       `json:"open_findings"`
+	CriticalCount int       `json:"critical_count"`
+	HighCount     int       `json:"high_count"`
+	MediumCount   int       `json:"medium_count"`
+	LowCount      int       `json:"low_count"`
+	AvgCVSS       float64   `json:"avg_cvss"`
+	MaxCVSS       float64   `json:"max_cvss"`
+	ExposureScore float64   `json:"exposure_score"` // 0-10
+	SLABreached   int       `json:"sla_breached"`
+	HasKEV        bool      `json:"has_kev"` // Known Exploited Vulnerability
 }
 
 // VulnStats is the dashboard summary.
 type VulnStats struct {
-	TotalVulns         int              `json:"total_vulns"`
-	TotalFindings      int              `json:"total_findings"`
-	OpenFindings       int              `json:"open_findings"`
-	SLABreached        int              `json:"sla_breached"`
-	KEVFindings        int              `json:"kev_findings"`    // known exploited in wild
-	AvgCVSS            float64          `json:"avg_cvss"`
-	BySeverity         map[string]int   `json:"by_severity"`
-	ByStatus           map[string]int   `json:"by_status"`
+	TotalVulns          int              `json:"total_vulns"`
+	TotalFindings       int              `json:"total_findings"`
+	OpenFindings        int              `json:"open_findings"`
+	SLABreached         int              `json:"sla_breached"`
+	KEVFindings         int              `json:"kev_findings"` // known exploited in wild
+	AvgCVSS             float64          `json:"avg_cvss"`
+	BySeverity          map[string]int   `json:"by_severity"`
+	ByStatus            map[string]int   `json:"by_status"`
 	TopVulnerableAssets []*ExposureScore `json:"top_vulnerable_assets"`
-	RecentScans        []*ScanJob       `json:"recent_scans"`
+	RecentScans         []*ScanJob       `json:"recent_scans"`
 }
 
 // ─── Request / filter models ──────────────────────────────────────────────────
@@ -225,10 +225,10 @@ type CreateFindingRequest struct {
 }
 
 type UpdateFindingRequest struct {
-	Status              *string        `json:"status"    validate:"omitempty,oneof=open in_remediation resolved accepted_risk false_positive"`
-	AssigneeID          *uuid.UUID     `json:"assignee_id"`
-	RemediationTicketID *uuid.UUID     `json:"remediation_ticket_id"`
-	Notes               *string        `json:"notes"`
+	Status              *string    `json:"status"    validate:"omitempty,oneof=open in_remediation resolved accepted_risk false_positive"`
+	AssigneeID          *uuid.UUID `json:"assignee_id"`
+	RemediationTicketID *uuid.UUID `json:"remediation_ticket_id"`
+	Notes               *string    `json:"notes"`
 }
 
 type CreateScanJobRequest struct {

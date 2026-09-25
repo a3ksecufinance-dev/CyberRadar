@@ -8,22 +8,22 @@ import (
 
 // ── Framework codes ───────────────────────────────────────────────────────────
 const (
-	FrameworkISO27001  = "ISO27001"
-	FrameworkSOC2      = "SOC2"
-	FrameworkPCIDSS    = "PCIDSS"
-	FrameworkSWIFTCSP  = "SWIFTCSP"
-	FrameworkNIS2      = "NIS2"
-	FrameworkDORA      = "DORA"
-	FrameworkGDPR      = "GDPR"
+	FrameworkISO27001 = "ISO27001"
+	FrameworkSOC2     = "SOC2"
+	FrameworkPCIDSS   = "PCIDSS"
+	FrameworkSWIFTCSP = "SWIFTCSP"
+	FrameworkNIS2     = "NIS2"
+	FrameworkDORA     = "DORA"
+	FrameworkGDPR     = "GDPR"
 )
 
 // ── Assessment statuses ───────────────────────────────────────────────────────
 const (
-	StatusCompliant      = "compliant"
-	StatusPartial        = "partial"
-	StatusNonCompliant   = "non_compliant"
-	StatusNotApplicable  = "not_applicable"
-	StatusNotAssessed    = "not_assessed"
+	StatusCompliant     = "compliant"
+	StatusPartial       = "partial"
+	StatusNonCompliant  = "non_compliant"
+	StatusNotApplicable = "not_applicable"
+	StatusNotAssessed   = "not_assessed"
 )
 
 // ── Risk statuses ─────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ type Control struct {
 	ID          uuid.UUID `json:"id"`
 	TenantID    uuid.UUID `json:"tenant_id"`
 	FrameworkID uuid.UUID `json:"framework_id"`
-	ControlID   string    `json:"control_id"`   // e.g. A.5.1.1
+	ControlID   string    `json:"control_id"` // e.g. A.5.1.1
 	Domain      string    `json:"domain"`
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
@@ -111,24 +111,24 @@ type Assessment struct {
 
 // Risk is an entry in the organisational risk register.
 type Risk struct {
-	ID                 uuid.UUID  `json:"id"`
-	TenantID           uuid.UUID  `json:"tenant_id"`
-	Title              string     `json:"title"`
-	Description        string     `json:"description,omitempty"`
-	Category           string     `json:"category"`
-	Likelihood         int        `json:"likelihood"`
-	Impact             int        `json:"impact"`
-	RiskScore          int        `json:"risk_score"`
-	Status             string     `json:"status"`
-	OwnerID            *uuid.UUID `json:"owner_id,omitempty"`
+	ID                 uuid.UUID   `json:"id"`
+	TenantID           uuid.UUID   `json:"tenant_id"`
+	Title              string      `json:"title"`
+	Description        string      `json:"description,omitempty"`
+	Category           string      `json:"category"`
+	Likelihood         int         `json:"likelihood"`
+	Impact             int         `json:"impact"`
+	RiskScore          int         `json:"risk_score"`
+	Status             string      `json:"status"`
+	OwnerID            *uuid.UUID  `json:"owner_id,omitempty"`
 	RelatedControls    []uuid.UUID `json:"related_controls"`
-	MitigationPlan     string     `json:"mitigation_plan,omitempty"`
-	ResidualLikelihood *int       `json:"residual_likelihood,omitempty"`
-	ResidualImpact     *int       `json:"residual_impact,omitempty"`
-	DueDate            *time.Time `json:"due_date,omitempty"`
-	CreatedBy          *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	MitigationPlan     string      `json:"mitigation_plan,omitempty"`
+	ResidualLikelihood *int        `json:"residual_likelihood,omitempty"`
+	ResidualImpact     *int        `json:"residual_impact,omitempty"`
+	DueDate            *time.Time  `json:"due_date,omitempty"`
+	CreatedBy          *uuid.UUID  `json:"created_by,omitempty"`
+	CreatedAt          time.Time   `json:"created_at"`
+	UpdatedAt          time.Time   `json:"updated_at"`
 }
 
 // Evidence is an artefact attached to an assessment.
@@ -148,17 +148,17 @@ type Evidence struct {
 
 // ComplianceScore holds computed compliance posture for one framework.
 type ComplianceScore struct {
-	FrameworkID    uuid.UUID `json:"framework_id"`
-	FrameworkCode  string    `json:"framework_code"`
-	FrameworkName  string    `json:"framework_name"`
-	TotalControls  int       `json:"total_controls"`
-	Assessed       int       `json:"assessed"`
-	Compliant      int       `json:"compliant"`
-	Partial        int       `json:"partial"`
-	NonCompliant   int       `json:"non_compliant"`
-	NotApplicable  int       `json:"not_applicable"`
-	NotAssessed    int       `json:"not_assessed"`
-	ScorePct       float64   `json:"score_pct"` // (compliant*100 + partial*50) / total_controls
+	FrameworkID   uuid.UUID `json:"framework_id"`
+	FrameworkCode string    `json:"framework_code"`
+	FrameworkName string    `json:"framework_name"`
+	TotalControls int       `json:"total_controls"`
+	Assessed      int       `json:"assessed"`
+	Compliant     int       `json:"compliant"`
+	Partial       int       `json:"partial"`
+	NonCompliant  int       `json:"non_compliant"`
+	NotApplicable int       `json:"not_applicable"`
+	NotAssessed   int       `json:"not_assessed"`
+	ScorePct      float64   `json:"score_pct"` // (compliant*100 + partial*50) / total_controls
 }
 
 // ComplianceStats aggregates all framework scores and top risks.
@@ -169,13 +169,13 @@ type ComplianceStats struct {
 
 // AutoAssessmentSuggestion is the result of an automated control check.
 type AutoAssessmentSuggestion struct {
-	ControlID   uuid.UUID `json:"control_id"`
-	ControlRef  string    `json:"control_ref"`
-	Title       string    `json:"title"`
-	SuggestedStatus string `json:"suggested_status"`
-	Score       float64   `json:"score"`
-	Rationale   string    `json:"rationale"`
-	EvidenceRef string    `json:"evidence_ref"`
+	ControlID       uuid.UUID `json:"control_id"`
+	ControlRef      string    `json:"control_ref"`
+	Title           string    `json:"title"`
+	SuggestedStatus string    `json:"suggested_status"`
+	Score           float64   `json:"score"`
+	Rationale       string    `json:"rationale"`
+	EvidenceRef     string    `json:"evidence_ref"`
 }
 
 // ── Request / filter models ───────────────────────────────────────────────────
@@ -217,12 +217,12 @@ type UpdateAssessmentRequest struct {
 }
 
 type BulkAssessmentItem struct {
-	FrameworkID  uuid.UUID  `json:"framework_id"  validate:"required"`
-	ControlID    uuid.UUID  `json:"control_id"    validate:"required"`
-	Status       string     `json:"status"        validate:"required,oneof=compliant partial non_compliant not_applicable not_assessed"`
-	Score        float64    `json:"score"         validate:"omitempty,min=0,max=100"`
-	EvidenceRefs []string   `json:"evidence_refs"`
-	Notes        string     `json:"notes"`
+	FrameworkID  uuid.UUID `json:"framework_id"  validate:"required"`
+	ControlID    uuid.UUID `json:"control_id"    validate:"required"`
+	Status       string    `json:"status"        validate:"required,oneof=compliant partial non_compliant not_applicable not_assessed"`
+	Score        float64   `json:"score"         validate:"omitempty,min=0,max=100"`
+	EvidenceRefs []string  `json:"evidence_refs"`
+	Notes        string    `json:"notes"`
 }
 
 type BulkAssessmentRequest struct {

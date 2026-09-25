@@ -6,67 +6,84 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/services/attackpath/internal/model"
-	"github.com/cyberradar/platform/services/attackpath/internal/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
-// Analyzer runs attack path discovery on the stored graph.
+// maxPathsPerScenario caps how many paths one scenario records. Reaching it is
+// reported rather than silently returning a partial answer.
+const maxPathsPerScenario = 200
+
+// hopDecay is how much each extra hop reduces a path's threat score. An attack
+// that needs more steps is more work and more chance of being caught.
+const hopDecay = 0.85
+
+// Analyzer finds attack paths through a tenant's graph.
 type Analyzer struct {
-	repo   *repository.GraphRepository
+	store  GraphStore
 	logger zerolog.Logger
 }
 
 // NewAnalyzer creates an Analyzer.
-func NewAnalyzer(repo *repository.GraphRepository, logger zerolog.Logger) *Analyzer {
-	return &Analyzer{repo: repo, logger: logger}
+func NewAnalyzer(store GraphStore, logger zerolog.Logger) *Analyzer {
+	return &Analyzer{store: store, logger: logger}
 }
 
-// RunScenario executes BFS-based path discovery for a scenario and stores results.
+// RunScenario walks the graph from each entry node to each target and records
+// what it found.
 func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenario) error {
 	start := time.Now()
 
-	if err := a.repo.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusRunning); err != nil {
+	if err := a.store.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusRunning); err != nil {
 		return err
 	}
 
-	// Load full adjacency list for this tenant
-	graph, err := a.buildGraph(ctx, scenario.TenantID)
+	graph, err := a.store.LoadGraph(ctx, scenario.TenantID)
 	if err != nil {
-		_ = a.repo.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusFailed)
+		_ = a.store.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusFailed)
 		return err
 	}
 
-	targetSet := make(map[uuid.UUID]bool, len(scenario.TargetNodeIDs))
+	targets := make(map[uuid.UUID]bool, len(scenario.TargetNodeIDs))
 	for _, tid := range scenario.TargetNodeIDs {
-		targetSet[tid] = true
+		targets[tid] = true
 	}
 
 	var allPaths []*model.AttackPath
+	truncated := false
 	for _, entryID := range scenario.EntryNodeIDs {
-		paths := a.bfsFind(ctx, graph, scenario, entryID, targetSet)
+		if len(allPaths) >= maxPathsPerScenario {
+			truncated = true
+			break
+		}
+		paths, cut := a.walk(graph, scenario, entryID, targets, maxPathsPerScenario-len(allPaths))
 		allPaths = append(allPaths, paths...)
+		truncated = truncated || cut
 	}
 
-	// Compute choke points
 	computeChokePoints(allPaths)
 
-	// Persist paths
-	if err := a.repo.SavePaths(ctx, allPaths); err != nil {
+	if err := a.store.SavePaths(ctx, allPaths); err != nil {
 		a.logger.Error().Err(err).Str("scenario_id", scenario.ID.String()).Msg("save_paths_error")
 	}
 
-	// Update scenario results
 	durationMS := int(time.Since(start).Milliseconds())
 	shortest, critical := pathStats(allPaths)
 	riskScore := scenarioRisk(allPaths)
 
-	if err := a.repo.UpdateScenarioResult(ctx, scenario.ID, len(allPaths), shortest, critical, riskScore, durationMS); err != nil {
+	if err := a.store.UpdateScenarioResult(ctx, scenario.ID, len(allPaths), shortest, critical, riskScore, durationMS); err != nil {
 		return err
 	}
 
-	a.logger.Info().
+	entry := a.logger.Info()
+	if truncated {
+		// An analyst reading "200 paths" must not take it for the whole
+		// answer: the cap used to be hit and returned with no trace at all.
+		entry = a.logger.Warn().Bool("truncated", true)
+	}
+	entry.
 		Str("scenario_id", scenario.ID.String()).
+		Str("tenant_id", scenario.TenantID.String()).
 		Int("paths_found", len(allPaths)).
 		Float64("risk_score", riskScore).
 		Int("duration_ms", durationMS).
@@ -75,142 +92,226 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 	return nil
 }
 
-// bfsFind performs BFS from entryID to find all reachable target nodes within maxHops.
-func (a *Analyzer) bfsFind(
-	ctx context.Context,
-	graph map[uuid.UUID][]*model.AttackEdge,
+// walk enumerates paths from entryID to any target, depth first, and reports
+// whether it stopped at the cap.
+//
+// Depth first with backtracking, not breadth first with copied state: the
+// previous breadth-first search deep-copied the visited set and both sequences
+// at every edge it expanded, so memory grew with nodes × edges. Here one
+// visited set and two slices are shared and unwound, so the working set is the
+// depth of the walk — at most max_hops.
+func (a *Analyzer) walk(
+	g *model.Graph,
 	scenario *model.AttackScenario,
 	entryID uuid.UUID,
-	targetSet map[uuid.UUID]bool,
-) []*model.AttackPath {
-	type state struct {
-		nodeID    uuid.UUID
-		nodeSeq   []uuid.UUID
-		edgeSeq   []uuid.UUID
-		visited   map[uuid.UUID]bool
-		totalCost float64
+	targets map[uuid.UUID]bool,
+	budget int,
+) ([]*model.AttackPath, bool) {
+	entryNode, ok := g.Nodes[entryID]
+	if !ok {
+		return nil, false // an entry node that is not in the graph reaches nothing
 	}
 
 	var found []*model.AttackPath
-	queue := []state{{
-		nodeID:  entryID,
-		nodeSeq: []uuid.UUID{entryID},
-		edgeSeq: []uuid.UUID{},
-		visited: map[uuid.UUID]bool{entryID: true},
-	}}
+	truncated := false
 
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
+	onPath := map[uuid.UUID]bool{entryID: true}
+	nodeSeq := []uuid.UUID{entryID}
+	edgeSeq := []uuid.UUID{}
+	// The edges themselves travel with the walk. Looking them up afterwards
+	// would mean scanning the adjacency list, which is the size of the graph.
+	edgesOnPath := []*model.AttackEdge{}
+	cost := 0.0
 
-		if len(cur.nodeSeq) > scenario.MaxHops+1 {
-			continue
+	var step func(current uuid.UUID)
+	step = func(current uuid.UUID) {
+		if truncated || len(nodeSeq) > scenario.MaxHops {
+			return
 		}
-
-		for _, edge := range graph[cur.nodeID] {
-			if !edge.IsActive {
-				continue
-			}
+		for _, edge := range g.Out[current] {
 			next := edge.TargetID
-			if cur.visited[next] {
+			if onPath[next] {
+				continue // a cycle; the walk already holds this node
+			}
+			node, known := g.Nodes[next]
+			if !known {
+				continue // an edge to a node the graph does not have
+			}
+			isTarget := targets[next]
+			if !isTarget && !typeIncluded(scenario, node) {
 				continue
 			}
 
-			newSeqN := append(append([]uuid.UUID{}, cur.nodeSeq...), next)
-			newSeqE := append(append([]uuid.UUID{}, cur.edgeSeq...), edge.ID)
-			newCost := cur.totalCost + edge.Weight
-			newVisited := make(map[uuid.UUID]bool, len(cur.visited)+1)
-			for k, v := range cur.visited {
-				newVisited[k] = v
-			}
-			newVisited[next] = true
+			onPath[next] = true
+			nodeSeq = append(nodeSeq, next)
+			edgeSeq = append(edgeSeq, edge.ID)
+			edgesOnPath = append(edgesOnPath, edge)
+			cost += edge.Weight
 
-			if targetSet[next] {
-				path := a.buildPath(scenario, entryID, next, newSeqN, newSeqE, newCost)
-				found = append(found, path)
-				// Don't stop — continue to find all paths, but cap total results
-				if len(found) >= 200 {
-					return found
+			if isTarget {
+				found = append(found, a.buildPath(g, scenario, entryNode, node, nodeSeq, edgeSeq, edgesOnPath, cost))
+				if len(found) >= budget {
+					truncated = true
 				}
 			}
+			if !truncated {
+				step(next)
+			}
 
-			queue = append(queue, state{
-				nodeID:    next,
-				nodeSeq:   newSeqN,
-				edgeSeq:   newSeqE,
-				visited:   newVisited,
-				totalCost: newCost,
-			})
+			cost -= edge.Weight
+			edgesOnPath = edgesOnPath[:len(edgesOnPath)-1]
+			edgeSeq = edgeSeq[:len(edgeSeq)-1]
+			nodeSeq = nodeSeq[:len(nodeSeq)-1]
+			onPath[next] = false
+
+			if truncated {
+				return
+			}
 		}
 	}
-	return found
+	step(entryID)
+
+	return found, truncated
 }
 
+// typeIncluded applies a scenario's include_types to an intermediate node.
+//
+// The field was stored, returned by the API and never read by the traversal,
+// so narrowing a scenario to "asset" nodes silently changed nothing.
+func typeIncluded(scenario *model.AttackScenario, node *model.AttackNode) bool {
+	if len(scenario.IncludeTypes) == 0 {
+		return true
+	}
+	for _, t := range scenario.IncludeTypes {
+		if t == node.NodeType {
+			return true
+		}
+	}
+	return false
+}
+
+// buildPath records one path and what it says about the attack.
 func (a *Analyzer) buildPath(
+	g *model.Graph,
 	scenario *model.AttackScenario,
-	entryID, targetID uuid.UUID,
+	entry, target *model.AttackNode,
 	nodeSeq, edgeSeq []uuid.UUID,
+	edgesOnPath []*model.AttackEdge,
 	totalCost float64,
 ) *model.AttackPath {
 	hopCount := len(nodeSeq) - 1
 
-	// Normalize path score: lower cost → higher threat score
-	pathScore := math.Min(10.0, 10.0/math.Max(totalCost, 1.0)*float64(hopCount))
+	// The sequences are reused across the walk, so the path keeps its own copy.
+	nodes := append([]uuid.UUID(nil), nodeSeq...)
+	edges := append([]uuid.UUID(nil), edgeSeq...)
 
-	// Likelihood decreases with each hop (attacker detection risk)
-	likelihood := math.Pow(0.85, float64(hopCount))
-
-	// Impact based on target criticality (approximated from scenario)
-	impact := 7.0 // default high-value target impact
-
-	return &model.AttackPath{
-		ID:           uuid.New(),
-		TenantID:     scenario.TenantID,
-		ScenarioID:   scenario.ID,
-		EntryNodeID:  entryID,
-		TargetNodeID: targetID,
-		NodeSequence: nodeSeq,
-		EdgeSequence: edgeSeq,
-		HopCount:     hopCount,
-		PathScore:    pathScore,
-		Likelihood:   likelihood,
-		Impact:       impact,
-		PathType:     model.PathTypeLateralMovement,
-		MitreTactics: []string{},
-		DiscoveredAt: time.Now().UTC(),
+	path := &model.AttackPath{
+		ID:               uuid.New(),
+		TenantID:         scenario.TenantID,
+		ScenarioID:       scenario.ID,
+		EntryNodeID:      entry.ID,
+		TargetNodeID:     target.ID,
+		NodeSequence:     nodes,
+		EdgeSequence:     edges,
+		HopCount:         hopCount,
+		PathScore:        pathScore(totalCost, hopCount),
+		Likelihood:       math.Pow(hopDecay, float64(hopCount)),
+		Impact:           impactOf(target),
+		HasInternetEntry: entry.IsInternetFacing,
+		MitreTactics:     []string{},
+		DiscoveredAt:     time.Now().UTC(),
 	}
+
+	// These three were declared, persisted and read back by the API, and never
+	// computed: every path in the database recorded false for all of them.
+	// They are exactly what an analyst filters on.
+	for _, edge := range edgesOnPath {
+		if edge.EdgeType == model.EdgeTypeExploit || edge.CVEID != "" || edge.VulnID != nil {
+			path.HasExploitStep = true
+			break
+		}
+	}
+	for _, nodeID := range nodes[1:] {
+		if n, ok := g.Nodes[nodeID]; ok && n.IsPrivileged {
+			path.HasPrivEsc = true
+			break
+		}
+	}
+
+	path.PathType = pathTypeOf(target, path)
+	return path
 }
 
-// buildGraph loads all active edges into an in-memory adjacency list.
-func (a *Analyzer) buildGraph(ctx context.Context, tenantID uuid.UUID) (map[uuid.UUID][]*model.AttackEdge, error) {
-	edges, err := a.repo.ListEdges(ctx, tenantID, nil, true)
-	if err != nil {
-		return nil, err
+// pathScore is how threatening a path is: higher means easier for an attacker.
+//
+// Both extra hops and heavier edges make an attack harder, so both lower it.
+// The previous formula multiplied by hop count, so a five-hop path scored
+// above a one-hop path of the same cost — it ranked the hardest attacks as the
+// most dangerous, which is the wrong way round for a list an analyst works
+// from the top of.
+func pathScore(totalCost float64, hopCount int) float64 {
+	if hopCount < 1 {
+		hopCount = 1
 	}
-	graph := make(map[uuid.UUID][]*model.AttackEdge)
-	for _, e := range edges {
-		graph[e.SourceID] = append(graph[e.SourceID], e)
+	avgCost := totalCost / float64(hopCount)
+	score := 10.0 / (1.0 + avgCost) * math.Pow(hopDecay, float64(hopCount-1))
+	return math.Min(10.0, math.Max(0, score))
+}
+
+// impactOf is what reaching this target would cost, from the target itself.
+//
+// Every path used to record a flat 7.0 regardless of what it reached, so
+// impact carried no information and any ranking that used it was arbitrary.
+func impactOf(target *model.AttackNode) float64 {
+	// Criticality is 1–4 in the asset model. It maps onto 0–9 rather than
+	// 0–10 so that is_critical_system still has somewhere to go: mapping it
+	// straight onto 0–10 saturates at criticality 4 and the flag stops
+	// distinguishing the targets it exists to distinguish.
+	const ceiling = 9.0
+
+	impact := 0.0
+	switch {
+	case target.Criticality > 0:
+		impact = math.Min(ceiling, float64(target.Criticality)/4.0*ceiling)
+	case target.RiskScore > 0:
+		impact = math.Min(ceiling, target.RiskScore)
+	default:
+		impact = 4.5 // nothing recorded about the target; assume the middle
 	}
-	return graph, nil
+	if target.IsCriticalSystem {
+		impact += 1.0
+	}
+	return math.Min(10.0, impact)
+}
+
+// pathTypeOf classifies a path by what it achieved, rather than labelling
+// every path lateral_movement as before.
+func pathTypeOf(target *model.AttackNode, path *model.AttackPath) string {
+	switch {
+	case target.IsPrivileged || path.HasPrivEsc:
+		return model.PathTypePrivEscalation
+	case target.IsCriticalSystem:
+		return model.PathTypeDataAccess
+	default:
+		return model.PathTypeLateralMovement
+	}
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // computeChokePoints identifies the most impactful node in each path to block.
 func computeChokePoints(paths []*model.AttackPath) {
-	// Count how often each intermediate node appears across all paths
+	// Count how often each intermediate node appears across all paths.
 	nodeCounts := make(map[uuid.UUID]int)
 	for _, p := range paths {
-		// Skip first (entry) and last (target) — only intermediate nodes are choke points
 		if len(p.NodeSequence) <= 2 {
-			continue
+			continue // entry and target only; nothing in between to block
 		}
 		for _, nid := range p.NodeSequence[1 : len(p.NodeSequence)-1] {
 			nodeCounts[nid]++
 		}
 	}
 
-	// For each path, pick the intermediate node with highest count as the choke point
 	for _, p := range paths {
 		if len(p.NodeSequence) <= 2 {
 			continue
@@ -252,14 +353,13 @@ func scenarioRisk(paths []*model.AttackPath) float64 {
 	if len(paths) == 0 {
 		return 0
 	}
-	// Risk = max path score adjusted by number of paths (more paths = higher risk)
 	maxScore := 0.0
 	for _, p := range paths {
 		if p.PathScore > maxScore {
 			maxScore = p.PathScore
 		}
 	}
-	// Boost for many paths: each additional path adds diminishing risk
+	// More ways in is more risk, with diminishing return.
 	boost := math.Log1p(float64(len(paths))) * 0.3
 	return math.Min(10.0, maxScore+boost)
 }

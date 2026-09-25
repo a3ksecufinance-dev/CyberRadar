@@ -255,10 +255,10 @@ func (s *IGAService) runSoDCheck(tenantID uuid.UUID) {
 	if count > 0 {
 		s.logger.Warn().Int("new_violations", count).Str("tenant_id", tenantID.String()).Msg("iga_sod_violations_detected")
 		payload := map[string]any{
-			"event_type":      "iga.sod_violation",
-			"tenant_id":       tenantID.String(),
+			"event_type":       "iga.sod_violation",
+			"tenant_id":        tenantID.String(),
 			"violations_count": count,
-			"timestamp":       time.Now().UTC().Format(time.RFC3339),
+			"timestamp":        time.Now().UTC().Format(time.RFC3339),
 		}
 		data, _ := json.Marshal(payload)
 		_ = s.producer.Publish(ctx, tenantID.String(), data)

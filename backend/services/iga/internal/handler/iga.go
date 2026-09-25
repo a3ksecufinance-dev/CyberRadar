@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/iga/internal/model"
@@ -65,14 +66,15 @@ func (h *IGAHandler) RegisterRoutes(r chi.Router) {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, error) {
-	raw, _ := r.Context().Value("tenant_id").(string)
-	return uuid.Parse(raw)
+	id := authctx.TenantID(r.Context())
+	if id == uuid.Nil {
+		return uuid.Nil, apierrors.Forbidden("no tenant in context")
+	}
+	return id, nil
 }
 
 func userFromCtx(r *http.Request) uuid.UUID {
-	raw, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(raw)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -146,7 +148,7 @@ func (h *IGAHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeOnly := r.URL.Query().Get("active_only") != "false"
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -341,7 +343,7 @@ func (h *IGAHandler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	campaigns, total, err := h.svc.ListCampaigns(r.Context(), tenantID, r.URL.Query().Get("status"), page, pageSize)
 	if err != nil {
@@ -513,7 +515,7 @@ func (h *IGAHandler) ListSoDViolations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1

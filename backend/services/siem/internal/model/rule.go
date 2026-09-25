@@ -53,31 +53,31 @@ type RuleConditions struct {
 
 // RuleAction defines what to do when a rule fires.
 type RuleAction struct {
-	Type    string         `json:"type"` // notify, create_case, block_ip, disable_user
-	Params  map[string]any `json:"params,omitempty"`
+	Type   string         `json:"type"` // notify, create_case, block_ip, disable_user
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // DetectionRule is a SIEM detection rule.
 type DetectionRule struct {
-	ID               uuid.UUID      `json:"id"`
-	TenantID         uuid.UUID      `json:"tenant_id"`
-	Name             string         `json:"name"`
-	Description      string         `json:"description,omitempty"`
-	Category         string         `json:"category,omitempty"`
-	Severity         Severity       `json:"severity"`
-	Conditions       RuleConditions `json:"conditions"`
-	MitreTactic      string         `json:"mitre_tactic,omitempty"`
-	MitreTechnique   string         `json:"mitre_technique,omitempty"`
-	Actions          []RuleAction   `json:"actions"`
-	DedupWindowS     int            `json:"dedup_window_s"`
-	Enabled          bool           `json:"enabled"`
-	IsSystem         bool           `json:"is_system"`
-	FalsePositiveRate float64       `json:"false_positive_rate"`
-	AlertsTotal      int            `json:"alerts_total"`
-	LastFiredAt      *time.Time     `json:"last_fired_at,omitempty"`
-	CreatedBy        *uuid.UUID     `json:"created_by,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	ID                uuid.UUID      `json:"id"`
+	TenantID          uuid.UUID      `json:"tenant_id"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description,omitempty"`
+	Category          string         `json:"category,omitempty"`
+	Severity          Severity       `json:"severity"`
+	Conditions        RuleConditions `json:"conditions"`
+	MitreTactic       string         `json:"mitre_tactic,omitempty"`
+	MitreTechnique    string         `json:"mitre_technique,omitempty"`
+	Actions           []RuleAction   `json:"actions"`
+	DedupWindowS      int            `json:"dedup_window_s"`
+	Enabled           bool           `json:"enabled"`
+	IsSystem          bool           `json:"is_system"`
+	FalsePositiveRate float64        `json:"false_positive_rate"`
+	AlertsTotal       int            `json:"alerts_total"`
+	LastFiredAt       *time.Time     `json:"last_fired_at,omitempty"`
+	CreatedBy         *uuid.UUID     `json:"created_by,omitempty"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 // CreateRuleRequest creates a new detection rule.

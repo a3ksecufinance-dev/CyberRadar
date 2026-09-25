@@ -120,20 +120,30 @@ func (r *FraudRepository) UpdateRule(ctx context.Context, tenantID, ruleID uuid.
 	args := []any{}
 	n := 1
 	if req.Name != "" {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, req.Name)
+		n++
 	}
 	if req.Description != "" {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
 	}
 	if req.Conditions != nil {
 		cond, _ := json.Marshal(req.Conditions)
-		sets = append(sets, fmt.Sprintf("conditions=$%d", n)); args = append(args, cond); n++
+		sets = append(sets, fmt.Sprintf("conditions=$%d", n))
+		args = append(args, cond)
+		n++
 	}
 	if req.RiskScore != nil {
-		sets = append(sets, fmt.Sprintf("risk_score=$%d", n)); args = append(args, *req.RiskScore); n++
+		sets = append(sets, fmt.Sprintf("risk_score=$%d", n))
+		args = append(args, *req.RiskScore)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 	args = append(args, ruleID, tenantID)
 	var rule model.FraudRule
@@ -243,19 +253,29 @@ func (r *FraudRepository) ListTransactions(ctx context.Context, tenantID uuid.UU
 	args := []any{tenantID}
 	n := 2
 	if f.Channel != "" {
-		conditions = append(conditions, fmt.Sprintf("channel=$%d", n)); args = append(args, f.Channel); n++
+		conditions = append(conditions, fmt.Sprintf("channel=$%d", n))
+		args = append(args, f.Channel)
+		n++
 	}
 	if f.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		conditions = append(conditions, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	if f.MinScore != nil {
-		conditions = append(conditions, fmt.Sprintf("fraud_score>=$%d", n)); args = append(args, *f.MinScore); n++
+		conditions = append(conditions, fmt.Sprintf("fraud_score>=$%d", n))
+		args = append(args, *f.MinScore)
+		n++
 	}
 	if f.SenderAcct != "" {
-		conditions = append(conditions, fmt.Sprintf("sender_account=$%d", n)); args = append(args, f.SenderAcct); n++
+		conditions = append(conditions, fmt.Sprintf("sender_account=$%d", n))
+		args = append(args, f.SenderAcct)
+		n++
 	}
 	if f.ReceiverAcct != "" {
-		conditions = append(conditions, fmt.Sprintf("receiver_account=$%d", n)); args = append(args, f.ReceiverAcct); n++
+		conditions = append(conditions, fmt.Sprintf("receiver_account=$%d", n))
+		args = append(args, f.ReceiverAcct)
+		n++
 	}
 	where := strings.Join(conditions, " AND ")
 	var total int
@@ -426,13 +446,19 @@ func (r *FraudRepository) ListCases(ctx context.Context, tenantID uuid.UUID, f m
 	args := []any{tenantID}
 	n := 2
 	if f.Category != "" {
-		conditions = append(conditions, fmt.Sprintf("category=$%d", n)); args = append(args, f.Category); n++
+		conditions = append(conditions, fmt.Sprintf("category=$%d", n))
+		args = append(args, f.Category)
+		n++
 	}
 	if f.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		conditions = append(conditions, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	if f.Severity != "" {
-		conditions = append(conditions, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		conditions = append(conditions, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	where := strings.Join(conditions, " AND ")
 	var total int
@@ -468,22 +494,34 @@ func (r *FraudRepository) UpdateCase(ctx context.Context, tenantID, caseID uuid.
 	args := []any{}
 	n := 1
 	if req.Status != "" {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, req.Status)
+		n++
 		if req.Status == model.CaseStatusClosedConfirmed || req.Status == model.CaseStatusClosedFalsePositive {
-			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n)); args = append(args, time.Now()); n++
+			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n))
+			args = append(args, time.Now())
+			n++
 		}
 		if req.Status == model.CaseStatusSARFiled {
-			sets = append(sets, fmt.Sprintf("sar_filed_at=$%d", n)); args = append(args, time.Now()); n++
+			sets = append(sets, fmt.Sprintf("sar_filed_at=$%d", n))
+			args = append(args, time.Now())
+			n++
 		}
 	}
 	if req.AssignedTo != nil {
-		sets = append(sets, fmt.Sprintf("assigned_to=$%d", n)); args = append(args, *req.AssignedTo); n++
+		sets = append(sets, fmt.Sprintf("assigned_to=$%d", n))
+		args = append(args, *req.AssignedTo)
+		n++
 	}
 	if req.SARRequired != nil {
-		sets = append(sets, fmt.Sprintf("sar_required=$%d", n)); args = append(args, *req.SARRequired); n++
+		sets = append(sets, fmt.Sprintf("sar_required=$%d", n))
+		args = append(args, *req.SARRequired)
+		n++
 	}
 	if req.Notes != "" {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, req.Notes)
+		n++
 	}
 	args = append(args, caseID, tenantID)
 	var c model.FraudCase
@@ -534,10 +572,14 @@ func (r *FraudRepository) ListWatchlist(ctx context.Context, tenantID uuid.UUID,
 	args := []any{tenantID}
 	n := 2
 	if entityType != "" {
-		conditions = append(conditions, fmt.Sprintf("entity_type=$%d", n)); args = append(args, entityType); n++
+		conditions = append(conditions, fmt.Sprintf("entity_type=$%d", n))
+		args = append(args, entityType)
+		n++
 	}
 	if listType != "" {
-		conditions = append(conditions, fmt.Sprintf("list_type=$%d", n)); args = append(args, listType); n++
+		conditions = append(conditions, fmt.Sprintf("list_type=$%d", n))
+		args = append(args, listType)
+		n++
 	}
 	if activeOnly {
 		conditions = append(conditions, "(expires_at IS NULL OR expires_at > NOW()) AND is_active=TRUE")
@@ -642,7 +684,8 @@ func (r *FraudRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var s string; var c int
+		var s string
+		var c int
 		_ = rows.Scan(&s, &c)
 		stats.TransactionsByStatus[s] = c
 	}
@@ -653,7 +696,8 @@ func (r *FraudRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 	}
 	defer rows2.Close()
 	for rows2.Next() {
-		var s string; var c int
+		var s string
+		var c int
 		_ = rows2.Scan(&s, &c)
 		stats.CasesByCategory[s] = c
 	}

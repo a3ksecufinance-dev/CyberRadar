@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/cspm/internal/model"
@@ -60,14 +61,15 @@ func (h *CSPMHandler) RegisterRoutes(r chi.Router) {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, error) {
-	raw, _ := r.Context().Value("tenant_id").(string)
-	return uuid.Parse(raw)
+	id := authctx.TenantID(r.Context())
+	if id == uuid.Nil {
+		return uuid.Nil, apierrors.Forbidden("no tenant in context")
+	}
+	return id, nil
 }
 
 func userFromCtx(r *http.Request) uuid.UUID {
-	raw, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(raw)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -222,7 +224,7 @@ func (h *CSPMHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "100")
 	rules, total, err := h.svc.ListRules(r.Context(), tenantID,
 		r.URL.Query().Get("provider"), r.URL.Query().Get("framework"),
@@ -296,15 +298,20 @@ func (h *CSPMHandler) ListResources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v := r.URL.Query().Get("is_public"); v == "true" {
-		b := true; f.IsPublic = &b
+		b := true
+		f.IsPublic = &b
 	}
 	if v := r.URL.Query().Get("min_risk_score"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			f.MinRiskScore = &n
 		}
 	}
-	if f.Page < 1 { f.Page = 1 }
-	if f.PageSize < 1 || f.PageSize > 200 { f.PageSize = 50 }
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 200 {
+		f.PageSize = 50
+	}
 	resources, total, err := h.svc.ListResources(r.Context(), tenantID, f)
 	if err != nil {
 		writeError(w, err)
@@ -380,8 +387,12 @@ func (h *CSPMHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 			f.ResourceID = &id
 		}
 	}
-	if f.Page < 1 { f.Page = 1 }
-	if f.PageSize < 1 || f.PageSize > 200 { f.PageSize = 50 }
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 200 {
+		f.PageSize = 50
+	}
 	findings, total, err := h.svc.ListFindings(r.Context(), tenantID, f)
 	if err != nil {
 		writeError(w, err)
@@ -455,7 +466,7 @@ func (h *CSPMHandler) ListScans(w http.ResponseWriter, r *http.Request) {
 		writeError(w, apierrors.New(apierrors.KindBadInput, "account_id query param required"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	scans, total, err := h.svc.ListScans(r.Context(), tenantID, accountID, page, pageSize)
 	if err != nil {

@@ -138,22 +138,34 @@ func (r *MobileRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.Platform != "" {
-		cond = append(cond, fmt.Sprintf("platform=$%d", n)); args = append(args, f.Platform); n++
+		cond = append(cond, fmt.Sprintf("platform=$%d", n))
+		args = append(args, f.Platform)
+		n++
 	}
 	if f.EnrollmentStatus != "" {
-		cond = append(cond, fmt.Sprintf("enrollment_status=$%d", n)); args = append(args, f.EnrollmentStatus); n++
+		cond = append(cond, fmt.Sprintf("enrollment_status=$%d", n))
+		args = append(args, f.EnrollmentStatus)
+		n++
 	}
 	if f.Ownership != "" {
-		cond = append(cond, fmt.Sprintf("ownership=$%d", n)); args = append(args, f.Ownership); n++
+		cond = append(cond, fmt.Sprintf("ownership=$%d", n))
+		args = append(args, f.Ownership)
+		n++
 	}
 	if f.RiskLevel != "" {
-		cond = append(cond, fmt.Sprintf("risk_level=$%d", n)); args = append(args, f.RiskLevel); n++
+		cond = append(cond, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, f.RiskLevel)
+		n++
 	}
 	if f.IsCompliant != nil {
-		cond = append(cond, fmt.Sprintf("is_compliant=$%d", n)); args = append(args, *f.IsCompliant); n++
+		cond = append(cond, fmt.Sprintf("is_compliant=$%d", n))
+		args = append(args, *f.IsCompliant)
+		n++
 	}
 	if f.Department != "" {
-		cond = append(cond, fmt.Sprintf("department=$%d", n)); args = append(args, f.Department); n++
+		cond = append(cond, fmt.Sprintf("department=$%d", n))
+		args = append(args, f.Department)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -202,47 +214,77 @@ func (r *MobileRepository) UpdateDevice(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.DeviceName != nil {
-		sets = append(sets, fmt.Sprintf("device_name=$%d", n)); args = append(args, *req.DeviceName); n++
+		sets = append(sets, fmt.Sprintf("device_name=$%d", n))
+		args = append(args, *req.DeviceName)
+		n++
 	}
 	if req.OSVersion != nil {
-		sets = append(sets, fmt.Sprintf("os_version=$%d", n)); args = append(args, *req.OSVersion); n++
+		sets = append(sets, fmt.Sprintf("os_version=$%d", n))
+		args = append(args, *req.OSVersion)
+		n++
 	}
 	if req.EnrollmentStatus != nil {
-		sets = append(sets, fmt.Sprintf("enrollment_status=$%d", n)); args = append(args, *req.EnrollmentStatus); n++
+		sets = append(sets, fmt.Sprintf("enrollment_status=$%d", n))
+		args = append(args, *req.EnrollmentStatus)
+		n++
 	}
 	if req.MDMProfileInstalled != nil {
-		sets = append(sets, fmt.Sprintf("mdm_profile_installed=$%d", n)); args = append(args, *req.MDMProfileInstalled); n++
+		sets = append(sets, fmt.Sprintf("mdm_profile_installed=$%d", n))
+		args = append(args, *req.MDMProfileInstalled)
+		n++
 	}
 	if req.IsJailbroken != nil {
-		sets = append(sets, fmt.Sprintf("is_jailbroken=$%d", n)); args = append(args, *req.IsJailbroken); n++
+		sets = append(sets, fmt.Sprintf("is_jailbroken=$%d", n))
+		args = append(args, *req.IsJailbroken)
+		n++
 	}
 	if req.IsRooted != nil {
-		sets = append(sets, fmt.Sprintf("is_rooted=$%d", n)); args = append(args, *req.IsRooted); n++
+		sets = append(sets, fmt.Sprintf("is_rooted=$%d", n))
+		args = append(args, *req.IsRooted)
+		n++
 	}
 	if req.IsEncrypted != nil {
-		sets = append(sets, fmt.Sprintf("is_encrypted=$%d", n)); args = append(args, *req.IsEncrypted); n++
+		sets = append(sets, fmt.Sprintf("is_encrypted=$%d", n))
+		args = append(args, *req.IsEncrypted)
+		n++
 	}
 	if req.IsScreenLock != nil {
-		sets = append(sets, fmt.Sprintf("is_screen_lock=$%d", n)); args = append(args, *req.IsScreenLock); n++
+		sets = append(sets, fmt.Sprintf("is_screen_lock=$%d", n))
+		args = append(args, *req.IsScreenLock)
+		n++
 	}
 	if req.IsCompliant != nil {
-		sets = append(sets, fmt.Sprintf("is_compliant=$%d", n)); args = append(args, *req.IsCompliant); n++
+		sets = append(sets, fmt.Sprintf("is_compliant=$%d", n))
+		args = append(args, *req.IsCompliant)
+		n++
 	}
 	if req.ComplianceIssues != nil {
-		sets = append(sets, fmt.Sprintf("compliance_issues=$%d", n)); args = append(args, req.ComplianceIssues); n++
+		sets = append(sets, fmt.Sprintf("compliance_issues=$%d", n))
+		args = append(args, req.ComplianceIssues)
+		n++
 	}
 	if req.LastLocation != nil {
-		sets = append(sets, fmt.Sprintf("last_location=$%d", n)); args = append(args, *req.LastLocation); n++
-		sets = append(sets, fmt.Sprintf("last_seen_at=$%d", n)); args = append(args, time.Now().UTC()); n++
+		sets = append(sets, fmt.Sprintf("last_location=$%d", n))
+		args = append(args, *req.LastLocation)
+		n++
+		sets = append(sets, fmt.Sprintf("last_seen_at=$%d", n))
+		args = append(args, time.Now().UTC())
+		n++
 	}
 	if req.LastIP != nil {
-		sets = append(sets, fmt.Sprintf("last_ip=$%d", n)); args = append(args, *req.LastIP); n++
+		sets = append(sets, fmt.Sprintf("last_ip=$%d", n))
+		args = append(args, *req.LastIP)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var d model.MobDevice
@@ -349,16 +391,24 @@ func (r *MobileRepository) ListApps(ctx context.Context, tenantID uuid.UUID, f m
 	args := []any{tenantID}
 	n := 2
 	if f.Platform != "" {
-		cond = append(cond, fmt.Sprintf("platform=$%d", n)); args = append(args, f.Platform); n++
+		cond = append(cond, fmt.Sprintf("platform=$%d", n))
+		args = append(args, f.Platform)
+		n++
 	}
 	if f.IsApproved != nil {
-		cond = append(cond, fmt.Sprintf("is_approved=$%d", n)); args = append(args, *f.IsApproved); n++
+		cond = append(cond, fmt.Sprintf("is_approved=$%d", n))
+		args = append(args, *f.IsApproved)
+		n++
 	}
 	if f.IsBlocklisted != nil {
-		cond = append(cond, fmt.Sprintf("is_blocklisted=$%d", n)); args = append(args, *f.IsBlocklisted); n++
+		cond = append(cond, fmt.Sprintf("is_blocklisted=$%d", n))
+		args = append(args, *f.IsBlocklisted)
+		n++
 	}
 	if f.HasVulns != nil {
-		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *f.HasVulns); n++
+		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *f.HasVulns)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -400,25 +450,39 @@ func (r *MobileRepository) UpdateApp(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.IsApproved != nil {
-		sets = append(sets, fmt.Sprintf("is_approved=$%d", n)); args = append(args, *req.IsApproved); n++
+		sets = append(sets, fmt.Sprintf("is_approved=$%d", n))
+		args = append(args, *req.IsApproved)
+		n++
 	}
 	if req.IsBlocklisted != nil {
-		sets = append(sets, fmt.Sprintf("is_blocklisted=$%d", n)); args = append(args, *req.IsBlocklisted); n++
+		sets = append(sets, fmt.Sprintf("is_blocklisted=$%d", n))
+		args = append(args, *req.IsBlocklisted)
+		n++
 	}
 	if req.BlocklistReason != nil {
-		sets = append(sets, fmt.Sprintf("blocklist_reason=$%d", n)); args = append(args, *req.BlocklistReason); n++
+		sets = append(sets, fmt.Sprintf("blocklist_reason=$%d", n))
+		args = append(args, *req.BlocklistReason)
+		n++
 	}
 	if req.HasKnownVulns != nil {
-		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *req.HasKnownVulns); n++
+		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *req.HasKnownVulns)
+		n++
 	}
 	if req.VulnCount != nil {
-		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n)); args = append(args, *req.VulnCount); n++
+		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n))
+		args = append(args, *req.VulnCount)
+		n++
 	}
 	if req.RiskLevel != nil {
-		sets = append(sets, fmt.Sprintf("risk_level=$%d", n)); args = append(args, *req.RiskLevel); n++
+		sets = append(sets, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, *req.RiskLevel)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var a model.MobApp
@@ -566,23 +630,35 @@ func (r *MobileRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.Rules != nil {
 		rules, _ := json.Marshal(req.Rules)
-		sets = append(sets, fmt.Sprintf("rules=$%d", n)); args = append(args, rules); n++
+		sets = append(sets, fmt.Sprintf("rules=$%d", n))
+		args = append(args, rules)
+		n++
 	}
 	if req.Action != nil {
-		sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, *req.Action); n++
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, *req.Action)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 	if req.AppliesTo != nil {
-		sets = append(sets, fmt.Sprintf("applies_to=$%d", n)); args = append(args, *req.AppliesTo); n++
+		sets = append(sets, fmt.Sprintf("applies_to=$%d", n))
+		args = append(args, *req.AppliesTo)
+		n++
 	}
 
 	var p model.MobPolicy
@@ -669,16 +745,24 @@ func (r *MobileRepository) ListThreats(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.DeviceID != nil {
-		cond = append(cond, fmt.Sprintf("device_id=$%d", n)); args = append(args, *f.DeviceID); n++
+		cond = append(cond, fmt.Sprintf("device_id=$%d", n))
+		args = append(args, *f.DeviceID)
+		n++
 	}
 	if f.ThreatType != "" {
-		cond = append(cond, fmt.Sprintf("threat_type=$%d", n)); args = append(args, f.ThreatType); n++
+		cond = append(cond, fmt.Sprintf("threat_type=$%d", n))
+		args = append(args, f.ThreatType)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -722,17 +806,24 @@ func (r *MobileRepository) UpdateThreat(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "resolved" || *req.Status == "false_positive" {
 			sets = append(sets, fmt.Sprintf("resolved_at=COALESCE(resolved_at,$%d)", n))
-			args = append(args, time.Now().UTC()); n++
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.Remediation != nil {
-		sets = append(sets, fmt.Sprintf("remediation=$%d", n)); args = append(args, *req.Remediation); n++
+		sets = append(sets, fmt.Sprintf("remediation=$%d", n))
+		args = append(args, *req.Remediation)
+		n++
 	}
 	if req.ResolvedBy != nil {
-		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n)); args = append(args, *req.ResolvedBy); n++
+		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n))
+		args = append(args, *req.ResolvedBy)
+		n++
 	}
 
 	var t model.MobThreat
@@ -948,17 +1039,25 @@ func (r *MobileRepository) UpdateRemoteAction(ctx context.Context, tenantID, id 
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		now := time.Now().UTC()
 		switch *req.Status {
 		case "sent":
-			sets = append(sets, fmt.Sprintf("sent_at=COALESCE(sent_at,$%d)", n)); args = append(args, now); n++
+			sets = append(sets, fmt.Sprintf("sent_at=COALESCE(sent_at,$%d)", n))
+			args = append(args, now)
+			n++
 		case "completed", "failed":
-			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n)); args = append(args, now); n++
+			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n))
+			args = append(args, now)
+			n++
 		}
 	}
 	if req.FailureReason != nil {
-		sets = append(sets, fmt.Sprintf("failure_reason=$%d", n)); args = append(args, *req.FailureReason); n++
+		sets = append(sets, fmt.Sprintf("failure_reason=$%d", n))
+		args = append(args, *req.FailureReason)
+		n++
 	}
 
 	var a model.MobRemoteAction
@@ -1019,7 +1118,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows.Scan(&k, &v)
 			stats.DevicesByPlatform[k] = v
 		}
@@ -1031,7 +1131,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows2 != nil {
 		defer rows2.Close()
 		for rows2.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows2.Scan(&k, &v)
 			stats.DevicesByOwnership[k] = v
 		}
@@ -1043,7 +1144,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows3 != nil {
 		defer rows3.Close()
 		for rows3.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows3.Scan(&k, &v)
 			stats.ThreatsBySeverity[k] = v
 		}
@@ -1055,7 +1157,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows4 != nil {
 		defer rows4.Close()
 		for rows4.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows4.Scan(&k, &v)
 			stats.ThreatsByType[k] = v
 		}

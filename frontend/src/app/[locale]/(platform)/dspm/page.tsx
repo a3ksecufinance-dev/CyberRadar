@@ -37,10 +37,12 @@ export default function DSPMPage() {
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'Data Stores', value: stats?.total_stores ?? stores.length, color: 'text-slate-200' },
+          { label: 'Data Stores', value: stats?.total_data_stores ?? stores.length, color: 'text-slate-200' },
           { label: 'Open Findings', value: stats?.open_findings ?? findings.length, color: 'text-red-400' },
           { label: 'Unencrypted Stores', value: stats?.unencrypted_stores ?? stores.filter(s => !s.is_encrypted).length, color: 'text-amber-400' },
-          { label: 'Records at Risk', value: stats?.records_at_risk ? (stats.records_at_risk / 1_000_000).toFixed(1) + 'M' : '—', color: 'text-red-400' },
+          // PII and PCI exposure counts are what the service computes; a
+          // "records at risk" total is not among them.
+          { label: 'PII / PCI Exposures', value: `${stats?.pii_exposures ?? 0} / ${stats?.pci_exposures ?? 0}`, color: 'text-red-400' },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -95,7 +97,7 @@ export default function DSPMPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
-                          {s.data_categories.map((c) => (
+                          {(s.data_categories ?? []).map((c) => (
                             <Badge key={c} variant="outline" className="text-[10px]">{c.toUpperCase()}</Badge>
                           ))}
                         </div>
@@ -104,7 +106,7 @@ export default function DSPMPage() {
                         {s.is_encrypted ? <Check className="mx-auto h-4 w-4 text-emerald-400" /> : <X className="mx-auto h-4 w-4 text-red-400" />}
                       </td>
                       <td className="px-4 py-3">
-                        {s.open_finding_count > 0
+                        {(s.open_finding_count ?? 0) > 0
                           ? <Badge variant="critical">{s.open_finding_count} open</Badge>
                           : <Badge variant="success">None</Badge>}
                       </td>

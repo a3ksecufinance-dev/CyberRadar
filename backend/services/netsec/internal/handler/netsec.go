@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/netsec/internal/model"
@@ -61,14 +62,15 @@ func (h *NetSecHandler) RegisterRoutes(r chi.Router) {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, error) {
-	raw, _ := r.Context().Value("tenant_id").(string)
-	return uuid.Parse(raw)
+	id := authctx.TenantID(r.Context())
+	if id == uuid.Nil {
+		return uuid.Nil, apierrors.Forbidden("no tenant in context")
+	}
+	return id, nil
 }
 
 func userFromCtx(r *http.Request) uuid.UUID {
-	raw, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(raw)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -237,7 +239,7 @@ func (h *NetSecHandler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	activeOnly := r.URL.Query().Get("active_only") != "false"
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -481,7 +483,7 @@ func (h *NetSecHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
 			zoneID = &id
 		}
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1

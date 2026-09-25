@@ -15,14 +15,14 @@ import (
 
 // Processor consumes normalized events, enriches them, and writes to ClickHouse.
 type Processor struct {
-	geo            *enricher.GeoEnricher
-	threat         *enricher.ThreatEnricher
-	chWriter       *writer.ClickHouseWriter
-	enrichedPub    *pkgkafka.Producer // publishes to crp.events.enriched
-	alertPub       *pkgkafka.Producer // publishes to crp.events.alerts
-	dlqPub         *pkgkafka.Producer // publishes to crp.events.dlq
-	logger         zerolog.Logger
-	flushInterval  time.Duration
+	geo           *enricher.GeoEnricher
+	threat        *enricher.ThreatEnricher
+	chWriter      *writer.ClickHouseWriter
+	enrichedPub   *pkgkafka.Producer // publishes to crp.events.enriched
+	alertPub      *pkgkafka.Producer // publishes to crp.events.alerts
+	dlqPub        *pkgkafka.Producer // publishes to crp.events.dlq
+	logger        zerolog.Logger
+	flushInterval time.Duration
 }
 
 // Config holds Processor configuration.

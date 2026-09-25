@@ -8,7 +8,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { useSIEMAlerts, useSIEMStats } from '@/hooks'
-import { formatDateShort } from '@/lib/utils'
+import { countOf, formatDateShort } from '@/lib/utils'
 
 const SEVERITY_FILTERS = ['All', 'Critical', 'High', 'Medium', 'Low'] as const
 
@@ -17,14 +17,23 @@ export default function SiemPage() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('All')
 
-  const params: Record<string, string> = {}
-  if (filter !== 'All') params.severity = filter.toLowerCase()
-  if (search.trim()) params.search = search.trim()
+  // ClickHouse stores severity as Enum8('LOW','MEDIUM','HIGH','CRITICAL') and
+  // the filter is an exact string match, so a lower-cased value silently
+  // matches nothing and empties the table without an error.
+  const params: Record<string, string> = { limit: '100' }
+  if (filter !== 'All') params.severity = filter.toUpperCase()
 
   const { data: alertsData, isLoading, error, mutate } = useSIEMAlerts(params)
   const { data: stats } = useSIEMStats()
 
-  const alerts = alertsData?.items ?? []
+  // ListAlerts takes no text filter, so the box narrows the page already
+  // fetched rather than pretending to query the whole store.
+  const term = search.trim().toLowerCase()
+  const alerts = (alertsData?.items ?? []).filter((a) =>
+    !term ||
+    a.title.toLowerCase().includes(term) ||
+    a.rule_name.toLowerCase().includes(term) ||
+    a.entity_value.toLowerCase().includes(term))
 
   return (
     <div className="space-y-6">
@@ -43,10 +52,10 @@ export default function SiemPage() {
       {stats && (
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Total Alerts', value: stats.total_alerts, color: 'text-slate-200' },
-            { label: 'Open', value: stats.open_alerts, color: 'text-red-400' },
-            { label: 'Critical', value: stats.critical_alerts, color: 'text-red-400' },
-            { label: 'Events (24h)', value: stats.events_last_24h?.toLocaleString() ?? '—', color: 'text-cyan-400' },
+            { label: 'Total Alerts', value: stats.total, color: 'text-slate-200' },
+            { label: 'Open', value: stats.open, color: 'text-red-400' },
+            { label: 'Critical', value: countOf(stats.by_severity, 'critical'), color: 'text-red-400' },
+            { label: 'Fired (24h)', value: stats.fired_last_24h.toLocaleString(), color: 'text-cyan-400' },
           ].map((s) => (
             <Card key={s.label}>
               <CardContent className="pt-4">
@@ -61,7 +70,7 @@ export default function SiemPage() {
       <div className="flex gap-3">
         <Input
           className="max-w-sm text-xs"
-          placeholder={t('search')}
+          placeholder="Filter these results…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -110,7 +119,7 @@ export default function SiemPage() {
                     <td className="px-4 py-2.5 text-xs text-cyan-400">{alert.entity_value}</td>
                     <td className="px-4 py-2.5 text-xs text-slate-300 max-w-xs truncate font-sans">{alert.title}</td>
                     <td className="px-4 py-2.5"><SeverityBadge severity={alert.severity} /></td>
-                    <td className="px-4 py-2.5 text-xs text-slate-400">{alert.status}</td>
+                    <td className="px-4 py-2.5 text-xs text-slate-400">{alert.status ?? 'open'}</td>
                   </tr>
                 ))}
               </tbody>

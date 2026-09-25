@@ -9,13 +9,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/copilot/internal/handler"
 	"github.com/cyberradar/platform/services/copilot/internal/repository"
 	"github.com/cyberradar/platform/services/copilot/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -24,9 +26,22 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "copilot-service").Logger()
 
-	port       := envOrDefault("SERVICE_PORT", "8016")
-	jwtSecret  := mustEnv("JWT_SECRET")
-	dbURL      := mustEnv("DATABASE_URL")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"copilot-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8016")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
 	anthropicKey := mustEnv("ANTHROPIC_API_KEY")
 
 	// Service URL map for tool dispatcher (all optional — missing = tool returns unavailable)
@@ -59,27 +74,37 @@ func main() {
 
 	// ── Services ──────────────────────────────────────────────────────────────
 	copilotRepo := repository.NewCopilotRepository(pool)
-	dispatcher  := service.NewToolDispatcher(serviceURLs)
-	llmClient   := service.NewLLMClient(anthropicKey, dispatcher, logger)
-	copilotSvc  := service.NewCopilotService(copilotRepo, llmClient, logger)
-	copilotH    := handler.NewCopilotHandler(copilotSvc)
+	dispatcher := service.NewToolDispatcher(serviceURLs)
+	llmClient := service.NewLLMClient(anthropicKey, dispatcher, logger)
+
+	// ── Retrieval ─────────────────────────────────────────────────────────────
+	// Optional: with no embeddings server the Copilot still works, it just has
+	// no recall of the tenant's own history. Point EMBEDDINGS_URL at a
+	// self-hosted server to keep incident text inside the estate.
+	embedder := buildEmbedder(ctx, copilotRepo, logger)
+
+	copilotSvc := service.NewCopilotService(copilotRepo, llmClient, embedder, logger)
+	copilotH := handler.NewCopilotHandler(copilotSvc)
 
 	logger.Info().Int("configured_service_urls", len(serviceURLs)).Msg("tool_dispatcher_ready")
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()
+	r.Use(observe.Middleware("copilot-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(120 * time.Second)) // LLM calls can take up to 90s
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"copilot-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequirePermissionByMethod("copilot"))
 		copilotH.RegisterRoutes(r)
 	})
 
@@ -109,42 +134,6 @@ func main() {
 	logger.Info().Msg("copilot-service stopped")
 }
 
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
 func mustEnv(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
@@ -158,4 +147,38 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// buildEmbedder configures retrieval, or returns nil when it is not deployed.
+//
+// It checks the model's width against the column the index is built on before
+// anything is written. A mismatch would otherwise be found one row at a time,
+// at ingestion, long after the deployment looked healthy.
+func buildEmbedder(ctx context.Context, repo *repository.CopilotRepository, logger zerolog.Logger) service.Embedder {
+	url := os.Getenv("EMBEDDINGS_URL")
+	if url == "" {
+		logger.Warn().Msg("no EMBEDDINGS_URL: the copilot will answer without recall of this tenant's history")
+		return nil
+	}
+
+	dimension, err := repo.EmbeddingDimension(ctx)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("cannot read the embedding column's dimension")
+	}
+
+	embedder, err := service.NewHTTPEmbedder(service.EmbedderConfig{
+		URL:       url,
+		Model:     envOrDefault("EMBEDDINGS_MODEL", "BAAI/bge-large-en-v1.5"),
+		APIKey:    os.Getenv("EMBEDDINGS_API_KEY"),
+		Dimension: dimension,
+	})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("embeddings configuration invalid")
+	}
+
+	logger.Info().
+		Str("url", url).
+		Int("dimension", dimension).
+		Msg("retrieval enabled")
+	return embedder
 }

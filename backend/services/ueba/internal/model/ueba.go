@@ -46,7 +46,7 @@ type EntityProfile struct {
 	TenantID         uuid.UUID  `json:"tenant_id"`
 	EntityID         uuid.UUID  `json:"entity_id"`
 	EntityType       string     `json:"entity_type"`
-	NormalHours      []int32    `json:"normal_hours"`      // UTC hours seen (0-23)
+	NormalHours      []int32    `json:"normal_hours"` // UTC hours seen (0-23)
 	NormalCountries  []string   `json:"normal_countries"`
 	NormalIPPrefixes []string   `json:"normal_ip_prefixes"` // /24 CIDR blocks
 	NormalEventTypes []string   `json:"normal_event_types"`
