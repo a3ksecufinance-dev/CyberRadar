@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/tenant/internal/model"
 	"github.com/cyberradar/platform/services/tenant/internal/service"
@@ -169,7 +169,7 @@ func (h *TenantHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // Stats handles GET /tenants/{tenantID}/stats
 func (h *TenantHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// TODO: implement stats aggregation (asset count, user count, alert count)
-	response.OK(w, map[string]any{"message": "stats endpoint — implementation in progress"})
+	response.OKWithMeta(w, "stats endpoint — implementation in progress", &response.Meta{Total: int64(len("stats endpoint — implementation in progress"))})
 }
 
 // ─── Context helpers ─────────────────────────────────────────────────────────
@@ -192,18 +192,7 @@ func mapError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil
 	}
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindConflict):
-		response.Conflict(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 	return err
 }
 

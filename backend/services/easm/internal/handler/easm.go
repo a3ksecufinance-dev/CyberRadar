@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/easm/internal/model"
 	"github.com/cyberradar/platform/services/easm/internal/service"
@@ -466,26 +466,5 @@ func queryInt(r *http.Request, key string, def int) int {
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	if err == nil {
-		return
-	}
-	de, ok := err.(*apierrors.DomainError)
-	if !ok {
-		response.InternalError(w)
-		return
-	}
-	switch de.Kind {
-	case apierrors.KindNotFound:
-		response.NotFound(w, de.Message)
-	case apierrors.KindConflict:
-		response.Conflict(w, de.Message)
-	case apierrors.KindBadInput:
-		response.BadRequest(w, "VALIDATION_ERROR", de.Message)
-	case apierrors.KindUnauth:
-		response.Unauthorized(w, de.Message)
-	case apierrors.KindForbidden:
-		response.Forbidden(w, de.Message)
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }

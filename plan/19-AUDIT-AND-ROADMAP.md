@@ -619,6 +619,101 @@ qu'il croit. Les deux notions d'administrateur devraient être une seule.
 hors liste remonte en erreur 500 au lieu d'un 422. L'utilisateur voit « erreur
 interne » pour une saisie invalide.
 
+### 3.8 Le contrat d'API, les erreurs, l'administrateur et les KPI
+
+Quatre chantiers issus de §3.7. Trois étaient des dettes connues ; le quatrième
+a mis au jour trois défauts qui, ensemble, rendaient le tableau de bord
+inexistant.
+
+**Une seule forme de réponse.** Les 30 services passent désormais par
+`internal/pkg/response`. Neuf écrivaient leur JSON eux-mêmes — ~780 sites
+d'appel — et la plupart emballaient les listes sous une clé de leur choix. Les
+erreurs de ces neuf-là sortaient en `{"error": "texte"}` là où le contrat dit
+`{"error": {"code", "message"}}` : un client lisant `error.message` recevait
+`undefined`, donc « HTTP 500 » au lieu du motif. Une liste est maintenant un
+tableau sous `data`, avec `meta.total` **toujours présent** — il portait
+`omitempty`, si bien qu'une page sans résultat répondait sans total et qu'on ne
+pouvait pas distinguer « zéro correspondance » de « cet endpoint ne compte
+pas ». `page` et `limit` gardent `omitempty` : leur absence dit que l'endpoint
+ne pagine pas. Côté frontend, l'adaptateur à trois formes a disparu ; il reste
+un garde qui *signale* une réponse non conforme au lieu de l'absorber.
+
+**Les erreurs disent ce qui s'est passé.** `internal/pkg/httperr` remplace
+vingt copies de `mapError` qui divergeaient : certaines renvoyaient `err.Error()`
+au client — avec le préfixe `[KIND]` et parfois le message du driver —, d'autres
+répondaient 500 à tout ce que la couche domaine n'avait pas classé, ce qui
+incluait **toutes** les violations de contrainte. Désormais une valeur hors
+d'une liste CHECK donne 422 en nommant le champ :
+
+```json
+{"error": {"code": "VALIDATION_ERROR", "details":
+  {"field": "incident_type", "constraint": "ir_incidents_incident_type_check",
+   "reason": "value is not accepted for this field"}}}
+```
+
+Une clé dupliquée donne 409, une référence absente 422, un littéral UUID
+malformé 400. Tout le reste reste 500 avec un texte générique : le message du
+driver, qui nomme la relation et parfois le SQL, ne quitte plus le serveur.
+
+**Un seul administrateur.** Le rôle `super_admin` n'accordait rien : 000029
+l'omettait délibérément de la matrice au motif que le code le court-circuitait,
+et le court-circuit lisait en réalité `identities.privilege_level`. Les deux
+notions sont séparées selon l'axe qui les distingue vraiment :
+
+> les permissions disent **quoi** ; `is_admin` dit **sur les données de qui**.
+
+`super_admin` détient maintenant les 82 permissions par la matrice, comme
+n'importe quel rôle — donc son autorité est énumérable — et c'est lui, non la
+colonne, qui accorde la portée inter-tenant. Le court-circuit de
+`HasPermission` a disparu : il rendait la matrice décorative pour précisément le
+compte le plus puissant. Migration 000035, avec réconciliation des données
+existantes ; `TestSuperAdminHoldsEveryPermission` échoue si une migration future
+ajoute une permission sans l'accorder.
+
+**Les KPI : trois défauts superposés.** Le constat de §3.7 (« rien ne publie de
+`KPISnapshot` ») était exact mais en cachait deux autres, et les trois se
+conjuguaient pour rendre le tableau de bord vide :
+
+1. **`PlatformOverview` lit lui aussi le magasin KPI.** Il ne calcule rien : il
+   assemble le dernier relevé publié par chaque domaine. Sans producteur, ce
+   n'était pas « un graphique manquant » — c'était *toute* la page, score de
+   sécurité compris, à zéro pour chaque tenant.
+2. **Six des sept migrations ClickHouse ne s'appliquaient pas.** Cinq portaient
+   un `TTL` sur une colonne `DateTime64`, que ClickHouse refuse (il exige `Date`
+   ou `DateTime`) ; une déclarait `ORDER BY (..., severity DESC, ...)`, or une
+   clé de tri MergeTree n'a pas de direction — erreur de syntaxe. Les schémas
+   SIEM, UEBA, TI, vuln et audit **n'avaient donc jamais existé**. La septième
+   exigeait des disques `warm`/`cold` qu'aucun schéma ne peut présumer : la
+   table d'audit, celle qu'un régulateur demande, échouait sur toute
+   installation mono-disque. Le TTL de tiering y est remplacé par la commande
+   `ALTER TABLE` documentée ; ce qui ne doit jamais y figurer est une expiration
+   sèche — un enregistrement d'audit qui s'efface tout seul est le contraire de
+   ce à quoi sert la table.
+3. **Toutes les lectures ClickHouse échouaient.** `clickhouse.Named` lie ses
+   paramètres sous forme textuelle : un `uuid.UUID` ([16]byte) et un `time.Time`
+   sont rejetés par `expected string value in NamedValue for query parameter`.
+   Les écritures, en liaison positionnelle, passaient ; les lectures — les
+   `LatestSnapshots` du dashboard, son `QueryTimeSeries`, la déduplication
+   d'alertes du SIEM et son filtre de dates — non. `db.CHTime` / `db.CHTime64`
+   règlent le cas au même endroit.
+
+Le producteur lui-même est `internal/pkg/kpi` : un service le démarre en un
+appel dans son `main`, fournit `KPISamples(ctx, tenantID)` au-dessus de ce qu'il
+calcule déjà pour son propre `/stats`, et le sampler publie pour chaque tenant
+actif sur `crp.events.kpi`. L'échec d'un tenant n'interrompt pas les autres :
+un tableau de bord vidé pour tout le monde parce qu'un tenant est en erreur est
+exactement ce qu'on cherche à supprimer. Les sept domaines que lit l'aperçu
+(siem, ueba, ti, vuln, attackpath, soar, kg) publient.
+
+**À faire valider avant de lire les scores comme des mesures.** Chaque domaine
+dérive un `risk_score` 0–100 d'une formule pondérée écrite en clair dans son
+fichier `kpi.go` — dix alertes critiques ouvertes saturent le score du SIEM, une
+entité à risque pèse plus qu'une anomalie isolée, un finding hors SLA pèse plus
+qu'un finding de même gravité encore dans les temps. Ces pondérations sont un
+point de départ, au même titre que la matrice de permissions : arbitrer une
+gravité contre une autre est une décision d'appétit au risque qui appartient à
+l'établissement, pas au code.
+
 ---
 
 ## 4. Points forts à préserver
@@ -769,21 +864,17 @@ Fait (§3.7) : les 7 pages figées sont branchées, les types alignés sur les
 structs Go, les chemins et filtres corrigés, recharts introduit sur les
 répartitions que les API calculent.
 
+Fait (§3.8) : réponses normalisées sur `response.OKWithMeta`, erreurs Postgres
+mappées sur leur vrai statut, `super_admin` unifié, producteur de KPI écrit et
+les trois défauts qui vidaient le tableau de bord corrigés.
+
 Reste :
 
-- **Normaliser les réponses des services sur `response.OKWithMeta`.** Cinq
-  services n'émettent aucune enveloppe et neuf emballent leurs listes sous une
-  clé nommée ; `lib/api.ts` réconcilie les trois formes en attendant. C'est la
-  dette la plus visible pour tout client tiers de l'API.
-- **Publier des `KPISnapshot`.** `/dashboard/kpi/*` lit ClickHouse via Kafka,
-  mais aucun service ne produit d'événement : les séries temporelles sont
-  impossibles tant que le producteur n'existe pas.
-- **Mapper les violations de contrainte CHECK sur 422**, pas 500.
-- **Unifier les deux notions d'administrateur** : le rôle `super_admin` n'accorde
-  aucune permission, seul `privilege_level` compte.
 - Auditer les autres services pour la lecture de colonnes nullables dans des
   `string` Go — deux occurrences trouvées (IR, OT) en exécutant six services ;
   vingt-quatre n'ont pas été exercés.
+- **Faire valider les pondérations de `risk_score`** par la fonction risque
+  avant que le score de sécurité soit présenté comme une mesure (§3.8).
 - Endpoint de réglages du tenant, pour que la page Réglages puisse écrire.
 - Visualisation du graphe d'attaque (Cytoscape.js ou react-force-graph).
 - Heatmap MITRE ATT&CK.

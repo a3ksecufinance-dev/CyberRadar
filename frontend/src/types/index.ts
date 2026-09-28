@@ -23,8 +23,10 @@ export interface ApiResponse<T> {
 }
 
 export interface PageMeta {
-  page: number
-  limit: number
+  /** Absent on an endpoint that returns everything rather than a page. */
+  page?: number
+  limit?: number
+  /** Always present: zero matches is an answer, not a missing field. */
   total: number
 }
 

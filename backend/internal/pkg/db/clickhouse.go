@@ -73,3 +73,21 @@ func NewClickHouseConn(ctx context.Context, cfg ClickHouseConfig) (driver.Conn, 
 
 	return conn, nil
 }
+
+// CHTime renders a time for a {name:DateTime} query parameter.
+//
+// ClickHouse named parameters are bound as text, so a time.Time cannot be
+// passed through as-is: the driver rejects it with "expected string value in
+// NamedValue for query parameter" and the query never runs. Every read in the
+// dashboard's KPI repository and the SIEM's alert repository failed this way.
+//
+// The value is normalised to UTC because the columns carry no zone of their own.
+func CHTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04:05")
+}
+
+// CHTime64 is CHTime for a {name:DateTime64(3,'UTC')} parameter, which keeps
+// milliseconds.
+func CHTime64(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04:05.000")
+}

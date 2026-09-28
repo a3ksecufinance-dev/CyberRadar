@@ -124,15 +124,21 @@ func Token(ctx context.Context) string {
 }
 
 // HasPermission reports whether the caller may perform perm, named
-// "resource:action". A super-admin holds every permission, which mirrors the
-// bypass in policies/rbac.rego.
+// "resource:action".
+//
+// There is no super-admin bypass here. There used to be, and it made the
+// permission matrix decorative for exactly the account with the most
+// authority: role_permissions held no row for super_admin, so nothing in the
+// database said what a platform operator could do. super_admin now holds every
+// permission like any other role (migration 000035), so what it may do is
+// enumerable, and an unanswered permission is a missing grant rather than an
+// invisible exception.
+//
+// IsSuperAdmin remains, and answers a different question — see below.
 func HasPermission(ctx context.Context, perm string) bool {
 	id, ok := From(ctx)
 	if !ok {
 		return false
-	}
-	if id.IsSuperAdmin {
-		return true
 	}
 	for _, p := range id.Permissions {
 		if p == perm {

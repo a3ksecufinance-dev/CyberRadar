@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
+	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/mobile/internal/model"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -125,16 +127,6 @@ func userFromCtx(r *http.Request) *uuid.UUID {
 	return nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
-}
-
 func parseUUID(s string) (uuid.UUID, error) {
 	return uuid.Parse(s)
 }
@@ -144,31 +136,31 @@ func parseUUID(s string) (uuid.UUID, error) {
 func (h *Handler) CreateDevice(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	device, err := h.svc.CreateDevice(r.Context(), tenantFromCtx(r), req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("CreateDevice")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusCreated, device)
+	response.Created(w, device)
 }
 
 func (h *Handler) GetDevice(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	device, err := h.svc.GetDevice(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetDevice")
-		writeError(w, http.StatusNotFound, "device not found")
+		response.NotFound(w, "device not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	response.OK(w, device)
 }
 
 func (h *Handler) ListDevices(w http.ResponseWriter, r *http.Request) {
@@ -198,41 +190,41 @@ func (h *Handler) ListDevices(w http.ResponseWriter, r *http.Request) {
 	devices, total, err := h.svc.ListDevices(r.Context(), tenantFromCtx(r), f)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListDevices")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": devices, "total": total})
+	response.OKWithMeta(w, devices, &response.Meta{Total: int64(total)})
 }
 
 func (h *Handler) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	var req model.UpdateDeviceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	device, err := h.svc.UpdateDevice(r.Context(), tenantFromCtx(r), id, req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("UpdateDevice")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, device)
+	response.OK(w, device)
 }
 
 func (h *Handler) DeleteDevice(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	if err := h.svc.DeleteDevice(r.Context(), tenantFromCtx(r), id); err != nil {
 		h.log.Error().Err(err).Msg("DeleteDevice")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -241,35 +233,35 @@ func (h *Handler) DeleteDevice(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListDeviceApps(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	apps, err := h.svc.ListDeviceApps(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListDeviceApps")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": apps})
+	response.OKWithMeta(w, apps, &response.Meta{Total: int64(len(apps))})
 }
 
 func (h *Handler) InstallApp(w http.ResponseWriter, r *http.Request) {
 	deviceID, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	appID, err := parseUUID(chi.URLParam(r, "appID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid app id")
+		response.BadRequest(w, "INVALID_ID", "invalid app id")
 		return
 	}
 	if err := h.svc.InstallApp(r.Context(), tenantFromCtx(r), deviceID, appID); err != nil {
 		h.log.Error().Err(err).Msg("InstallApp")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "installed"})
+	response.OK(w, map[string]string{"status": "installed"})
 }
 
 // ─── Apps ─────────────────────────────────────────────────────────────────────
@@ -277,31 +269,31 @@ func (h *Handler) InstallApp(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateApp(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	app, err := h.svc.CreateApp(r.Context(), tenantFromCtx(r), req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("CreateApp")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusCreated, app)
+	response.Created(w, app)
 }
 
 func (h *Handler) GetApp(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "appID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid app id")
+		response.BadRequest(w, "INVALID_ID", "invalid app id")
 		return
 	}
 	app, err := h.svc.GetApp(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetApp")
-		writeError(w, http.StatusNotFound, "app not found")
+		response.NotFound(w, "app not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, app)
+	response.OK(w, app)
 }
 
 func (h *Handler) ListApps(w http.ResponseWriter, r *http.Request) {
@@ -337,30 +329,30 @@ func (h *Handler) ListApps(w http.ResponseWriter, r *http.Request) {
 	apps, total, err := h.svc.ListApps(r.Context(), tenantFromCtx(r), f)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListApps")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": apps, "total": total})
+	response.OKWithMeta(w, apps, &response.Meta{Total: int64(total)})
 }
 
 func (h *Handler) UpdateApp(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "appID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid app id")
+		response.BadRequest(w, "INVALID_ID", "invalid app id")
 		return
 	}
 	var req model.UpdateAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	app, err := h.svc.UpdateApp(r.Context(), tenantFromCtx(r), id, req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("UpdateApp")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, app)
+	response.OK(w, app)
 }
 
 // ─── Policies ─────────────────────────────────────────────────────────────────
@@ -368,72 +360,72 @@ func (h *Handler) UpdateApp(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	var req model.CreatePolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	policy, err := h.svc.CreatePolicy(r.Context(), tenantFromCtx(r), req, userFromCtx(r))
 	if err != nil {
 		h.log.Error().Err(err).Msg("CreatePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusCreated, policy)
+	response.Created(w, policy)
 }
 
 func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	policy, err := h.svc.GetPolicy(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetPolicy")
-		writeError(w, http.StatusNotFound, "policy not found")
+		response.NotFound(w, "policy not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, policy)
+	response.OK(w, policy)
 }
 
 func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	policies, err := h.svc.ListPolicies(r.Context(), tenantFromCtx(r))
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListPolicies")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": policies})
+	response.OKWithMeta(w, policies, &response.Meta{Total: int64(len(policies))})
 }
 
 func (h *Handler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	var req model.UpdatePolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	policy, err := h.svc.UpdatePolicy(r.Context(), tenantFromCtx(r), id, req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("UpdatePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, policy)
+	response.OK(w, policy)
 }
 
 func (h *Handler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	if err := h.svc.DeletePolicy(r.Context(), tenantFromCtx(r), id); err != nil {
 		h.log.Error().Err(err).Msg("DeletePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -444,31 +436,31 @@ func (h *Handler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateThreat(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateThreatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	threat, err := h.svc.CreateThreat(r.Context(), tenantFromCtx(r), req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("CreateThreat")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusCreated, threat)
+	response.Created(w, threat)
 }
 
 func (h *Handler) GetThreat(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "threatID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid threat id")
+		response.BadRequest(w, "INVALID_ID", "invalid threat id")
 		return
 	}
 	threat, err := h.svc.GetThreat(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetThreat")
-		writeError(w, http.StatusNotFound, "threat not found")
+		response.NotFound(w, "threat not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, threat)
+	response.OK(w, threat)
 }
 
 func (h *Handler) ListThreats(w http.ResponseWriter, r *http.Request) {
@@ -496,30 +488,30 @@ func (h *Handler) ListThreats(w http.ResponseWriter, r *http.Request) {
 	threats, total, err := h.svc.ListThreats(r.Context(), tenantFromCtx(r), f)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListThreats")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": threats, "total": total})
+	response.OKWithMeta(w, threats, &response.Meta{Total: int64(total)})
 }
 
 func (h *Handler) UpdateThreat(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "threatID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid threat id")
+		response.BadRequest(w, "INVALID_ID", "invalid threat id")
 		return
 	}
 	var req model.UpdateThreatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	threat, err := h.svc.UpdateThreat(r.Context(), tenantFromCtx(r), id, req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("UpdateThreat")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, threat)
+	response.OK(w, threat)
 }
 
 // ─── Compliance ───────────────────────────────────────────────────────────────
@@ -527,22 +519,22 @@ func (h *Handler) UpdateThreat(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) RunComplianceCheck(w http.ResponseWriter, r *http.Request) {
 	var req model.RunComplianceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	check, err := h.svc.RunComplianceCheck(r.Context(), tenantFromCtx(r), req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("RunComplianceCheck")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, check)
+	response.OK(w, check)
 }
 
 func (h *Handler) ListComplianceChecks(w http.ResponseWriter, r *http.Request) {
 	deviceID, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -552,10 +544,10 @@ func (h *Handler) ListComplianceChecks(w http.ResponseWriter, r *http.Request) {
 	checks, err := h.svc.ListComplianceChecks(r.Context(), tenantFromCtx(r), deviceID, limit)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListComplianceChecks")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": checks})
+	response.OKWithMeta(w, checks, &response.Meta{Total: int64(len(checks))})
 }
 
 // ─── Remote Actions ───────────────────────────────────────────────────────────
@@ -563,7 +555,7 @@ func (h *Handler) ListComplianceChecks(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateRemoteAction(w http.ResponseWriter, r *http.Request) {
 	var req model.CreateRemoteActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	if userID := userFromCtx(r); userID != nil && req.RequestedByID == nil {
@@ -572,60 +564,60 @@ func (h *Handler) CreateRemoteAction(w http.ResponseWriter, r *http.Request) {
 	action, err := h.svc.CreateRemoteAction(r.Context(), tenantFromCtx(r), req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("CreateRemoteAction")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusCreated, action)
+	response.Created(w, action)
 }
 
 func (h *Handler) GetRemoteAction(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "actionID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		response.BadRequest(w, "INVALID_ID", "invalid action id")
 		return
 	}
 	action, err := h.svc.GetRemoteAction(r.Context(), tenantFromCtx(r), id)
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetRemoteAction")
-		writeError(w, http.StatusNotFound, "action not found")
+		response.NotFound(w, "action not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, action)
+	response.OK(w, action)
 }
 
 func (h *Handler) ListRemoteActions(w http.ResponseWriter, r *http.Request) {
 	deviceID, err := parseUUID(chi.URLParam(r, "deviceID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid device id")
+		response.BadRequest(w, "INVALID_ID", "invalid device id")
 		return
 	}
 	actions, err := h.svc.ListRemoteActions(r.Context(), tenantFromCtx(r), deviceID)
 	if err != nil {
 		h.log.Error().Err(err).Msg("ListRemoteActions")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": actions})
+	response.OKWithMeta(w, actions, &response.Meta{Total: int64(len(actions))})
 }
 
 func (h *Handler) UpdateRemoteAction(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "actionID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid action id")
+		response.BadRequest(w, "INVALID_ID", "invalid action id")
 		return
 	}
 	var req model.UpdateRemoteActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	action, err := h.svc.UpdateRemoteAction(r.Context(), tenantFromCtx(r), id, req)
 	if err != nil {
 		h.log.Error().Err(err).Msg("UpdateRemoteAction")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, action)
+	response.OK(w, action)
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -634,8 +626,8 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.svc.GetStats(r.Context(), tenantFromCtx(r))
 	if err != nil {
 		h.log.Error().Err(err).Msg("GetStats")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.log)
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	response.OK(w, stats)
 }

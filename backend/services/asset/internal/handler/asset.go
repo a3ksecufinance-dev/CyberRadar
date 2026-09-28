@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/asset/internal/model"
 	"github.com/cyberradar/platform/services/asset/internal/service"
@@ -193,7 +193,7 @@ func (h *AssetHandler) ListDiscovery(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"candidates": candidates, "total": len(candidates)})
+	response.OKWithMeta(w, candidates, &response.Meta{Total: int64(len(candidates))})
 }
 
 // GetRelationships handles GET /assets/{assetID}/relationships
@@ -207,7 +207,7 @@ func (h *AssetHandler) GetRelationships(w http.ResponseWriter, r *http.Request) 
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"relationships": rels, "total": len(rels)})
+	response.OKWithMeta(w, rels, &response.Meta{Total: int64(len(rels))})
 }
 
 // AddRelationship handles POST /assets/{assetID}/relationships
@@ -253,16 +253,7 @@ func mustIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource not found")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

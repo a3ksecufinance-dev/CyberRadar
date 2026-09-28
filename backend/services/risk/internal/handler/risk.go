@@ -7,6 +7,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/risk/internal/model"
 	"github.com/cyberradar/platform/services/risk/internal/service"
@@ -76,32 +77,6 @@ func userFromCtx(r *http.Request) uuid.UUID {
 	return authctx.UserID(r.Context())
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, err error) {
-	de, ok := err.(*apierrors.DomainError)
-	if !ok {
-		response.InternalError(w)
-		return
-	}
-	switch de.Kind {
-	case apierrors.KindNotFound:
-		response.NotFound(w, de.Message)
-	case apierrors.KindForbidden:
-		response.Forbidden(w, de.Message)
-	case apierrors.KindUnauth:
-		response.Unauthorized(w, de.Message)
-	case apierrors.KindBadInput, apierrors.KindConflict:
-		response.BadRequest(w, string(de.Kind), de.Message)
-	default:
-		response.InternalError(w)
-	}
-}
-
 func parseUUID(r *http.Request, param string) (uuid.UUID, error) {
 	return uuid.Parse(chi.URLParam(r, param))
 }
@@ -120,30 +95,30 @@ func queryInt(r *http.Request, key, def string) int {
 func (h *RiskHandler) CreateAsset(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateRiskAssetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	asset, err := h.svc.CreateAsset(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, asset)
+	response.Created(w, asset)
 }
 
 func (h *RiskHandler) ListAssets(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListAssetsFilter{
@@ -161,53 +136,53 @@ func (h *RiskHandler) ListAssets(w http.ResponseWriter, r *http.Request) {
 	}
 	assets, total, err := h.svc.ListAssets(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assets": assets, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, assets, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *RiskHandler) GetAsset(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	assetID, err := parseUUID(r, "assetID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid asset id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid asset id"))
 		return
 	}
 	asset, err := h.svc.GetAsset(r.Context(), tenantID, assetID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	response.OK(w, asset)
 }
 
 func (h *RiskHandler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	assetID, err := parseUUID(r, "assetID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid asset id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid asset id"))
 		return
 	}
 	var req model.UpdateRiskAssetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	asset, err := h.svc.UpdateAsset(r.Context(), tenantID, assetID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, asset)
+	response.OK(w, asset)
 }
 
 // ─── Scenarios ────────────────────────────────────────────────────────────────
@@ -215,30 +190,30 @@ func (h *RiskHandler) UpdateAsset(w http.ResponseWriter, r *http.Request) {
 func (h *RiskHandler) CreateScenario(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateScenarioRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	sc, err := h.svc.CreateScenario(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, sc)
+	response.Created(w, sc)
 }
 
 func (h *RiskHandler) ListScenarios(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListScenariosFilter{
@@ -257,53 +232,53 @@ func (h *RiskHandler) ListScenarios(w http.ResponseWriter, r *http.Request) {
 	}
 	scenarios, total, err := h.svc.ListScenarios(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scenarios": scenarios, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, scenarios, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *RiskHandler) GetScenario(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	scenarioID, err := parseUUID(r, "scenarioID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid scenario id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid scenario id"))
 		return
 	}
 	sc, err := h.svc.GetScenario(r.Context(), tenantID, scenarioID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sc)
+	response.OK(w, sc)
 }
 
 func (h *RiskHandler) UpdateScenario(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	scenarioID, err := parseUUID(r, "scenarioID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid scenario id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid scenario id"))
 		return
 	}
 	var req model.UpdateScenarioRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	sc, err := h.svc.UpdateScenario(r.Context(), tenantID, scenarioID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sc)
+	response.OK(w, sc)
 }
 
 // ─── Treatments ───────────────────────────────────────────────────────────────
@@ -311,30 +286,30 @@ func (h *RiskHandler) UpdateScenario(w http.ResponseWriter, r *http.Request) {
 func (h *RiskHandler) CreateTreatment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateTreatmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	t, err := h.svc.CreateTreatment(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, t)
+	response.Created(w, t)
 }
 
 func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var scenarioID *uuid.UUID
@@ -354,53 +329,53 @@ func (h *RiskHandler) ListTreatments(w http.ResponseWriter, r *http.Request) {
 	}
 	treatments, total, err := h.svc.ListTreatments(r.Context(), tenantID, scenarioID, status, page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"treatments": treatments, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, treatments, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *RiskHandler) GetTreatment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	treatmentID, err := parseUUID(r, "treatmentID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid treatment id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid treatment id"))
 		return
 	}
 	t, err := h.svc.GetTreatment(r.Context(), tenantID, treatmentID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	response.OK(w, t)
 }
 
 func (h *RiskHandler) UpdateTreatment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	treatmentID, err := parseUUID(r, "treatmentID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid treatment id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid treatment id"))
 		return
 	}
 	var req model.UpdateTreatmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	t, err := h.svc.UpdateTreatment(r.Context(), tenantID, treatmentID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, t)
+	response.OK(w, t)
 }
 
 // ─── Assessments ──────────────────────────────────────────────────────────────
@@ -408,30 +383,30 @@ func (h *RiskHandler) UpdateTreatment(w http.ResponseWriter, r *http.Request) {
 func (h *RiskHandler) CreateAssessment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateAssessmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	a, err := h.svc.CreateAssessment(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, a)
+	response.Created(w, a)
 }
 
 func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	status := r.URL.Query().Get("status")
@@ -445,29 +420,29 @@ func (h *RiskHandler) ListAssessments(w http.ResponseWriter, r *http.Request) {
 	}
 	assessments, total, err := h.svc.ListAssessments(r.Context(), tenantID, status, page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assessments": assessments, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, assessments, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *RiskHandler) GetAssessment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	assessmentID, err := parseUUID(r, "assessmentID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid assessment id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid assessment id"))
 		return
 	}
 	a, err := h.svc.GetAssessment(r.Context(), tenantID, assessmentID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	response.OK(w, a)
 }
 
 // ─── KRIs ─────────────────────────────────────────────────────────────────────
@@ -475,103 +450,103 @@ func (h *RiskHandler) GetAssessment(w http.ResponseWriter, r *http.Request) {
 func (h *RiskHandler) CreateKRI(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateKRIRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	k, err := h.svc.CreateKRI(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, k)
+	response.Created(w, k)
 }
 
 func (h *RiskHandler) ListKRIs(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	category := r.URL.Query().Get("category")
 	status := r.URL.Query().Get("status")
 	kris, err := h.svc.ListKRIs(r.Context(), tenantID, category, status)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"kris": kris, "total": len(kris)})
+	response.OKWithMeta(w, kris, &response.Meta{Total: int64(len(kris))})
 }
 
 func (h *RiskHandler) GetKRI(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	kriID, err := parseUUID(r, "kriID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
 		return
 	}
 	k, err := h.svc.GetKRI(r.Context(), tenantID, kriID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, k)
+	response.OK(w, k)
 }
 
 func (h *RiskHandler) UpdateKRIValue(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	kriID, err := parseUUID(r, "kriID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
 		return
 	}
 	var req model.UpdateKRIValueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	k, err := h.svc.UpdateKRIValue(r.Context(), tenantID, kriID, req.Value)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, k)
+	response.OK(w, k)
 }
 
 func (h *RiskHandler) GetKRIHistory(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	kriID, err := parseUUID(r, "kriID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid kri id"))
 		return
 	}
 	limit := queryInt(r, "limit", "90")
 	history, err := h.svc.GetKRIHistory(r.Context(), tenantID, kriID, limit)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"history": history, "total": len(history)})
+	response.OKWithMeta(w, history, &response.Meta{Total: int64(len(history))})
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -579,13 +554,13 @@ func (h *RiskHandler) GetKRIHistory(w http.ResponseWriter, r *http.Request) {
 func (h *RiskHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	stats, err := h.svc.Stats(r.Context(), tenantID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	response.OK(w, stats)
 }

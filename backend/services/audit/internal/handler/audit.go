@@ -8,7 +8,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/authmw"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/audit/internal/model"
 	"github.com/cyberradar/platform/services/audit/internal/service"
@@ -181,14 +181,7 @@ func mapError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil
 	}
-	switch {
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 	return err
 }
 

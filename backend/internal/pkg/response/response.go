@@ -13,10 +13,17 @@ type Envelope struct {
 }
 
 // Meta holds pagination and context info.
+//
+// Total is always emitted: it carried omitempty, so a page with no results
+// answered without one, and a client could not tell "no matches" from "this
+// endpoint does not report a total". Zero matches is an answer.
+//
+// Page and Limit keep omitempty because they genuinely do not apply to an
+// endpoint that returns everything it has; their absence says so.
 type Meta struct {
 	Page     int    `json:"page,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
-	Total    int64  `json:"total,omitempty"`
+	Total    int64  `json:"total"`
 	TenantID string `json:"tenant_id,omitempty"`
 }
 
@@ -54,6 +61,11 @@ func OKWithMeta(w http.ResponseWriter, data any, meta *Meta) {
 // Created sends a 201 response with the created resource.
 func Created(w http.ResponseWriter, data any) {
 	write(w, http.StatusCreated, Envelope{Data: data, Error: nil})
+}
+
+// Accepted sends a 202 response: the request was taken, the work is not done.
+func Accepted(w http.ResponseWriter, data any) {
+	write(w, http.StatusAccepted, Envelope{Data: data, Error: nil})
 }
 
 // NoContent sends a 204 response.

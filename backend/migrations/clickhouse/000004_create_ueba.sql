@@ -27,7 +27,11 @@ CREATE TABLE IF NOT EXISTS crp_ueba.behavior_events
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (tenant_id, entity_id, event_time)
-TTL event_time + INTERVAL 90 DAY
+-- TTL takes an expression yielding Date or DateTime. These columns are
+-- DateTime64, which it rejects outright, so the table was never created:
+-- toDateTime() narrows it for the expiry calculation only; the stored
+-- millisecond precision is untouched.
+TTL toDateTime(event_time) + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- Detected anomalies (ClickHouse mirror — fast range queries)
@@ -49,7 +53,7 @@ CREATE TABLE IF NOT EXISTS crp_ueba.anomaly_events
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(detected_at)
 ORDER BY (tenant_id, entity_id, detected_at)
-TTL detected_at + INTERVAL 180 DAY
+TTL toDateTime(detected_at) + INTERVAL 180 DAY
 SETTINGS index_granularity = 8192;
 
 -- Daily entity risk aggregations (SummingMergeTree for cheap dashboards)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/identity/internal/model"
 	"github.com/cyberradar/platform/services/identity/internal/service"
@@ -215,19 +216,6 @@ func mapError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil
 	}
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindConflict):
-		response.Conflict(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindUnauth):
-		response.Unauthorized(w, apierrors.Message(err))
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 	return err
 }

@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/soar/internal/model"
 	"github.com/cyberradar/platform/services/soar/internal/service"
@@ -79,7 +79,7 @@ func (h *SOARHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"incidents": incidents, "total": total})
+	response.OKWithMeta(w, incidents, &response.Meta{Total: int64(total)})
 }
 
 func (h *SOARHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +151,7 @@ func (h *SOARHandler) GetIncidentTimeline(w http.ResponseWriter, r *http.Request
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"events": events, "total": len(events)})
+	response.OKWithMeta(w, events, &response.Meta{Total: int64(len(events))})
 }
 
 // ─── Playbooks ────────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ func (h *SOARHandler) ListPlaybooks(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"playbooks": playbooks, "total": len(playbooks)})
+	response.OKWithMeta(w, playbooks, &response.Meta{Total: int64(len(playbooks))})
 }
 
 func (h *SOARHandler) CreatePlaybook(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +211,7 @@ func (h *SOARHandler) EnablePlaybook(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "enabled"})
+	response.OKWithMeta(w, "enabled", &response.Meta{Total: int64(len("enabled"))})
 }
 
 func (h *SOARHandler) DisablePlaybook(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +224,7 @@ func (h *SOARHandler) DisablePlaybook(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "disabled"})
+	response.OKWithMeta(w, "disabled", &response.Meta{Total: int64(len("disabled"))})
 }
 
 func (h *SOARHandler) RunPlaybook(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +274,7 @@ func (h *SOARHandler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"executions": execs, "total": total})
+	response.OKWithMeta(w, execs, &response.Meta{Total: int64(total)})
 }
 
 func (h *SOARHandler) GetExecution(w http.ResponseWriter, r *http.Request) {
@@ -324,16 +324,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource not found")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

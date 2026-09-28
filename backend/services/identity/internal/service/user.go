@@ -16,6 +16,18 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// roleSuperAdmin is the one role that carries authority beyond its own tenant.
+const roleSuperAdmin = "super_admin"
+
+func hasRole(roles []string, want string) bool {
+	for _, r := range roles {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}
+
 // UserService manages identity lifecycle.
 type UserService struct {
 	repo     *repository.UserRepository
@@ -83,7 +95,10 @@ func (s *UserService) Login(ctx context.Context, tenantID uuid.UUID, req *model.
 		s.logger.Warn().Err(err).Str("user_id", user.ID.String()).Msg("failed to load roles")
 	}
 
-	isSuperAdmin := user.PrivilegeLevel == "super_admin"
+	// Cross-tenant scope comes from the role, not from privilege_level.
+	// The column is descriptive — PAM and UEBA score risk from it — and using
+	// it as the switch meant the role named super_admin granted nothing.
+	isSuperAdmin := hasRole(roles, roleSuperAdmin)
 
 	// Issue tokens
 	perms, permErr := s.roleRepo.GetPermissionsByUser(ctx, user.ID)
@@ -142,7 +157,10 @@ func (s *UserService) Refresh(ctx context.Context, refreshToken string) (*model.
 	_ = s.repo.RevokeRefreshToken(ctx, tokenHash)
 
 	roles, _ := s.roleRepo.GetRoleNamesByUser(ctx, uid)
-	isSuperAdmin := user.PrivilegeLevel == "super_admin"
+	// Cross-tenant scope comes from the role, not from privilege_level.
+	// The column is descriptive — PAM and UEBA score risk from it — and using
+	// it as the switch meant the role named super_admin granted nothing.
+	isSuperAdmin := hasRole(roles, roleSuperAdmin)
 
 	perms, permErr := s.roleRepo.GetPermissionsByUser(ctx, user.ID)
 	if permErr != nil {

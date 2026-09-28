@@ -152,53 +152,58 @@ async function failure(res: Response): Promise<ApiError> {
 }
 
 // ─── Reading a response body ──────────────────────────────────
-// The backend does not answer in one shape. Three exist today:
+// Every service answers in the documented envelope:
 //
-//   1. {"data": [...], "meta": {...}, "error": null}   the documented envelope
-//   2. {"data": {"alerts": [...], "total": 12}, ...}   envelope, array named
-//   3. {"incidents": [...], "total": 12}               no envelope at all
+//   {"data": <resource or array>, "meta": {page, limit, total}, "error": null}
 //
-// Shape 3 comes from the five services that write JSON themselves instead of
-// going through internal/pkg/response (dspm, ir, mobile, ot, scs); four more
-// mix the two. A client cannot pick one parser, so this is where the three are
-// reconciled — once, rather than in every hook.
+// That was not always true. Five services wrote their own JSON with no
+// envelope at all and most wrapped a list under a name of their choosing, so
+// this file reconciled three shapes and a list page could come back empty
+// without an error. The services now go through internal/pkg/response, so the
+// reconciliation is gone and only the contract remains.
 //
-// Normalising the services onto OKWithMeta is the real fix and is tracked as
-// backend work; until then a page reads a list the same way whatever answered.
+// What is left is a guard, not an adapter: if a payload that should be a list
+// is not one, salvage it if we can but say so loudly, because the failure mode
+// this replaces was a blank table and a clean console.
 
-/** Strip the envelope if there is one, else take the body as the payload. */
-function payloadOf(body: unknown): { payload: unknown; meta?: PageMeta } {
-  if (body && typeof body === 'object' && 'data' in body && 'error' in body) {
+/** Strip the envelope. A body without one is a contract violation, so it is
+ *  reported rather than quietly accepted. */
+function payloadOf(body: unknown, url?: string): { payload: unknown; meta?: PageMeta } {
+  if (body && typeof body === 'object' && 'data' in body) {
     const env = body as ApiResponse<unknown>
     return { payload: env.data, meta: env.meta }
+  }
+  if (body !== null && body !== undefined) {
+    console.error(`[api] ${url ?? 'response'} is not in the {data, error} envelope`, body)
   }
   return { payload: body }
 }
 
-/** Pull the collection out of a payload that may be the array itself, or an
- *  object holding it under a name the endpoint chose. */
-function itemsOf<T>(payload: unknown): { items: T[]; total?: number } {
-  if (Array.isArray(payload)) return { items: payload as T[] }
-  if (payload && typeof payload === 'object') {
-    const obj = payload as Record<string, unknown>
-    const arrayKey = Object.keys(obj).find((k) => Array.isArray(obj[k]))
-    if (arrayKey) {
-      return {
-        items: obj[arrayKey] as T[],
-        total: typeof obj.total === 'number' ? obj.total : undefined,
-      }
-    }
-  }
-  // A payload with no collection in it is an empty page, not a crash.
-  return { items: [] }
-}
+function toPage<T>(body: unknown, url?: string): { items: T[]; meta: PageMeta } {
+  const { payload, meta } = payloadOf(body, url)
 
-function toPage<T>(body: unknown, fallbackLimit = 50): { items: T[]; meta: PageMeta } {
-  const { payload, meta } = payloadOf(body)
-  const { items, total } = itemsOf<T>(payload)
+  let items: T[]
+  if (Array.isArray(payload)) {
+    items = payload as T[]
+  } else {
+    // A list endpoint whose data is not an array. Recover the collection if
+    // one is in there, so a page degrades rather than throwing, but never
+    // silently: a regression here is exactly what used to go unnoticed.
+    const nested =
+      payload && typeof payload === 'object'
+        ? Object.values(payload as Record<string, unknown>).find(Array.isArray)
+        : undefined
+    console.error(
+      `[api] ${url ?? 'list endpoint'} did not return an array under "data"` +
+        (nested ? ' — recovered a nested array' : ''),
+      payload,
+    )
+    items = (nested as T[]) ?? []
+  }
+
   return {
     items,
-    meta: meta ?? { page: 1, limit: fallbackLimit, total: total ?? items.length },
+    meta: meta ?? { total: items.length },
   }
 }
 
@@ -222,7 +227,7 @@ async function requestRaw(
 }
 
 async function get<T>(service: string, path: string, token?: string): Promise<T> {
-  return payloadOf(await requestRaw(service, path, {}, token)).payload as T
+  return payloadOf(await requestRaw(service, path, {}, token), path).payload as T
 }
 
 function qs(params?: Record<string, string>): string {
@@ -235,7 +240,7 @@ async function list<T>(
   params?: Record<string, string>,
   token?: string,
 ): Promise<{ items: T[]; meta: PageMeta }> {
-  return toPage<T>(await requestRaw(service, path + qs(params), {}, token))
+  return toPage<T>(await requestRaw(service, path + qs(params), {}, token), path)
 }
 
 async function post<T>(service: string, path: string, body: unknown, token?: string): Promise<T> {
@@ -269,12 +274,12 @@ async function fetchBody(url: string, token?: string): Promise<unknown> {
 }
 
 export function swrFetcher<T>(token?: string) {
-  return async (url: string): Promise<T> => payloadOf(await fetchBody(url, token)).payload as T
+  return async (url: string): Promise<T> => payloadOf(await fetchBody(url, token), url).payload as T
 }
 
 export function swrListFetcher<T>(token?: string) {
   return async (url: string): Promise<{ items: T[]; meta: PageMeta }> =>
-    toPage<T>(await fetchBody(url, token))
+    toPage<T>(await fetchBody(url, token), url)
 }
 
 // ─── Typed API surface (imperative calls: form submits, chat) ─

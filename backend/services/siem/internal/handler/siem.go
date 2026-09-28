@@ -8,7 +8,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/authmw"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/siem/internal/model"
 	"github.com/cyberradar/platform/services/siem/internal/service"
@@ -72,7 +72,7 @@ func (h *SIEMHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"rules": rules, "total": len(rules)})
+	response.OKWithMeta(w, rules, &response.Meta{Total: int64(len(rules))})
 }
 
 func (h *SIEMHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +174,7 @@ func (h *SIEMHandler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"alerts": alerts, "total": total})
+	response.OKWithMeta(w, alerts, &response.Meta{Total: int64(total)})
 }
 
 func (h *SIEMHandler) AlertStats(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +251,7 @@ func (h *SIEMHandler) ListCases(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"cases": cases, "total": total})
+	response.OKWithMeta(w, cases, &response.Meta{Total: int64(total)})
 }
 
 func (h *SIEMHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +318,7 @@ func (h *SIEMHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"comments": comments, "total": len(comments)})
+	response.OKWithMeta(w, comments, &response.Meta{Total: int64(len(comments))})
 }
 
 func (h *SIEMHandler) AddComment(w http.ResponseWriter, r *http.Request) {
@@ -390,16 +390,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource not found")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

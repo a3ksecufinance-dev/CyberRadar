@@ -314,12 +314,12 @@ arranger un écran donne une cellule vide en production plutôt qu'une erreur de
 compilation — c'est exactement ce qui a produit sept pages muettes. Les modèles
 sont dans `backend/services/<svc>/internal/model/`.
 
-**La forme des réponses n'est pas uniforme.** Trois coexistent : enveloppe avec
-tableau nu, enveloppe avec tableau nommé, et pas d'enveloppe du tout (dspm, ir,
-mobile, ot, scs écrivent leur JSON eux-mêmes). `payloadOf` et `itemsOf` les
-réconcilient dans `lib/api.ts`, donc un hook n'a pas à savoir laquelle il
-reçoit. Ne pas contourner l'adaptateur ; l'alignement des services sur
-`response.OKWithMeta` est le vrai correctif, listé en Phase 3.
+**La forme des réponses est uniforme**, et doit le rester : tout service passe
+par `internal/pkg/response`. Une liste est un tableau sous `data`, avec
+`meta.total` toujours présent. `lib/api.ts` ne contient plus d'adaptateur mais
+un garde : une réponse non conforme est signalée en console plutôt qu'absorbée,
+parce qu'une table vide sans erreur est précisément le défaut que la
+normalisation a supprimé.
 
 Vérifier qu'un paramètre de filtre est bien lu par le handler avant de
 l'envoyer : un paramètre inconnu est ignoré en silence, et la page semble ne
@@ -337,6 +337,54 @@ Les répartitions viennent des `map[string]int` que les services calculent déj�
 (`by_severity`, `by_status`, `assets_by_purdue`…). Les lire avec `countOf`, qui
 ignore la casse : le SIEM renvoie `CRITICAL`, les domaines Postgres `critical`.
 Attention aux clés préfixées — `assets_by_purdue` est clé `level_1`, pas `1`.
+
+### Répondre depuis un service
+
+Tout handler passe par `internal/pkg/response`. Jamais de `json.NewEncoder(w)`
+direct : neuf services le faisaient, aucun client ne pouvait écrire un seul
+analyseur, et leurs erreurs sortaient sous une forme que le frontend lisait
+comme `undefined`.
+
+```go
+response.OK(w, asset)                                     // une ressource
+response.OKWithMeta(w, assets, &response.Meta{Total: n})  // une liste
+response.Created(w, asset)
+httperr.WriteLogged(w, err, h.logger)                     // toute erreur
+```
+
+**Ne jamais construire une réponse d'erreur à la main.** `internal/pkg/httperr`
+classe l'erreur : une erreur de domaine (`apierrors`) prend le statut de son
+`Kind`, une violation de contrainte Postgres prend le sien — CHECK et clé
+étrangère en 422 avec le champ nommé, clé dupliquée en 409, littéral malformé
+en 400 — et tout le reste en 500 avec un texte générique. Le message du driver
+nomme la relation et parfois le SQL : il ne doit pas sortir du serveur.
+
+### Publier ses KPI
+
+Le tableau de bord ne calcule rien : `PlatformOverview` assemble le dernier
+relevé publié par chaque domaine. Un service qui ne publie pas compte pour zéro
+dans le score de sécurité, sans que rien ne le signale.
+
+```go
+kpi.Start(ctx, kpi.Config{
+    Brokers: brokers,
+    Domain:  "siem",
+    Tenants: kpi.TenantsFromPostgres(pool),
+    Source:  siemSvc.KPISamples,
+}, logger)
+```
+
+`kpi.MetricKeys` dit ce que chaque domaine doit publier — c'est le contrat avec
+l'aperçu, et un test échoue si un domaine cesse de l'honorer. Les formules de
+`risk_score` vivent dans le `kpi.go` de chaque service, en clair : ce sont des
+pondérations à faire valider, pas des mesures.
+
+### Interroger ClickHouse
+
+Les paramètres nommés sont liés **sous forme textuelle**. Passer un `uuid.UUID`
+ou un `time.Time` échoue avec `expected string value in NamedValue` — c'est ce
+qui cassait toutes les lectures du dashboard et du SIEM. Utiliser
+`tenantID.String()` et `db.CHTime` / `db.CHTime64`.
 
 ### Secrets
 
@@ -367,11 +415,11 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Le frontend a besoin de Keycloak | Sans lui, `/login` renvoie une erreur de configuration NextAuth. |
 | `next.config` doit rester `.mjs` | Next 14 ne supporte pas une configuration TypeScript. |
 | Les clés et certificats ne sont pas versionnés | `.gitignore` exclut `*.pem` et `*.key`. Les générer localement. |
-| Trois formes de réponse d'API | Enveloppe/tableau nu, enveloppe/tableau nommé, ou pas d'enveloppe. `lib/api.ts` les réconcilie côté frontend. |
+| Paramètres nommés ClickHouse | Liés sous forme textuelle : un `uuid.UUID` ou un `time.Time` est rejeté. Utiliser `.String()` et `db.CHTime`. |
+| Migrations ClickHouse | `TTL` exige `Date`/`DateTime`, pas `DateTime64` ; une clé de tri MergeTree n'accepte pas `DESC`. Six des sept migrations échouaient pour ces deux raisons. |
 | `asset.criticality` est un entier | 1 faible … 4 critique. `Criticality` est un `int` Go sans `MarshalJSON`. |
 | Les sévérités du SIEM sont en majuscules | `Enum8('LOW'…'CRITICAL')` côté ClickHouse ; les domaines Postgres écrivent en minuscules. |
-| Le rôle `super_admin` n'accorde rien | Le contournement vient de `identities.privilege_level`, pas du rôle. |
-| Une valeur d'énumération invalide renvoie 500 | Les contraintes CHECK remontent en erreur interne, pas en 422. |
+| `super_admin` accorde tout par la matrice | Plus de court-circuit : le rôle détient les 82 permissions et la portée inter-tenant. Une permission ajoutée doit lui être accordée — un test le vérifie. |
 
 ---
 
@@ -393,14 +441,10 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.
-- **Rien ne publie de `KPISnapshot`.** `/dashboard/kpi/timeseries` et
-  `/kpi/snapshot` lisent ClickHouse, alimenté par un consommateur Kafka, mais
-  aucun service n'émet l'événement : ces endpoints renvoient toujours vide. Pas
-  de série temporelle dans l'interface tant que le producteur n'existe pas.
-- **Les réponses de liste n'ont pas une forme unique.** Cinq services
-  (`dspm`, `ir`, `mobile`, `ot`, `scs`) n'émettent aucune enveloppe et neuf
-  emballent leur tableau sous une clé nommée. Le frontend réconcilie les trois
-  formes ; un autre client de l'API devra faire de même.
+- **Les pondérations de `risk_score` ne sont pas calibrées.** Chaque domaine en
+  dérive une de ce qu'il compte, formule écrite en clair dans son `kpi.go`. À
+  faire valider par la fonction risque avant de présenter le score de sécurité
+  comme une mesure.
 - **La page Réglages ne peut rien écrire.** Aucun endpoint de réglages du tenant
   n'existe ; elle liste les utilisateurs réels et dit ce qui se configure
   ailleurs.

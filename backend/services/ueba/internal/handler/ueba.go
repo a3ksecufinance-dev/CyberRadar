@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/ueba/internal/model"
 	"github.com/cyberradar/platform/services/ueba/internal/service"
@@ -73,7 +73,7 @@ func (h *UEBAHandler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"profiles": profiles, "total": total})
+	response.OKWithMeta(w, profiles, &response.Meta{Total: int64(total)})
 }
 
 func (h *UEBAHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +125,7 @@ func (h *UEBAHandler) ListAnomalies(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"anomalies": anomalies, "total": total})
+	response.OKWithMeta(w, anomalies, &response.Meta{Total: int64(total)})
 }
 
 func (h *UEBAHandler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +178,7 @@ func (h *UEBAHandler) Timeline(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"events": events, "total": len(events)})
+	response.OKWithMeta(w, events, &response.Meta{Total: int64(len(events))})
 }
 
 // ─── Peer Groups ──────────────────────────────────────────────────────────────
@@ -190,7 +190,7 @@ func (h *UEBAHandler) ListPeerGroups(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"peer_groups": groups, "total": len(groups)})
+	response.OKWithMeta(w, groups, &response.Meta{Total: int64(len(groups))})
 }
 
 func (h *UEBAHandler) CreatePeerGroup(w http.ResponseWriter, r *http.Request) {
@@ -229,16 +229,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource not found")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

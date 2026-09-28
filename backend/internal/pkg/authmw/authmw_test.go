@@ -212,12 +212,29 @@ func TestRequirePermissionDeniesWhenNoneHeld(t *testing.T) {
 	}
 }
 
-func TestSuperAdminBypassesPermissionChecks(t *testing.T) {
-	// Mirrors the super-admin rule in policies/rbac.rego.
+// The super-admin flag used to authorize everything on its own, which left
+// role_permissions with nothing to say about the account holding the most
+// authority. It grants cross-tenant scope now, not permissions: super_admin
+// holds every permission through the matrix (migration 000035), so it is
+// authorized by the same rule as everyone else.
+func TestSuperAdminFlagAloneAuthorizesNothing(t *testing.T) {
 	sub := jwt.Subject{TenantID: testTenant, UserID: testUser, Email: "a@b.c", IsAdmin: true}
 	if code, reached := serveAuthorized(t, sub,
+		RequirePermission("tenants:delete"), http.MethodDelete); reached || code != http.StatusForbidden {
+		t.Errorf("the admin flag authorized a permission it does not carry: status %d", code)
+	}
+}
+
+func TestSuperAdminIsAuthorizedByItsGrants(t *testing.T) {
+	sub := jwt.Subject{
+		TenantID: testTenant, UserID: testUser, Email: "a@b.c",
+		IsAdmin:     true,
+		Roles:       []string{"super_admin"},
+		Permissions: []string{"tenants:delete"},
+	}
+	if code, reached := serveAuthorized(t, sub,
 		RequirePermission("tenants:delete"), http.MethodDelete); !reached || code != http.StatusOK {
-		t.Errorf("super-admin denied: status %d", code)
+		t.Errorf("super-admin denied a permission it holds: status %d", code)
 	}
 }
 

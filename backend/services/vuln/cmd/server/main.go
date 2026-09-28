@@ -14,6 +14,7 @@ import (
 	"github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/kpi"
 	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/vuln/internal/handler"
 	"github.com/cyberradar/platform/services/vuln/internal/repository"
@@ -68,6 +69,17 @@ func main() {
 	}, logger)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
+	// ── Report this domain's KPIs to the dashboard ────────────────────────────
+	// PlatformOverview is assembled from the latest snapshot each domain
+	// published. Nothing published any, so the overview answered zero for every
+	// tenant — see internal/pkg/kpi.
+	kpi.Start(ctx, kpi.Config{
+		Brokers: brokers,
+		Domain:  "vuln",
+		Tenants: kpi.TenantsFromPostgres(pool),
+		Source:  vulnSvc.KPISamples,
+	}, logger)
+
 	r := chi.NewRouter()
 	r.Use(observe.Middleware("vuln-service"))
 	r.Use(chimiddleware.RequestID)

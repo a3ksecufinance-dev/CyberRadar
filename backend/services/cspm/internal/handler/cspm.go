@@ -7,6 +7,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/cspm/internal/model"
 	"github.com/cyberradar/platform/services/cspm/internal/service"
@@ -72,32 +73,6 @@ func userFromCtx(r *http.Request) uuid.UUID {
 	return authctx.UserID(r.Context())
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, err error) {
-	de, ok := err.(*apierrors.DomainError)
-	if !ok {
-		response.InternalError(w)
-		return
-	}
-	switch de.Kind {
-	case apierrors.KindNotFound:
-		response.NotFound(w, de.Message)
-	case apierrors.KindForbidden:
-		response.Forbidden(w, de.Message)
-	case apierrors.KindUnauth:
-		response.Unauthorized(w, de.Message)
-	case apierrors.KindBadInput, apierrors.KindConflict:
-		response.BadRequest(w, string(de.Kind), de.Message)
-	default:
-		response.InternalError(w)
-	}
-}
-
 func parseUUID(r *http.Request, param string) (uuid.UUID, error) {
 	return uuid.Parse(chi.URLParam(r, param))
 }
@@ -116,81 +91,81 @@ func queryInt(r *http.Request, key, def string) int {
 func (h *CSPMHandler) RegisterAccount(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.RegisterAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	a, err := h.svc.RegisterAccount(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, a)
+	response.Created(w, a)
 }
 
 func (h *CSPMHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	accounts, err := h.svc.ListAccounts(r.Context(), tenantID, r.URL.Query().Get("provider"), r.URL.Query().Get("environment"))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": accounts, "total": len(accounts)})
+	response.OKWithMeta(w, accounts, &response.Meta{Total: int64(len(accounts))})
 }
 
 func (h *CSPMHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	accountID, err := parseUUID(r, "accountID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid account id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid account id"))
 		return
 	}
 	a, err := h.svc.GetAccount(r.Context(), tenantID, accountID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	response.OK(w, a)
 }
 
 func (h *CSPMHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	accountID, err := parseUUID(r, "accountID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid account id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid account id"))
 		return
 	}
 	var req model.UpdateAccountRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	a, err := h.svc.UpdateAccount(r.Context(), tenantID, accountID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a)
+	response.OK(w, a)
 }
 
 // ─── Rules ────────────────────────────────────────────────────────────────────
@@ -198,30 +173,30 @@ func (h *CSPMHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 func (h *CSPMHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateRuleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	rule, err := h.svc.CreateRule(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, rule)
+	response.Created(w, rule)
 }
 
 func (h *CSPMHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	page := queryInt(r, "page", "1")
@@ -230,29 +205,29 @@ func (h *CSPMHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		r.URL.Query().Get("provider"), r.URL.Query().Get("framework"),
 		r.URL.Query().Get("severity"), page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": rules, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, rules, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *CSPMHandler) SeedRules(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	provider := r.URL.Query().Get("provider")
 	if provider == "" {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "provider query param required"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "provider query param required"))
 		return
 	}
 	count, err := h.svc.SeedRules(r.Context(), tenantID, provider)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules_seeded": count, "provider": provider})
+	response.OK(w, map[string]any{"rules_seeded": count, "provider": provider})
 }
 
 // ─── Resources ────────────────────────────────────────────────────────────────
@@ -260,30 +235,30 @@ func (h *CSPMHandler) SeedRules(w http.ResponseWriter, r *http.Request) {
 func (h *CSPMHandler) UpsertResource(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.UpsertResourceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	res, err := h.svc.UpsertResource(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	response.OK(w, res)
 }
 
 func (h *CSPMHandler) ListResources(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListResourcesFilter{
@@ -314,29 +289,29 @@ func (h *CSPMHandler) ListResources(w http.ResponseWriter, r *http.Request) {
 	}
 	resources, total, err := h.svc.ListResources(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"resources": resources, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, resources, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *CSPMHandler) GetResource(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	resourceID, err := parseUUID(r, "resourceID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid resource id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid resource id"))
 		return
 	}
 	res, err := h.svc.GetResource(r.Context(), tenantID, resourceID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	response.OK(w, res)
 }
 
 // ─── Findings ─────────────────────────────────────────────────────────────────
@@ -344,30 +319,30 @@ func (h *CSPMHandler) GetResource(w http.ResponseWriter, r *http.Request) {
 func (h *CSPMHandler) ReportFinding(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.ReportFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	finding, err := h.svc.ReportFinding(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, finding)
+	response.Created(w, finding)
 }
 
 func (h *CSPMHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListFindingsFilter{
@@ -395,38 +370,38 @@ func (h *CSPMHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 	}
 	findings, total, err := h.svc.ListFindings(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"findings": findings, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, findings, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *CSPMHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	findingID, err := parseUUID(r, "findingID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid finding id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid finding id"))
 		return
 	}
 	var req model.UpdateFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	finding, err := h.svc.UpdateFinding(r.Context(), tenantID, findingID, userFromCtx(r), &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, finding)
+	response.OK(w, finding)
 }
 
 // ─── Scans ────────────────────────────────────────────────────────────────────
@@ -434,65 +409,65 @@ func (h *CSPMHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
 func (h *CSPMHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.TriggerScanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	scan, err := h.svc.TriggerScan(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, scan)
+	response.Accepted(w, scan)
 }
 
 func (h *CSPMHandler) ListScans(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	accountIDStr := r.URL.Query().Get("account_id")
 	accountID, err := uuid.Parse(accountIDStr)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "account_id query param required"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "account_id query param required"))
 		return
 	}
 	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	scans, total, err := h.svc.ListScans(r.Context(), tenantID, accountID, page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"scans": scans, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, scans, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *CSPMHandler) GetScan(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	scanID, err := parseUUID(r, "scanID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid scan id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid scan id"))
 		return
 	}
 	scan, err := h.svc.GetScan(r.Context(), tenantID, scanID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, scan)
+	response.OK(w, scan)
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -500,13 +475,13 @@ func (h *CSPMHandler) GetScan(w http.ResponseWriter, r *http.Request) {
 func (h *CSPMHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	stats, err := h.svc.Stats(r.Context(), tenantID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	response.OK(w, stats)
 }

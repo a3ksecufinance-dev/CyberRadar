@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/attackpath/internal/model"
 	"github.com/cyberradar/platform/services/attackpath/internal/service"
@@ -89,7 +89,7 @@ func (h *AttackPathHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"nodes": nodes, "total": total})
+	response.OKWithMeta(w, nodes, &response.Meta{Total: int64(total)})
 }
 
 func (h *AttackPathHandler) UpsertNode(w http.ResponseWriter, r *http.Request) {
@@ -162,7 +162,7 @@ func (h *AttackPathHandler) ListEdges(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"edges": edges, "total": len(edges)})
+	response.OKWithMeta(w, edges, &response.Meta{Total: int64(len(edges))})
 }
 
 func (h *AttackPathHandler) UpsertEdge(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +193,7 @@ func (h *AttackPathHandler) ListScenarios(w http.ResponseWriter, r *http.Request
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"scenarios": scenarios, "total": len(scenarios)})
+	response.OKWithMeta(w, scenarios, &response.Meta{Total: int64(len(scenarios))})
 }
 
 func (h *AttackPathHandler) CreateScenario(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +274,7 @@ func (h *AttackPathHandler) ListPaths(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"paths": paths, "total": total})
+	response.OKWithMeta(w, paths, &response.Meta{Total: int64(total)})
 }
 
 func (h *AttackPathHandler) ListPathsWithGraph(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +296,7 @@ func (h *AttackPathHandler) ListPathsWithGraph(w http.ResponseWriter, r *http.Re
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"paths": paths, "total": total})
+	response.OKWithMeta(w, paths, &response.Meta{Total: int64(total)})
 }
 
 // ─── Choke Points ─────────────────────────────────────────────────────────────
@@ -316,7 +316,7 @@ func (h *AttackPathHandler) ChokePoints(w http.ResponseWriter, r *http.Request) 
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"choke_points": cps, "total": len(cps)})
+	response.OKWithMeta(w, cps, &response.Meta{Total: int64(len(cps))})
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -352,16 +352,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource not found")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {
