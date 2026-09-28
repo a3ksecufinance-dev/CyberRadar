@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate fmt tidy
+.PHONY: help dev down build test lint migrate fmt tidy graph-reconcile graph-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -11,7 +11,7 @@ help: ## Show this help
 # ─── Infrastructure ───────────────────────────────────────────────────────────
 
 infra-up: ## Start all infrastructure containers
-	$(DOCKER_COMPOSE) up -d postgres clickhouse redis kafka vault jaeger prometheus grafana
+	$(DOCKER_COMPOSE) up -d postgres clickhouse neo4j redis kafka vault jaeger prometheus grafana
 	@echo "⏳ Waiting for services to be healthy..."
 	@sleep 5
 
@@ -40,7 +40,29 @@ migrate: ## Run all PostgreSQL migrations
 		echo "  → $$f"; \
 		curl -s -u crp_user:crp_password_dev "http://localhost:8123/?database=default" --data-binary @$$f; \
 	done
+	@echo "Running Neo4j migrations..."
+	@for f in migrations/neo4j/*.cypher; do \
+		echo "  → $$f"; \
+		docker exec -i crp-neo4j cypher-shell -u neo4j -p crp_password_dev < $$f; \
+	done
 	@echo "Migrations complete."
+
+# ─── Attack graph mirror ──────────────────────────────────────────────────────
+
+# PostgreSQL is the source of truth and mirrored writes are allowed to fail, so
+# the two stores can drift. This is what says whether they have — and it exits
+# non-zero when they disagree, so a scheduled run is an alert rather than a log
+# line nobody reads. Pointing reads at Neo4j is only defensible once it reports
+# parity.
+graph-reconcile: ## Compare the attack graph in PostgreSQL and Neo4j
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/attackpath/cmd/reconcile/
+
+graph-backfill: ## Copy the attack graph from PostgreSQL into Neo4j, then verify
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/attackpath/cmd/reconcile/ -backfill
 
 migrate-status: ## Show migration status
 	PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
@@ -63,6 +85,7 @@ build: ## Build all service binaries
 	go build -o bin/ti-service ./services/ti/cmd/server/
 	go build -o bin/vuln-service ./services/vuln/cmd/server/
 	go build -o bin/attackpath-service ./services/attackpath/cmd/server/
+	go build -o bin/attackpath-reconcile ./services/attackpath/cmd/reconcile/
 	go build -o bin/knowledgegraph-service ./services/knowledgegraph/cmd/server/
 	go build -o bin/soar-service ./services/soar/cmd/server/
 	go build -o bin/dashboard-service ./services/dashboard/cmd/server/

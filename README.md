@@ -386,6 +386,29 @@ ou un `time.Time` échoue avec `expected string value in NamedValue` — c'est c
 qui cassait toutes les lectures du dashboard et du SIEM. Utiliser
 `tenantID.String()` et `db.CHTime` / `db.CHTime64`.
 
+### Écrire dans le graphe d'attaque
+
+Le graphe vit à deux endroits : PostgreSQL, qui fait foi, et Neo4j, qui en
+reçoit une copie. Rien à faire côté appelant — `AttackPathService` s'en charge —
+mais trois règles valent pour quiconque y touche :
+
+- **Une écriture au miroir ne doit jamais faire échouer l'écriture primaire.**
+  Elle est journalisée et comptée
+  (`attackpath_graph_mirror_failures_total`), sous un délai de 5 s. Faire
+  dépendre PostgreSQL d'un magasin secondaire, c'est ne plus pouvoir enregistrer
+  un graphe parce qu'une base de reporting est tombée.
+- **Toute lecture Cypher filtre `tenant_id` sur la relation et sur ses deux
+  extrémités.** Ici l'isolation est une propriété, pas une colonne : il n'y a
+  pas de schéma derrière. Neo4j Community n'a qu'une base, donc pas de base par
+  tenant.
+- **Une arête dont un nœud manque dans Neo4j est refusée.** Sans ce contrôle, le
+  `MERGE` ne rattache rien et rapporte un succès : PostgreSQL porterait un chemin
+  que la traversée Neo4j ne verrait pas, et rien ne le dirait.
+
+Après une écriture manuelle, un incident ou une reprise, `make graph-reconcile`
+liste ce qui diverge ; `make graph-backfill` recopie PostgreSQL dans Neo4j puis
+vérifie.
+
 ### Secrets
 
 `internal/pkg/vault` lit Vault quand il est configuré, l'environnement sinon.
@@ -398,6 +421,15 @@ Vault est exactement la mauvaise configuration à rendre visible.
 ```bash
 cd backend/services/<service> && go test ./...
 ```
+
+Les tests qui ont besoin d'une vraie dépendance **sautent** quand elle est
+injoignable, ce qui garde la suite utilisable sur un portable. Mais un saut est
+indiscernable d'un succès dans la sortie de CI : chacun lit une variable
+d'environnement qui transforme le saut en échec, et la CI les pose toutes —
+`REDIS_TEST_URL`, `PAM_TEST_DSN`, `COPILOT_TEST_DSN`, `IR_TEST_DSN`,
+`IDENTITY_TEST_DSN`, `DASHBOARD_TEST_CH`, `ATTACKPATH_TEST_DSN`,
+`ATTACKPATH_TEST_NEO4J`. Si vous ajoutez un test qui parle à une base, suivez ce
+motif plutôt que de le faire sauter en silence.
 
 Les tests de `internal/pkg/jwt`, `authmw` et `observe` couvrent des propriétés
 de sécurité (confusion d'algorithme, isolation des permissions, cardinalité des
@@ -423,6 +455,10 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | `asset.criticality` est un entier | 1 faible … 4 critique. `Criticality` est un `int` Go sans `MarshalJSON`. |
 | Les sévérités du SIEM sont en majuscules | `Enum8('LOW'…'CRITICAL')` côté ClickHouse ; les domaines Postgres écrivent en minuscules. |
 | `super_admin` accorde tout par la matrice | Plus de court-circuit : le rôle détient les 82 permissions et la portée inter-tenant. Une permission ajoutée doit lui être accordée — un test le vérifie. |
+| Neo4j n'est pas le maître du graphe | PostgreSQL l'est ; Neo4j en reçoit une copie. Basculer `ATTACKPATH_GRAPH_READS` seulement après `make graph-reconcile` en parité. |
+| Les contraintes de relation sont Enterprise | Sur Community, l'unicité d'une arête tient par `MERGE` sur sa clé naturelle — donc aucune autre écriture ne doit créer de relation. |
+| Le pilote Neo4j réessaie 30 s par défaut | Sur le chemin d'une requête, cela fait 30 s par écriture quand le miroir est tombé. `MaxTransactionRetryTime` et un contexte borné. |
+| Une colonne annulable ne se lit pas dans un `int` | `last_run_ms` rendait 500 toute lecture de scénario avant sa première exécution. `COALESCE(col, 0)` à la lecture. |
 
 ---
 
@@ -437,10 +473,13 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 - **`unblock_ip` et `unisolate_host` attendent le `policy_id`** renvoyé par
   l'étape qui a posé la règle. netsec n'expose pas de suppression : la règle
   passe en `log` plutôt que d'être retirée, ce qui laisse la trace.
-- **Neo4j est absent.** Attack Path et Knowledge Graph tournent sur PostgreSQL.
-  Le préalable est posé — l'analyseur dépend de `service.GraphStore`, pas du
-  dépôt — mais l'implémentation Neo4j reste à écrire, et à exécuter au moins
-  une fois avant d'être crue. Voir §3.5 de l'audit.
+- **Neo4j est un miroir, pas la source de vérité.** Attack Path y écrit en
+  double ; PostgreSQL reste la référence et les lectures n'y passent que si
+  `ATTACKPATH_GRAPH_READS=neo4j`. Un échec du miroir ne fait pas échouer
+  l'écriture — il est compté — donc les deux magasins peuvent diverger :
+  `make graph-reconcile` dit en quoi, et sort en code non nul si c'est le cas.
+  Ne basculez les lectures qu'après un rapport en parité. Knowledge Graph, lui,
+  est toujours entièrement en PostgreSQL. Voir §3.5 de l'audit.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.

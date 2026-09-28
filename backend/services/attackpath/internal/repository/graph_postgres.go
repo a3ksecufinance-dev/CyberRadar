@@ -37,7 +37,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 		IsInternetFacing: req.IsInternetFacing, IsPrivileged: req.IsPrivileged,
 		IsCriticalSystem: req.IsCriticalSystem, HasCriticalVuln: req.HasCriticalVuln,
 		HasKnownExploit: req.HasKnownExploit, OpenVulnCount: req.OpenVulnCount,
-		NetworkZone: req.NetworkZone, Hostname: req.Hostname,
+		NetworkZone: req.NetworkZone, IPAddress: req.IPAddress, Hostname: req.Hostname,
 	}
 
 	if err := r.db.QueryRow(ctx, `
@@ -45,8 +45,8 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 			(id, tenant_id, ref_id, node_type, label, risk_score, criticality,
 			 is_internet_facing, is_privileged, is_critical_system,
 			 has_critical_vuln, has_known_exploit, open_vuln_count,
-			 network_zone, hostname, properties)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+			 network_zone, ip_address, hostname, properties)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT (tenant_id, ref_id, node_type) DO UPDATE SET
 			label             = EXCLUDED.label,
 			risk_score        = EXCLUDED.risk_score,
@@ -58,6 +58,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 			has_known_exploit = EXCLUDED.has_known_exploit,
 			open_vuln_count   = EXCLUDED.open_vuln_count,
 			network_zone      = EXCLUDED.network_zone,
+			ip_address        = EXCLUDED.ip_address,
 			hostname          = EXCLUDED.hostname,
 			properties        = EXCLUDED.properties,
 			last_updated_at   = NOW()
@@ -66,7 +67,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 		req.RiskScore, req.Criticality,
 		req.IsInternetFacing, req.IsPrivileged, req.IsCriticalSystem,
 		req.HasCriticalVuln, req.HasKnownExploit, req.OpenVulnCount,
-		nvlS(req.NetworkZone), nvlS(req.Hostname), props,
+		nvlS(req.NetworkZone), nvlS(req.IPAddress), nvlS(req.Hostname), props,
 	).Scan(&n.ID, &n.IsCompromised, &n.LastUpdatedAt, &n.CreatedAt); err != nil {
 		return nil, fmt.Errorf("upsert node: %w", err)
 	}
@@ -525,13 +526,21 @@ const nodeSelect = `
 	SELECT id, tenant_id, ref_id, node_type, label, risk_score, criticality,
 	       is_internet_facing, is_privileged, is_critical_system, is_compromised,
 	       has_critical_vuln, has_known_exploit, open_vuln_count,
-	       network_zone, hostname, properties, last_updated_at, created_at
+	       -- host() renders inet as plain text: the model carries an address as
+	       -- a string, and an analyst reading a node wants 10.0.0.5, not a CIDR.
+	       network_zone, COALESCE(host(ip_address), '') AS ip_address, hostname,
+	       properties, last_updated_at, created_at
 	FROM attack_nodes`
 
 const scenarioSelect = `
 	SELECT id, tenant_id, name, description, entry_node_ids, target_node_ids,
 	       max_hops, include_types, status, path_count, shortest_path, critical_path,
-	       last_run_at, last_run_ms, risk_score, created_by, created_at, updated_at
+	       -- last_run_ms is NULL until the scenario has run, and the model holds
+	       -- it as a plain int: without this every scenario read failed between
+	       -- creation and the first run, which is every scenario an analyst has
+	       -- just defined.
+	       last_run_at, COALESCE(last_run_ms, 0) AS last_run_ms,
+	       risk_score, created_by, created_at, updated_at
 	FROM attack_scenarios`
 
 func scanNode(row scannable) (*model.AttackNode, error) {
@@ -543,7 +552,7 @@ func scanNode(row scannable) (*model.AttackNode, error) {
 		&n.RiskScore, &n.Criticality,
 		&n.IsInternetFacing, &n.IsPrivileged, &n.IsCriticalSystem, &n.IsCompromised,
 		&n.HasCriticalVuln, &n.HasKnownExploit, &n.OpenVulnCount,
-		&zone, &hostname, &propsRaw, &n.LastUpdatedAt, &n.CreatedAt,
+		&zone, &n.IPAddress, &hostname, &propsRaw, &n.LastUpdatedAt, &n.CreatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil

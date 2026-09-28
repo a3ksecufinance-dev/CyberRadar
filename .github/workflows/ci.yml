@@ -38,6 +38,17 @@ jobs:
         options: >-
           --health-cmd "clickhouse-client --query 'SELECT 1'"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      neo4j:
+        # The attack graph's mirror. Its Cypher, its tenant filtering and the
+        # claim that the traversal returns the same paths from either store are
+        # only worth anything run against a real server.
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/crp_password_dev
+        ports: ["7687:7687", "7474:7474"]
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 20
       postgres:
         # pgvector, not plain postgres: migration 000034 creates the extension
         # and the copilot knowledge tests search a real HNSW index.
@@ -57,6 +68,10 @@ jobs:
       IR_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       IDENTITY_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       DASHBOARD_TEST_CH: localhost:9000
+      ATTACKPATH_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      ATTACKPATH_TEST_NEO4J: bolt://localhost:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: crp_password_dev
     steps:
       - uses: actions/checkout@v4
 

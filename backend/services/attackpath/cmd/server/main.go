@@ -66,7 +66,40 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	graphRepo := repository.NewGraphRepository(pool)
-	attackSvc := service.NewAttackPathService(graphRepo, logger)
+
+	// ── Neo4j, when a deployment has one ──────────────────────────────────────
+	//
+	// Configuring NEO4J_URI turns on the mirror: every graph write goes to
+	// PostgreSQL and then to Neo4j. Reads stay on PostgreSQL until
+	// ATTACKPATH_GRAPH_READS is set to "neo4j", and that switch is only
+	// defensible once `reconcile` reports parity for the tenants in question.
+	//
+	// Startup fails on an unreachable Neo4j rather than carrying on without
+	// it: a mirror that is configured but silently not written drifts from the
+	// source of truth, and a traversal on a drifted graph reports attack paths
+	// that do not exist.
+	var graphOpts []service.Option
+	if uri := os.Getenv("NEO4J_URI"); uri != "" {
+		neoStore, err := repository.NewNeo4jGraphStore(ctx, repository.Neo4jConfig{
+			URI:      uri,
+			Username: os.Getenv("NEO4J_USERNAME"),
+			Password: os.Getenv("NEO4J_PASSWORD"),
+			Database: os.Getenv("NEO4J_DATABASE"),
+		}, graphRepo)
+		if err != nil {
+			logger.Fatal().Err(err).Str("uri", uri).Msg("neo4j connect failed")
+		}
+		defer func() { _ = neoStore.Close(context.Background()) }()
+		graphOpts = append(graphOpts, service.WithMirror(neoStore))
+
+		reads := envOrDefault("ATTACKPATH_GRAPH_READS", "postgres")
+		if reads == "neo4j" {
+			graphOpts = append(graphOpts, service.WithGraphStore(neoStore))
+		}
+		logger.Info().Str("uri", uri).Str("reads", reads).Msg("neo4j graph mirror enabled")
+	}
+
+	attackSvc := service.NewAttackPathService(graphRepo, logger, graphOpts...)
 	attackH := handler.NewAttackPathHandler(attackSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────

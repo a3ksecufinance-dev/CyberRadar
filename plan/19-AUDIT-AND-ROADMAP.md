@@ -412,35 +412,79 @@ le parcours sur des graphes construits dans le test, sans base du tout.
 - des algorithmes de graphe prêts à l'emploi — centralité d'intermédiarité pour
   les points d'étranglement, au lieu du comptage d'occurrences actuel.
 
-**Pourquoi l'implémentation n'est pas livrée ici.** Neo4j ne peut pas être
-exécuté dans cet environnement : le proxy refuse (403) aussi bien les images
-conteneur que l'archive de distribution. Écrire le pilote, le schéma, les
-requêtes Cypher et la double écriture sans pouvoir les exécuter **une seule
-fois** produirait du code qui compile et dont personne ne sait s'il fonctionne
-— sur le différenciateur produit de la plateforme. C'est exactement le genre de
-livraison « qui a l'air finie » que cet audit reproche au reste du dépôt.
+**Ce qui était bloqué ne l'est plus.** L'audit précédent notait que Neo4j ne
+pouvait pas tourner dans cet environnement — le proxy refusait (403) les images
+conteneur comme l'archive de distribution — et refusait de livrer un pilote que
+personne n'aurait jamais exécuté. Le constat portait sur deux chemins de
+téléchargement ; un troisième passe. Neo4j est un logiciel Java publié sur Maven
+Central, que le proxy autorise : `org.neo4j.test:neo4j-harness` **est** le
+serveur, embarqué, connecteur Bolt compris. Un serveur 5.26.31 a donc tourné en
+local, et tout ce qui suit a été exécuté contre lui, pas seulement compilé.
 
-**Plan de migration, à exécuter dans un environnement où Neo4j tourne :**
+**Étapes 1 à 4 du plan de migration : faites.**
 
-1. Service `neo4j` dans `docker-compose`, contraintes d'unicité sur
-   `(tenant_id, id)` pour `:AttackNode`, index sur `tenant_id`.
-2. `repository/graph_neo4j.go` implémentant `service.GraphStore`. `LoadGraph`
-   devient d'abord un `MATCH` équivalent, à iso-comportement.
-3. **Double écriture** sur les upserts de nœuds et d'arêtes, PostgreSQL restant
-   la source de vérité, avec une commande de réconciliation qui compare les
-   deux et compte les écarts.
-4. Bascule de la lecture vers Neo4j derrière une variable d'environnement, par
-   tenant, avec les tests de traversée rejoués contre les deux implémentations
-   — ils sont écrits pour ça.
-5. Une fois la parité établie, pousser la traversée dans Cypher
-   (`shortestPath`, `apoc.path.expandConfig`) et retirer `LoadGraph` du chemin
-   chaud.
+1. **Service `neo4j`** dans `docker-compose` (Community 5.26) et
+   `migrations/neo4j/000001_attack_graph.cypher` : unicité sur
+   `(tenant_id, id)` et sur `(tenant_id, ref_id, node_type)` — les deux clés de
+   PostgreSQL retranscrites —, index sur `tenant_id` pour les nœuds et les
+   arêtes. Le service applique les mêmes instructions au démarrage
+   (`EnsureSchema`) ; **un test compare le fichier et le code**, parce que deux
+   copies d'un schéma autorisées à diverger finissent par diverger.
+2. **`repository/graph_neo4j.go`.** `Neo4jGraphStore` encapsule le dépôt
+   PostgreSQL et ne redéfinit que `LoadGraph` : le graphe déménage, les
+   scénarios et les chemins découverts restent relationnels — ce sont des
+   enregistrements, pas de la topologie.
+3. **Double écriture** sur les upserts de nœuds et d'arêtes et sur le marquage
+   de compromission. Un échec du miroir **ne fait pas échouer l'écriture** :
+   PostgreSQL est la source de vérité, et faire dépendre l'écriture primaire
+   d'un magasin secondaire reviendrait à ne plus pouvoir enregistrer un graphe
+   parce qu'une base de reporting est tombée. L'échec est journalisé en `error`
+   et compté (`attackpath_graph_mirror_failures_total`).
+   `attackpath-reconcile` (`make graph-reconcile`) compare les deux magasins,
+   liste ce qui diverge et **sort en code non nul** : une réconciliation
+   planifiée qui réussit toujours n'apprend rien à personne.
+4. **Bascule de lecture** derrière `ATTACKPATH_GRAPH_READS=neo4j`, la valeur par
+   défaut restant `postgres`. Le test de parité rejoue le **même scénario sur le
+   même graphe** depuis chaque magasin et compare les chemins trouvés — route,
+   longueur, score, drapeaux. Il a été falsifié pour vérifier qu'il échoue
+   quand les deux divergent.
 
-L'isolation tenant est le point de vigilance : en PostgreSQL elle est une
-colonne présente dans chaque `WHERE`. En Cypher elle devient une propriété
-qu'il faut filtrer explicitement à chaque `MATCH`, sans le filet du schéma.
-Une base par tenant l'élimine, au prix de la densité — arbitrage à trancher
-avant l'étape 2.
+**Mesuré plutôt que supposé.** Avec Neo4j arrêté, une écriture de nœud prenait
+**30 secondes** : les valeurs par défaut du pilote réessaient une transaction
+pendant une demi-minute, et le miroir est sur le chemin de la requête. Le miroir
+a le droit d'échouer, pas de rendre le magasin primaire lent : délai propre de
+5 s, détaché de l'annulation de la requête (un client qui raccroche ne doit pas
+laisser les deux magasins dans des états différents). Vérifié à nouveau :
+5,0 s miroir arrêté, ~25 ms miroir démarré.
+
+**Deux défauts trouvés en exécutant, pas en lisant :**
+
+- **Toute lecture de scénario renvoyait 500.** `last_run_ms` est `NULL` tant que
+  le scénario n'a pas tourné, et il était lu dans un `int`. Autrement dit : un
+  scénario défini par un analyste était illisible jusqu'à sa première
+  exécution — et son exécution passe par sa lecture. La fonctionnalité entière
+  était inutilisable. Même classe que les défauts IR et OT du §3.8.
+- **`ip_address` était accepté, jamais stocké, jamais relu.** L'API prenait
+  l'adresse, l'`INSERT` ne la portait pas, le `SELECT` non plus. Un champ qui
+  fait semblant.
+
+**Ce qui reste — l'étape 5.** Pousser la traversée dans Cypher
+(`shortestPath`, plus court chemin **pondéré**, centralité d'intermédiarité pour
+les points d'étranglement) et retirer `LoadGraph` du chemin chaud. C'est là
+qu'est le gain réel : aujourd'hui les deux magasins chargent le graphe entier du
+tenant dans le processus, donc Neo4j ne fait encore que **rendre les mêmes
+réponses**. Cette étape n'a de sens qu'après une période de double écriture en
+production et une réconciliation stable.
+
+**L'isolation tenant, arbitrage tranché.** En PostgreSQL c'est une colonne
+présente dans chaque `WHERE` ; en Cypher, une propriété sans filet. Une base par
+tenant l'éliminerait, mais le multi-base est une fonction **Enterprise** : sur
+Community, visée par ce déploiement, il n'y a qu'une base et le filtre par
+propriété est la seule option. Deux choses en tiennent lieu : chaque lecture
+filtre `tenant_id` sur la relation **et** sur ses deux extrémités — une arête
+écrite entre deux tenants est alors intraversable depuis l'un comme depuis
+l'autre — et aucun Cypher n'est construit par concaténation. Un test dédié
+tient lieu de ce que le schéma relationnel garantissait.
 
 ### 3.6 Mémoire du Copilot — ce qui a été fait
 
@@ -869,10 +913,10 @@ Aucun déploiement production sans cette phase.
   d'audit, et le SOAR autonome (portée `platform`).
 - **SOAR réel** — *fait*, voir §3.3. Les quinze actions appellent les services
   de remédiation ; un échec fait échouer l'étape.
-- **Neo4j** — préalable posé (§3.5) : l'analyseur dépend d'une interface `GraphStore`, et les sept
-  défauts du parcours qui auraient été transcrits en Cypher sont corrigés. L'implémentation attend un
-  environnement où Neo4j peut tourner. Migration des modèles `attackpath` et `knowledgegraph` : plus elle est tardive,
-  plus la réécriture des couches repository/service coûte cher.
+- **Neo4j** — *fait pour `attackpath`*, voir §3.5 : schéma, double écriture, commande de
+  réconciliation et bascule de lecture, tous exécutés contre un serveur 5.26 réel. Reste l'étape 5
+  (traversée en Cypher) et la migration de `knowledgegraph`, qui tient encore son graphe en
+  PostgreSQL — plus elle est tardive, plus la réécriture des couches repository/service coûte cher.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
   partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).
 - **DLQ + backoff exponentiel** sur Kafka — *fait*.
