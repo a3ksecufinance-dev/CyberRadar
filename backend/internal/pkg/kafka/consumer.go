@@ -107,6 +107,12 @@ func NewConsumer(cfg ConsumerConfig, logger zerolog.Logger) (*Consumer, error) {
 		MaxBytes:    maxBytes,
 		MaxWait:     maxWait,
 		StartOffset: startOffset,
+		// A consumer that starts before its topic exists is assigned no
+		// partitions, and without this it never notices when the topic
+		// appears — it blocks on ReadMessage forever, with no error to show
+		// for it. Seen for real: the dashboard's KPI ingestor started ahead of
+		// the first producer and consumed nothing until it was restarted.
+		WatchPartitionChanges: true,
 	})
 
 	dlq := NewProducer(ProducerConfig{Brokers: cfg.Brokers, Topic: cfg.DLQTopic}, logger)

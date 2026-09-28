@@ -697,6 +697,25 @@ conjuguaient pour rendre le tableau de bord vide :
    d'alertes du SIEM et son filtre de dates — non. `db.CHTime` / `db.CHTime64`
    règlent le cas au même endroit.
 
+Faire tourner la chaîne en a révélé trois de plus, qu'aucun test unitaire
+n'aurait pu voir :
+
+4. **`GetAlertStats` du SIEM échouait toujours.** `COUNT()` revient en `UInt64`
+   et le driver refuse de le réduire : `converting UInt64 to *int is
+   unsupported`. Les agrégats groupés lisaient déjà dans un `uint64`, la
+   première ligne non. L'endpoint `/siem/alerts/stats` n'a donc jamais répondu.
+5. **`AlertStats.Open` n'était jamais renseigné.** ClickHouse détient les
+   alertes, PostgreSQL détient leur statut dans `alert_metadata`, et la requête
+   n'interrogeait que ClickHouse : le compte d'alertes ouvertes valait zéro quel
+   qu'en soit le nombre — sur la page du SIEM comme sur le tableau de bord.
+   `CountOpenAlerts` fait la jointure ; une alerte sans ligne de métadonnées n'a
+   jamais été triée, et la colonne comme son absence valent `open`.
+6. **Un consommateur démarré avant son topic ne le voyait jamais apparaître.**
+   Sans partition assignée, il reste bloqué sur `ReadMessage` sans une seule
+   erreur à montrer. C'est arrivé pour de bon ici : l'ingesteur du dashboard a
+   précédé le premier producteur et n'a rien consommé jusqu'à son redémarrage.
+   `WatchPartitionChanges: true` sur les cinq lecteurs du dépôt.
+
 Le producteur lui-même est `internal/pkg/kpi` : un service le démarre en un
 appel dans son `main`, fournit `KPISamples(ctx, tenantID)` au-dessus de ce qu'il
 calcule déjà pour son propre `/stats`, et le sampler publie pour chaque tenant
@@ -704,6 +723,14 @@ actif sur `crp.events.kpi`. L'échec d'un tenant n'interrompt pas les autres :
 un tableau de bord vidé pour tout le monde parce qu'un tenant est en erreur est
 exactement ce qu'on cherche à supprimer. Les sept domaines que lit l'aperçu
 (siem, ueba, ti, vuln, attackpath, soar, kg) publient.
+
+**Vérifié de bout en bout.** Avec PostgreSQL, ClickHouse 24.3 et un broker
+Kafka KRaft : quatre alertes insérées dans ClickHouse (2 critiques) et quatre
+statuts dans PostgreSQL (3 non closes) ; le SIEM publie
+`critical_alerts=2`, `open_alerts=3`, `risk_score=25` (10×2 + 4×1 + 1) ; le
+consommateur les stocke ; `GET /dashboard/overview` les rend. Le même essai
+répété avec le consommateur démarré *avant* la création du topic passe
+désormais aussi.
 
 **À faire valider avant de lire les scores comme des mesures.** Chaque domaine
 dérive un `risk_score` 0–100 d'une formule pondérée écrite en clair dans son

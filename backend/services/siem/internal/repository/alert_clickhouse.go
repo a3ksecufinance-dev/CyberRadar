@@ -162,9 +162,16 @@ func (r *AlertRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 		FROM crp_siem.alerts
 		WHERE tenant_id = {t:String}`,
 		clickhouse.Named("t", tenantID.String()))
-	if err := row.Scan(&stats.Total, &stats.FiredLast24h, &stats.FiredLast7d); err != nil {
+	// COUNT() comes back as UInt64 and the driver will not narrow it for us:
+	// scanning it straight into an int fails with "converting UInt64 to *int
+	// is unsupported", which is why this whole endpoint returned an error.
+	var total, last24h, last7d uint64
+	if err := row.Scan(&total, &last24h, &last7d); err != nil {
 		return nil, err
 	}
+	stats.Total = int(total)
+	stats.FiredLast24h = int(last24h)
+	stats.FiredLast7d = int(last7d)
 
 	// By severity
 	rows, err := r.conn.Query(ctx, `

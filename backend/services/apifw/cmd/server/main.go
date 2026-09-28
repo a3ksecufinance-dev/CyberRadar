@@ -139,6 +139,12 @@ func consumeTopic(ctx context.Context, brokers []string, topic string, apifwSvc 
 		MinBytes:    1,
 		MaxBytes:    10 << 20,
 		MaxWait:     time.Second,
+		// A consumer that starts before its topic exists is assigned no
+		// partitions, and without this it never notices when the topic
+		// appears — it blocks on ReadMessage forever, with no error to show
+		// for it. Seen for real: the dashboard's KPI ingestor started ahead of
+		// the first producer and consumed nothing until it was restarted.
+		WatchPartitionChanges: true,
 	})
 	defer r.Close()
 	logger.Info().Str("topic", topic).Msg("apifw kafka consumer started")

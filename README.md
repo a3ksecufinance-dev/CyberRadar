@@ -415,6 +415,9 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Le frontend a besoin de Keycloak | Sans lui, `/login` renvoie une erreur de configuration NextAuth. |
 | `next.config` doit rester `.mjs` | Next 14 ne supporte pas une configuration TypeScript. |
 | Les clés et certificats ne sont pas versionnés | `.gitignore` exclut `*.pem` et `*.key`. Les générer localement. |
+| `COUNT()` ClickHouse est un `UInt64` | Le driver ne le réduit pas en `int` : scanner dans un `uint64` puis convertir. |
+| Un consommateur Kafka doit surveiller son topic | Démarré avant que le topic existe, il reste bloqué sans erreur. `WatchPartitionChanges: true`. |
+| Le statut d'une alerte est dans PostgreSQL | ClickHouse détient les alertes, `alert_metadata` leur statut. Compter les ouvertes exige les deux. |
 | Paramètres nommés ClickHouse | Liés sous forme textuelle : un `uuid.UUID` ou un `time.Time` est rejeté. Utiliser `.String()` et `db.CHTime`. |
 | Migrations ClickHouse | `TTL` exige `Date`/`DateTime`, pas `DateTime64` ; une clé de tri MergeTree n'accepte pas `DESC`. Six des sept migrations échouaient pour ces deux raisons. |
 | `asset.criticality` est un entier | 1 faible … 4 critique. `Criticality` est un `int` Go sans `MarshalJSON`. |
