@@ -146,3 +146,38 @@ func TestUnclassifiedErrorLeaksNothing(t *testing.T) {
 		t.Errorf("message = %q, want the generic text", b.Error.Message)
 	}
 }
+
+// A service that cannot classify a failure wraps it as Internal. The wrapper
+// must not hide a database error the driver classified perfectly well: the
+// asset service wrapped a not-null violation this way, and every create that
+// left an optional field out was answered "an internal error occurred".
+func TestInternalWrapperDoesNotHideADatabaseError(t *testing.T) {
+	pgErr := &pgconn.PgError{
+		Code:       sqlStateNotNullViolation,
+		ColumnName: "mac_addresses",
+		TableName:  "assets",
+	}
+	status, b := answer(t, apierrors.Internal("create asset", pgErr))
+
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", status, http.StatusUnprocessableEntity)
+	}
+	if b.Error == nil {
+		t.Fatal("no error in the envelope")
+	}
+	details, ok := b.Error.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("details = %#v, want the field and the reason", b.Error.Details)
+	}
+	if details["field"] != "mac_addresses" {
+		t.Errorf("field = %v, want mac_addresses", details["field"])
+	}
+}
+
+// An internal error with nothing classifiable underneath is still a 500.
+func TestInternalWithoutADatabaseErrorIsStillFiveHundred(t *testing.T) {
+	status, _ := answer(t, apierrors.Internal("compute score", errors.New("divide by zero")))
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", status, http.StatusInternalServerError)
+	}
+}

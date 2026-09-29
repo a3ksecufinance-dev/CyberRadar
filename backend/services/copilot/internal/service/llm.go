@@ -7,17 +7,30 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cyberradar/platform/services/copilot/internal/model"
 	"github.com/rs/zerolog"
 )
 
+// Defaults for the Messages API call. Each is overridable by environment
+// variable so an operator can move model or endpoint without a rebuild — a
+// sovereign deployment may have to point this at its own gateway, and the
+// model a customer is contractually allowed to use is not ours to hard-code.
 const (
-	anthropicAPI   = "https://api.anthropic.com/v1/messages"
-	anthropicModel = "claude-sonnet-4-6"
-	maxTokens      = 4096
+	defaultBaseURL   = "https://api.anthropic.com"
+	defaultModel     = "claude-opus-5-5"
+	defaultMaxTokens = 8192
 )
+
+// messagesPath is appended to the base URL.
+const messagesPath = "/v1/messages"
+
+// anthropicVersion is the wire version this client is written against.
+const anthropicVersion = "2023-06-01"
 
 // systemPrompt is the security analyst persona injected on every call.
 const systemPrompt = `You are CyberRadar Copilot, an expert AI security analyst embedded in the CyberRadar Platform (CRP) — a sovereign cybersecurity platform for banks, governments, and critical infrastructure.
@@ -41,9 +54,53 @@ Platform domains you can query:
 Always cite the tool call results that informed your answer.
 Never hallucinate data — if a tool returns no results, say so explicitly.`
 
+// LLMConfig is what the client needs beyond its credential.
+type LLMConfig struct {
+	BaseURL   string
+	Model     string
+	MaxTokens int
+	// Effort sets how much thinking the answer gets. Empty leaves the model's
+	// own default, which is what most deployments want.
+	Effort  string
+	Timeout time.Duration
+}
+
+// LLMConfigFromEnv reads the configuration, filling in the defaults.
+func LLMConfigFromEnv() LLMConfig {
+	cfg := LLMConfig{
+		BaseURL:   envOr("ANTHROPIC_BASE_URL", defaultBaseURL),
+		Model:     envOr("ANTHROPIC_MODEL", defaultModel),
+		MaxTokens: envInt("COPILOT_MAX_TOKENS", defaultMaxTokens),
+		Effort:    os.Getenv("COPILOT_EFFORT"),
+		Timeout:   time.Duration(envInt("COPILOT_TIMEOUT_SECONDS", 90)) * time.Second,
+	}
+	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
+	return cfg
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
 // LLMClient calls the Anthropic Messages API with tool use.
 type LLMClient struct {
 	apiKey     string
+	cfg        LLMConfig
 	httpClient *http.Client
 	tools      []model.AnthropicTool
 	dispatcher *ToolDispatcher
@@ -51,15 +108,21 @@ type LLMClient struct {
 }
 
 // NewLLMClient creates an LLMClient with the security analyst toolset.
-func NewLLMClient(apiKey string, dispatcher *ToolDispatcher, logger zerolog.Logger) *LLMClient {
+func NewLLMClient(apiKey string, cfg LLMConfig, dispatcher *ToolDispatcher, logger zerolog.Logger) *LLMClient {
 	return &LLMClient{
 		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 90 * time.Second},
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: cfg.Timeout},
 		tools:      buildTools(),
 		dispatcher: dispatcher,
 		logger:     logger,
 	}
 }
+
+// Model reports which model this client calls, for logs and for the health
+// endpoint: "which model is answering" is the first question asked of a
+// deployment, and guessing from a config file is how the wrong answer is given.
+func (c *LLMClient) Model() string { return c.cfg.Model }
 
 // Chat sends a conversational message and returns the assistant reply.
 // It implements the agentic loop: call Claude → dispatch tool use → call Claude again.
@@ -158,11 +221,17 @@ func (c *LLMClient) Analyze(ctx context.Context, prompt string) (*model.Anthropi
 // call makes a single HTTP POST to the Anthropic Messages API.
 func (c *LLMClient) call(ctx context.Context, messages []model.AnthropicMessage) (*model.AnthropicResponse, error) {
 	req := model.AnthropicRequest{
-		Model:     anthropicModel,
-		MaxTokens: maxTokens,
+		Model:     c.cfg.Model,
+		MaxTokens: c.cfg.MaxTokens,
 		System:    systemPrompt,
 		Messages:  messages,
 		Tools:     c.tools,
+	}
+	// Thinking is on by default on the current models and is not requested
+	// through a token budget — that field is refused outright. Depth is set
+	// here, and only when an operator asked for a particular one.
+	if c.cfg.Effort != "" {
+		req.OutputConfig = &model.AnthropicOutputConfig{Effort: c.cfg.Effort}
 	}
 
 	body, err := json.Marshal(req)
@@ -170,13 +239,13 @@ func (c *LLMClient) call(ctx context.Context, messages []model.AnthropicMessage)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPI, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+messagesPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("anthropic-version", anthropicVersion)
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -215,16 +284,12 @@ func buildAnthropicMessages(history []*model.Message) []model.AnthropicMessage {
 				Role:    model.RoleAssistant,
 				Content: []model.AnthropicContent{{Type: "text", Text: m.Content}},
 			})
-		case model.RoleTool:
-			// Reconstruct tool result block attached to previous assistant turn
-			if len(msgs) > 0 && msgs[len(msgs)-1].Role == model.RoleUser {
-				msgs[len(msgs)-1].Content = append(msgs[len(msgs)-1].Content, model.AnthropicContent{
-					Type:      "tool_result",
-					ToolUseID: m.ToolName,
-					Content:   m.Content,
-				})
-			}
 		}
+		// A tool turn is deliberately not replayed. History is persisted as
+		// text, so the tool_use blocks it answered are gone — and a
+		// tool_result whose tool_use_id names a tool rather than a block, as
+		// this did, is rejected by the API. The tools are called again from
+		// the current question, which is also the fresher answer.
 	}
 	return msgs
 }

@@ -84,7 +84,13 @@ func main() {
 	// ── Services ──────────────────────────────────────────────────────────────
 	copilotRepo := repository.NewCopilotRepository(pool)
 	dispatcher := service.NewToolDispatcher(serviceURLs)
-	llmClient := service.NewLLMClient(anthropicKey, dispatcher, logger)
+	llmConfig := service.LLMConfigFromEnv()
+	llmClient := service.NewLLMClient(anthropicKey, llmConfig, dispatcher, logger)
+	logger.Info().
+		Str("model", llmConfig.Model).
+		Str("endpoint", llmConfig.BaseURL).
+		Int("max_tokens", llmConfig.MaxTokens).
+		Msg("llm_configured")
 
 	// ── Retrieval ─────────────────────────────────────────────────────────────
 	// Optional: with no embeddings server the Copilot still works, it just has
@@ -111,9 +117,15 @@ func main() {
 	r.Use(chimiddleware.Timeout(120 * time.Second)) // LLM calls can take up to 90s
 
 	r.Handle("/metrics", observe.MetricsHandler())
+	// The health answer names the model. A Copilot is judged by what it says,
+	// and "which model said it" is the first thing asked of a deployment —
+	// reading it off a configuration file elsewhere is how the wrong answer
+	// gets given.
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","service":"copilot-service"}`)
+		//nolint:errcheck // nothing actionable if the client already hung up
+		fmt.Fprintf(w, `{"status":"ok","service":"copilot-service","model":%q,"retrieval":%t}`,
+			llmClient.Model(), embedder != nil)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {

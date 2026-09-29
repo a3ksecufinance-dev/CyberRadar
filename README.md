@@ -246,6 +246,35 @@ enregistre tous.
 La rétention est de 30 jours — la plus large fenêtre utilisée. Le service PAM
 purge au démarrage puis toutes les 6 heures.
 
+### Copilot : modèle et outils
+
+Le service appelle l'API Messages en direct, sans SDK. Rien n'y est figé :
+`ANTHROPIC_MODEL` (`claude-opus-5-5` par défaut), `ANTHROPIC_BASE_URL` pour une
+passerelle interne, `COPILOT_MAX_TOKENS`, `COPILOT_EFFORT`. Le modèle servi est
+annoncé sur `/health` : « quel modèle répond » est la première question posée
+d'un déploiement, et la lire dans un fichier de configuration ailleurs est la
+façon de s'y tromper.
+
+Trois points que la mise en service a tranchés :
+
+- **La profondeur de réflexion ne se demande plus par un budget de jetons.**
+  Les modèles courants refusent `budget_tokens` ; elle se règle par
+  `output_config.effort`, et n'est envoyée que si un exploitant en a demandé
+  une.
+- **Les blocs de réflexion doivent revenir intacts.** La boucle d'outils
+  renvoie le tour de l'assistant tel quel ; un bloc rendu sans sa signature est
+  rejeté. Un type qui les laissait tomber au passage aurait transformé chaque
+  appel d'outil en 400 — et seulement au deuxième échange, là où le premier
+  paraît parfait.
+- **Un refus n'est pas un résultat vide.** Une route absente renvoyait une page
+  404 que le dispatcher passait au modèle comme une donnée ; le modèle
+  concluait « aucune alerte » sur un service qu'il n'avait jamais interrogé.
+  L'erreur est désormais explicite dans le résultat d'outil.
+
+Les dix outils sont couverts par un test qui compare la route appelée à celle
+que le service monte réellement : trois d'entre eux se trompaient de préfixe,
+et rien ne le montrait — la réponse revenait fluide, assurée, et sur rien.
+
 ### Mémoire du Copilot (pgvector)
 
 Les outils du Copilot répondent à des questions exactes — « quelles alertes sont
@@ -466,13 +495,12 @@ chose en natif, sur les mêmes ports :
 cd backend
 CRP_KAFKA_HOME=/opt/kafka_2.13-3.7.1 \
 CRP_KEYCLOAK_HOME=/opt/keycloak-24.0.4 \
-CRP_CLICKHOUSE_BIN=clickhouse \
 ./scripts/dev-local.sh up
 ```
 
 `up` enchaîne infrastructure, migrations, identités, services et interface, puis
 affiche un état. Les étapes s'exécutent aussi séparément (`infra`, `migrate`,
-`seed`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
+`seed`, `demo`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
 suit un journal, `down` n'arrête que ce que le script a démarré. Un test
 (`internal/pkg/deploycheck`) compare sa liste de services à celle du
 `docker-compose` et à la table de ports du frontend : un service ajouté d'un
@@ -485,10 +513,58 @@ Trois choses qu'une installation révèle et qu'aucun test ne montrait :
   meurent sur « sorry, too many clients already ». Le compose fixe désormais
   `max_connections=400` et les pools se règlent par `DB_MAX_CONNS` /
   `DB_MIN_CONNS`. Une vraie production met un pooler devant.
-- **Les migrations ne sont pas rejouables.** Il n'y a pas d'outil versionné :
-  `migrate` refuse une base déjà migrée et renvoie vers `reset`.
+- **Les migrations PostgreSQL ne sont pas rejouables.** Il n'y a pas d'outil
+  versionné : `migrate` laisse une base déjà migrée tranquille et renvoie vers
+  `reset`. Celles de ClickHouse et de Neo4j le sont, et tournent à chaque
+  `migrate` — le garde-fou couvrait la fonction entière, si bien qu'une
+  installation d'abord montée sans ClickHouse ne pouvait plus jamais recevoir
+  son schéma : le seul magasin qui manquait était celui que le garde-fou
+  rendait inatteignable.
 - **Le Copilot exige une clé de modèle** et refuse de démarrer sans. Le script
   le saute en le disant, plutôt que de le laisser mort dans la liste.
+
+### Remplir la plateforme pour une démonstration
+
+Une plateforme vide ne s'évalue pas : chaque page affiche zéro et rien ne dit
+si le produit fonctionne ou s'il se contente de démarrer.
+
+```bash
+cd backend
+./scripts/dev-local.sh demo          # ou : make demo
+./scripts/dev-local.sh demo -summary # ne crée rien, compte ce qui est là
+```
+
+`internal/cmd/demoseed` écrit une banque de taille moyenne — quatorze actifs
+(canal en ligne, cœur bancaire, passerelle SWIFT, réseau monétique), dix CVE
+réelles et leurs constats, onze indicateurs rattachés à trois acteurs, cinq
+règles de détection, cinq incidents, un graphe d'attaque de seize nœuds avec
+trois scénarios analysés, quatre référentiels de conformité et leurs contrôles,
+un graphe de connaissance.
+
+**Tout passe par l'API de la plateforme**, sous une identité réelle et avec les
+permissions que ses rôles accordent vraiment. Des `INSERT` directs auraient
+sauté la validation, l'autorisation, le cloisonnement par tenant, les instantanés
+que le tableau de bord lit et le graphe que l'analyse de chemins parcourt — la
+démonstration aurait montré des lignes, pas un produit. Écrire à travers les
+mêmes portes a d'ailleurs révélé trois défauts qu'aucun test ne voyait : un actif
+créé sans champ facultatif partait en 500, la moitié des erreurs 500 ne
+laissaient aucune trace, et trois des dix outils du Copilot appelaient une route
+qui n'existait pas.
+
+Deux choses ne se créent pas par API, et c'est voulu :
+
+- **Les alertes SIEM.** Une alerte est ce que le moteur a conclu, pas ce qu'un
+  client affirme. Le jeu envoie donc les **événements** qu'un connecteur
+  enverrait, et les alertes à l'écran sont celles que cette plateforme a
+  décidé de lever.
+- **L'ingestion**, réservée aux comptes de service : le jeton d'un analyste ne
+  doit pas pouvoir injecter dans la chaîne de détection. Le connecteur de
+  démonstration est donc enrôlé comme un vrai — compte de service, secret
+  montré une fois, échange de justificatifs — et garde son secret dans
+  `.dev-local/demo-connector.json`.
+
+Relancer la commande ne duplique rien : chaque étape liste ce qu'elle s'apprête
+à créer et laisse en place ce qui existe.
 
 ### Se connecter à l'interface
 

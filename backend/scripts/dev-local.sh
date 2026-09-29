@@ -9,6 +9,7 @@
 # ports, so an address that works here works there.
 #
 #   ./scripts/dev-local.sh up         everything, in order
+#   ./scripts/dev-local.sh demo       fill the tenant with a demonstration estate
 #   ./scripts/dev-local.sh status     what is listening and what is healthy
 #   ./scripts/dev-local.sh logs siem-service
 #   ./scripts/dev-local.sh down       stop everything this script started
@@ -39,7 +40,17 @@ CLICKHOUSE_DSN="clickhouse://default:@localhost:9000/crp_audit"
 # Where the third-party servers live. Override to point at your own.
 KAFKA_HOME="${CRP_KAFKA_HOME:-/opt/kafka_2.13-3.7.1}"
 KEYCLOAK_HOME="${CRP_KEYCLOAK_HOME:-/opt/keycloak-24.0.4}"
-CLICKHOUSE_BIN="${CRP_CLICKHOUSE_BIN:-clickhouse}"
+# The single-binary release is called "clickhouse", but a machine that carries
+# more than one major version names them apart. Take the override if there is
+# one, otherwise the first name that exists on PATH — a install that works once
+# should not need the variable set again on the next session.
+CLICKHOUSE_BIN="${CRP_CLICKHOUSE_BIN:-}"
+if [[ -z "$CLICKHOUSE_BIN" ]]; then
+	for candidate in clickhouse clickhouse24 clickhouse-server; do
+		if command -v "$candidate" >/dev/null 2>&1; then CLICKHOUSE_BIN="$candidate"; break; fi
+	done
+	CLICKHOUSE_BIN="${CLICKHOUSE_BIN:-clickhouse}"
+fi
 NEO4J_HOME="${CRP_NEO4J_HOME:-}"   # empty: Neo4j is skipped, graphs stay in PostgreSQL
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
@@ -199,6 +210,10 @@ service_env() {
 				"SOAR_SERVICE_URL=http://localhost:8014" "DASHBOARD_SERVICE_URL=http://localhost:8015"
 				"ASSET_SERVICE_URL=http://localhost:8006"
 				"ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
+				"ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}"
+				"ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}"
+				"COPILOT_EFFORT=${COPILOT_EFFORT:-}"
+				"COPILOT_MAX_TOKENS=${COPILOT_MAX_TOKENS:-}"
 				"EMBEDDINGS_URL=${EMBEDDINGS_URL:-}" "EMBEDDINGS_API_KEY=${EMBEDDINGS_API_KEY:-}"
 				"EMBEDDINGS_MODEL=${EMBEDDINGS_MODEL:-BAAI/bge-large-en-v1.5}") ;;
 	esac
@@ -385,12 +400,6 @@ migrated_already() {
 }
 
 cmd_migrate() {
-	if migrated_already; then
-		warn "$PGDB already has the schema; the migrations are not replayable"
-		warn "start over with:  $0 reset && $0 migrate"
-		return 0
-	fi
-
 	step "Keys"
 	if [[ -f "$BACKEND_DIR/deployments/jwt/private.pem" ]]; then
 		ok "JWT key pair already present"
@@ -400,12 +409,21 @@ cmd_migrate() {
 
 	step "Migrations"
 	local n=0
-	for f in "$BACKEND_DIR"/migrations/postgres/*.sql; do
-		PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" \
-			-v ON_ERROR_STOP=1 -q -f "$f" || { fail "PostgreSQL: $(basename "$f")"; return 1; }
-		n=$((n + 1))
-	done
-	ok "$n PostgreSQL migrations"
+	# Only the PostgreSQL migrations are one-shot. The guard used to cover the
+	# whole function, so an install that first came up without ClickHouse could
+	# never be given its schema afterwards: the one store that was missing was
+	# the one the guard made unreachable.
+	if migrated_already; then
+		warn "$PGDB already has the schema; the PostgreSQL migrations are not replayable"
+		warn "start over with:  $0 reset && $0 migrate"
+	else
+		for f in "$BACKEND_DIR"/migrations/postgres/*.sql; do
+			PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" \
+				-v ON_ERROR_STOP=1 -q -f "$f" || { fail "PostgreSQL: $(basename "$f")"; return 1; }
+			n=$((n + 1))
+		done
+		ok "$n PostgreSQL migrations"
+	fi
 
 	if (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null; then
 		exec 3>&-
@@ -486,6 +504,19 @@ cmd_seed() {
 	n="$(PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" -tAc \
 		"SELECT count(*) FROM identities WHERE status='active'")"
 	ok "$n identities, each with the roles its permissions come from"
+}
+
+# cmd_demo fills the tenant with a demonstration estate.
+#
+# Separate from seed on purpose: seed creates the people who may sign in, and
+# an install needs it. This creates a bank's worth of assets, vulnerabilities,
+# indicators, incidents and controls, which an install being prepared for real
+# data does not want.
+cmd_demo() {
+	[[ -x "$BACKEND_DIR/bin/demo-seed" ]] || cmd_build
+	(cd "$BACKEND_DIR" && CRP_STATE_DIR="$STATE_DIR" DATABASE_URL="$DATABASE_URL" \
+		JWT_PRIVATE_KEY_PATH="$BACKEND_DIR/deployments/jwt/private.pem" \
+		./bin/demo-seed "$@")
 }
 
 # ─── Services ─────────────────────────────────────────────────────────────────
@@ -622,24 +653,22 @@ cmd_down() {
 
 cmd_up() {
 	cmd_infra
-	if migrated_already; then
-		warn "$PGDB already carries the schema — leaving it alone ($0 reset to start over)"
-	else
-		cmd_migrate
-	fi
+	cmd_migrate
 	cmd_seed
 	cmd_services
 	cmd_frontend
 	cmd_status
 	printf '\n   Web interface  http://localhost:3000\n'
 	printf '   Sign in as     admin@cyberradar.io / Admin@CyberRadar2025!\n'
-	printf '   Keycloak       http://localhost:8080 (admin / Admin@CyberRadar2025!)\n\n'
+	printf '   Keycloak       http://localhost:8080 (admin / Admin@CyberRadar2025!)\n'
+	printf '   Demonstration  %s demo   (assets, vulnerabilities, alerts, incidents, controls)\n\n' "$0"
 }
 
 case "${1:-up}" in
 	up) cmd_up ;;
 	reset) cmd_reset ;;
 	seed) cmd_seed ;;
+	demo) shift; cmd_demo "$@" ;;
 	infra) cmd_infra ;;
 	migrate) cmd_migrate ;;
 	build) cmd_build ;;
@@ -648,5 +677,5 @@ case "${1:-up}" in
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|seed|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
 esac

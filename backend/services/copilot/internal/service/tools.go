@@ -1,12 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 )
@@ -65,7 +68,7 @@ func (d *ToolDispatcher) queryAlerts(ctx context.Context, input map[string]any) 
 		"limit":     "limit",
 		"rule_name": "rule_name",
 	})
-	return httpGET(ctx, u+"/api/v1/alerts?"+p)
+	return httpGET(ctx, u+"/api/v1/siem/alerts?"+p)
 }
 
 func (d *ToolDispatcher) lookupIOC(ctx context.Context, input map[string]any) (map[string]any, error) {
@@ -74,12 +77,54 @@ func (d *ToolDispatcher) lookupIOC(ctx context.Context, input map[string]any) (m
 		return unavailable("ti"), nil
 	}
 	value, _ := input["value"].(string)
-	iocType, _ := input["type"].(string)
-	q := "value=" + url.QueryEscape(value)
-	if iocType != "" {
-		q += "&type=" + iocType
+	if value == "" {
+		return map[string]any{"error": "lookup_ioc needs a value"}, nil
 	}
-	return httpGET(ctx, u+"/api/v1/iocs/lookup?"+q)
+	iocType, _ := input["type"].(string)
+	if iocType == "" {
+		// The endpoint requires a type and the tool declares it optional, so
+		// an answer that omits it would always be rejected. The value says
+		// what it is; deriving it is cheaper than a round trip that fails.
+		iocType = inferIOCType(value)
+	}
+	return httpPOST(ctx, u+"/api/v1/ti/iocs/lookup", map[string]any{
+		"type": iocType, "value": value,
+	})
+}
+
+// inferIOCType reads an indicator's kind off its own shape.
+func inferIOCType(value string) string {
+	v := strings.TrimSpace(value)
+	switch {
+	case strings.HasPrefix(strings.ToUpper(v), "CVE-"):
+		return "cve"
+	case strings.HasPrefix(v, "http://"), strings.HasPrefix(v, "https://"):
+		return "url"
+	case strings.Contains(v, "@"):
+		return "email"
+	case net.ParseIP(v) != nil:
+		return "ip"
+	case isHex(v, 64):
+		return "hash_sha256"
+	case isHex(v, 40):
+		return "hash_sha1"
+	case isHex(v, 32):
+		return "hash_md5"
+	default:
+		return "domain"
+	}
+}
+
+func isHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *ToolDispatcher) getIncident(ctx context.Context, input map[string]any) (map[string]any, error) {
@@ -117,7 +162,7 @@ func (d *ToolDispatcher) queryVulns(ctx context.Context, input map[string]any) (
 		"severity": "severity", "asset_id": "asset_id",
 		"cve_id": "cve_id", "sla_breached": "sla_breached", "limit": "limit",
 	})
-	return httpGET(ctx, u+"/api/v1/findings?"+p)
+	return httpGET(ctx, u+"/api/v1/vuln/findings?"+p)
 }
 
 func (d *ToolDispatcher) analyzeAttackPath(ctx context.Context, input map[string]any) (map[string]any, error) {
@@ -182,7 +227,7 @@ func (d *ToolDispatcher) huntThreats(ctx context.Context, input map[string]any) 
 		"note":       "Threat hunt dispatched across siem, ueba, and ti sources.",
 	}
 	if u, ok := d.serviceURLs["siem"]; ok {
-		if stats, err := httpGET(ctx, u+"/api/v1/alerts/stats"); err == nil {
+		if stats, err := httpGET(ctx, u+"/api/v1/siem/alerts/stats"); err == nil {
 			results["siem_stats"] = stats
 		}
 	}
@@ -192,7 +237,7 @@ func (d *ToolDispatcher) huntThreats(ctx context.Context, input map[string]any) 
 		}
 	}
 	if u, ok := d.serviceURLs["ti"]; ok {
-		if data, err := httpGET(ctx, u+"/api/v1/iocs?limit=5"); err == nil {
+		if data, err := httpGET(ctx, u+"/api/v1/ti/iocs?limit=5"); err == nil {
 			results["active_iocs"] = data
 		}
 	}
@@ -226,11 +271,72 @@ func httpGET(ctx context.Context, rawURL string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeToolResponse(rawURL, resp.StatusCode, body), nil
+}
+
+// httpPOST is httpGET for the endpoints that take a body. The IOC lookup is
+// one: it is a POST because the indicator does not belong in a URL, where it
+// would be written to every access log between here and the service.
+func httpPOST(ctx context.Context, rawURL string, payload any) (map[string]any, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	token := authctx.Token(ctx)
+	if token == "" {
+		return nil, fmt.Errorf("no caller token in context: cannot query a service on the user's behalf")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("service call failed: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // read-only
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return decodeToolResponse(rawURL, resp.StatusCode, body), nil
+}
+
+// decodeToolResponse turns a service's answer into something the model can
+// reason about — and says plainly when the call failed.
+//
+// A 404 page used to come back as {"raw": "404 page not found"}, which reads
+// like data. The model then reported "no alerts" for a service that was never
+// asked, and the mistake was invisible: the answer was fluent and wrong.
+func decodeToolResponse(rawURL string, status int, body []byte) map[string]any {
+	if status < 200 || status >= 300 {
+		return map[string]any{
+			"error":       true,
+			"status_code": status,
+			"detail": fmt.Sprintf("the platform refused this call (%d). "+
+				"Do not treat this as an empty result — the data was not read.", status),
+			"body": truncateBody(body),
+		}
+	}
 	var result map[string]any
 	if err := json.Unmarshal(body, &result); err != nil {
-		return map[string]any{"raw": string(body), "status_code": resp.StatusCode}, nil
+		return map[string]any{"raw": truncateBody(body), "status_code": status}
 	}
-	return result, nil
+	return result
+}
+
+func truncateBody(body []byte) string {
+	const limit = 500
+	s := strings.TrimSpace(string(body))
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "…"
 }
 
 func buildQueryParams(input map[string]any, mapping map[string]string) string {

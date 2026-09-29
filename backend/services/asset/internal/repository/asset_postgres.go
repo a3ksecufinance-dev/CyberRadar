@@ -34,6 +34,26 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 		tags = req.Tags
 	}
 
+	// ip_addresses, mac_addresses and metadata are NOT NULL with a default,
+	// and a nil here is sent as NULL rather than left out — so every create
+	// that omitted an optional field failed on a constraint the API never
+	// said it had. The columns want "empty", which is what absent means.
+	ips := req.IPAddresses
+	if ips == nil {
+		ips = []string{}
+	}
+	macs := req.MACAddresses
+	if macs == nil {
+		macs = []string{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	metadata := req.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
 	const q = `
 		INSERT INTO assets (
 			id, tenant_id, name, hostname, fqdn,
@@ -51,12 +71,12 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 
 	row := r.db.QueryRow(ctx, q,
 		id, tenantID, req.Name, nvlStr(req.Hostname), nvlStr(req.FQDN),
-		req.IPAddresses, req.MACAddresses,
+		ips, macs,
 		req.AssetType, nvlStr(req.OS), nvlStr(req.OSVersion),
 		req.Criticality, env,
 		req.OwnerID, nvlStr(req.Department), nvlStr(req.Location), nvlStr(req.BusinessService),
 		req.IsCBSConnected, req.IsSWIFTConnected, req.IsPCIScope,
-		tags, req.Metadata, "manual",
+		tags, metadata, "manual",
 	)
 
 	var createdAt, updatedAt, firstSeen time.Time

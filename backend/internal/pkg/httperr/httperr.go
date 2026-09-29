@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
 	"github.com/cyberradar/platform/internal/pkg/response"
@@ -41,8 +42,13 @@ const (
 //
 // Order matters: a domain error carries the service's own judgement and wins
 // over whatever the driver said underneath it.
+//
+// It logs through the global logger rather than discarding the error. A 500 is
+// the one answer that tells the caller nothing, so a 500 that leaves no trace
+// anywhere cannot be diagnosed at all — which is how an asset that could never
+// be created answered "an internal error occurred" and wrote not one line.
 func Write(w http.ResponseWriter, err error) {
-	WriteLogged(w, err, zerolog.Nop())
+	WriteLogged(w, err, log.Logger)
 }
 
 // WriteLogged is Write, and logs the errors it turns into a 500 — the only
@@ -85,7 +91,13 @@ func writeDomain(w http.ResponseWriter, err error) bool {
 	case apierrors.KindBadInput:
 		response.BadRequest(w, "BAD_INPUT", msg)
 	default:
-		response.InternalError(w)
+		// KindInternal is the absence of a judgement, not one of its own: the
+		// service met an error it could not classify and said so. The driver
+		// underneath usually can, so hand it on instead of answering 500 on
+		// the strength of the wrapper. A not-null violation wrapped this way
+		// was reaching callers as "an internal error occurred" when the honest
+		// answer — which field, and that it is required — was one layer down.
+		return false
 	}
 	return true
 }

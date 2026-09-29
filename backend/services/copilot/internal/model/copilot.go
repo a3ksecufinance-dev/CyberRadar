@@ -107,7 +107,14 @@ type AnthropicMessage struct {
 	Content []AnthropicContent `json:"content"`
 }
 
-// AnthropicContent is a content block (text or tool_use/tool_result).
+// AnthropicContent is a content block: text, tool_use, tool_result, or one of
+// the thinking blocks the model emits when extended thinking is on.
+//
+// The thinking fields are not decoration. The agentic loop sends the
+// assistant's content back verbatim on the next turn, and a thinking block
+// returned without its signature is rejected — so a type that dropped these
+// fields on the way through would turn every tool call into a 400 as soon as
+// thinking was enabled.
 type AnthropicContent struct {
 	Type      string         `json:"type"`
 	Text      string         `json:"text,omitempty"`
@@ -117,6 +124,11 @@ type AnthropicContent struct {
 	ToolUseID string         `json:"tool_use_id,omitempty"` // for tool_result
 	Content   string         `json:"content,omitempty"`     // for tool_result
 	IsError   bool           `json:"is_error,omitempty"`
+
+	// Thinking blocks, returned and sent back untouched.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"` // redacted_thinking
 }
 
 // AnthropicTool defines a tool for Claude tool use.
@@ -126,13 +138,21 @@ type AnthropicTool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// AnthropicOutputConfig carries the knobs that shape the answer rather than
+// its content. On the current models the depth of thinking is set here, not
+// through a token budget.
+type AnthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
+}
+
 // AnthropicRequest is the full payload for POST /v1/messages.
 type AnthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system"`
-	Messages  []AnthropicMessage `json:"messages"`
-	Tools     []AnthropicTool    `json:"tools,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       string                 `json:"system"`
+	Messages     []AnthropicMessage     `json:"messages"`
+	Tools        []AnthropicTool        `json:"tools,omitempty"`
+	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 // AnthropicResponse is the response from the Claude Messages API.

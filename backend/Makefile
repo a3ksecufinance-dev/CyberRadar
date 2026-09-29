@@ -116,6 +116,7 @@ build: ## Build all service binaries
 	go build -o bin/mobile-service ./services/mobile/cmd/server/
 	go build -o bin/dspm-service ./services/dspm/cmd/server/
 	go build -o bin/syslog-connector ./services/syslog/cmd/server/
+	go build -o bin/demo-seed ./internal/cmd/demoseed/
 	@echo "Build complete → bin/"
 
 build-tenant: ## Build tenant service only
@@ -163,6 +164,9 @@ docker-build: ## Build Docker images for all services
 
 syslog-certs: ## Generate self-signed TLS certs for syslog connector (dev only)
 	./scripts/gen-syslog-certs.sh
+
+demo: ## Fill the tenant with a demonstration estate, through the platform's own API
+	go run ./internal/cmd/demoseed/
 
 vault-seed: ## Load development secrets into Vault (dev only)
 	./scripts/vault-seed.sh
