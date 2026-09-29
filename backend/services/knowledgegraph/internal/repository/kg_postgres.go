@@ -264,14 +264,20 @@ func (r *KGRepository) DeleteRelationship(ctx context.Context, tenantID, relID u
 
 // ListRelationships returns edges for a given entity (source or target depending on direction).
 func (r *KGRepository) ListRelationships(ctx context.Context, tenantID, entityID uuid.UUID, direction string) ([]*model.KGRelationship, error) {
+	// live is the same window the traversal uses: a relationship counts when
+	// now falls inside [valid_from, valid_until). Listing and traversing must
+	// agree, or an analyst sees an edge here that the graph view does not draw.
+	const live = ` AND (valid_from IS NULL OR valid_from <= NOW())
+		 AND (valid_until IS NULL OR valid_until > NOW())`
+
 	var q string
 	switch direction {
 	case "inbound":
-		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND target_id=$2 AND (valid_until IS NULL OR valid_until > NOW()) ORDER BY updated_at DESC`
+		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND target_id=$2` + live + ` ORDER BY updated_at DESC`
 	case "outbound":
-		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND source_id=$2 AND (valid_until IS NULL OR valid_until > NOW()) ORDER BY updated_at DESC`
+		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND source_id=$2` + live + ` ORDER BY updated_at DESC`
 	default: // both
-		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND (source_id=$2 OR target_id=$2) AND (valid_until IS NULL OR valid_until > NOW()) ORDER BY updated_at DESC`
+		q = `SELECT ` + relSelect + ` FROM kg_relationships WHERE tenant_id=$1 AND (source_id=$2 OR target_id=$2)` + live + ` ORDER BY updated_at DESC`
 	}
 	rows, err := r.db.Query(ctx, q, tenantID, entityID)
 	if err != nil {
@@ -291,157 +297,62 @@ func (r *KGRepository) ListRelationships(ctx context.Context, tenantID, entityID
 
 // ─── Graph Traversal ──────────────────────────────────────────────────────────
 
-// Neighbors performs BFS up to maxHops using a recursive CTE.
-// direction: "outbound" | "inbound" | "both"
+// Neighbors walks outward from one entity. The walk itself is in traversal.go
+// and shared with the Neo4j store; this supplies PostgreSQL's answer to "which
+// live relationships touch these entities?".
 func (r *KGRepository) Neighbors(ctx context.Context, q model.NeighborQuery) ([]model.KGNeighbor, error) {
-	if q.MaxHops <= 0 {
-		q.MaxHops = 2
-	}
-	if q.MaxHops > 5 {
-		q.MaxHops = 5
-	}
-
-	// Build the direction-specific join condition
-	var srcCol, dstCol string
-	switch q.Direction {
-	case "inbound":
-		srcCol, dstCol = "target_id", "source_id"
-	default: // outbound or both — handled below
-		srcCol, dstCol = "source_id", "target_id"
-	}
-
-	var traversalCTE string
-	if q.Direction == "both" {
-		traversalCTE = `
-		WITH RECURSIVE graph(entity_id, path, depth, rel_id, rel_type, src_id, tgt_id) AS (
-		    SELECT r.target_id, ARRAY[r.source_id, r.target_id]::uuid[], 1,
-		           r.id, r.relationship_type, r.source_id, r.target_id
-		    FROM kg_relationships r
-		    WHERE r.source_id = $1 AND r.tenant_id = $2
-		      AND (r.valid_until IS NULL OR r.valid_until > NOW())
-		    UNION ALL
-		    SELECT r.source_id, g.path || r.source_id, g.depth + 1,
-		           r.id, r.relationship_type, r.source_id, r.target_id
-		    FROM kg_relationships r
-		    WHERE r.target_id = $1 AND r.tenant_id = $2
-		      AND (r.valid_until IS NULL OR r.valid_until > NOW())
-		    UNION ALL
-		    SELECT r.target_id, g.path || r.target_id, g.depth + 1,
-		           r.id, r.relationship_type, r.source_id, r.target_id
-		    FROM kg_relationships r
-		    JOIN graph g ON r.source_id = g.entity_id
-		    WHERE r.tenant_id = $2 AND g.depth < $3
-		      AND NOT (r.target_id = ANY(g.path))
-		      AND (r.valid_until IS NULL OR r.valid_until > NOW())
-		)`
-	} else {
-		traversalCTE = fmt.Sprintf(`
-		WITH RECURSIVE graph(entity_id, path, depth, rel_id, rel_type, src_id, tgt_id) AS (
-		    SELECT r.%s, ARRAY[r.%s, r.%s]::uuid[], 1,
-		           r.id, r.relationship_type, r.source_id, r.target_id
-		    FROM kg_relationships r
-		    WHERE r.%s = $1 AND r.tenant_id = $2
-		      AND (r.valid_until IS NULL OR r.valid_until > NOW())
-		    UNION ALL
-		    SELECT r.%s, g.path || r.%s, g.depth + 1,
-		           r.id, r.relationship_type, r.source_id, r.target_id
-		    FROM kg_relationships r
-		    JOIN graph g ON r.%s = g.entity_id
-		    WHERE r.tenant_id = $2 AND g.depth < $3
-		      AND NOT (r.%s = ANY(g.path))
-		      AND (r.valid_until IS NULL OR r.valid_until > NOW())
-		)`, dstCol, srcCol, dstCol, srcCol,
-			dstCol, dstCol, srcCol, dstCol)
-	}
-
-	fullQuery := traversalCTE + `
-	SELECT DISTINCT ON (entity_id)
-	    g.entity_id, g.path, g.depth, g.rel_id, g.rel_type, g.src_id, g.tgt_id
-	FROM graph g
-	ORDER BY entity_id, depth`
-
-	rows, err := r.db.Query(ctx, fullQuery, q.EntityID, q.TenantID, q.MaxHops)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	type rawNeighbor struct {
-		entityID uuid.UUID
-		path     []uuid.UUID
-		depth    int
-		relID    uuid.UUID
-		relType  string
-		srcID    uuid.UUID
-		tgtID    uuid.UUID
-	}
-
-	var raws []rawNeighbor
-	relIDs := make([]uuid.UUID, 0)
-	entityIDs := make([]uuid.UUID, 0)
-	for rows.Next() {
-		var rn rawNeighbor
-		if err := rows.Scan(&rn.entityID, &rn.path, &rn.depth, &rn.relID, &rn.relType, &rn.srcID, &rn.tgtID); err != nil {
-			return nil, err
-		}
-		raws = append(raws, rn)
-		relIDs = append(relIDs, rn.relID)
-		entityIDs = append(entityIDs, rn.entityID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	// Batch fetch entity and relationship objects
-	entityMap, err := r.GetEntitiesByIDs(ctx, q.TenantID, entityIDs)
-	if err != nil {
-		return nil, err
-	}
-	relMap, err := r.getRelsByIDs(ctx, q.TenantID, relIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	neighbors := make([]model.KGNeighbor, 0, len(raws))
-	for _, rn := range raws {
-		e, ok := entityMap[rn.entityID]
-		if !ok {
-			continue
-		}
-		rel, ok := relMap[rn.relID]
-		if !ok {
-			continue
-		}
-		neighbors = append(neighbors, model.KGNeighbor{
-			Entity:       *e,
-			Relationship: *rel,
-			Depth:        rn.depth,
-			Path:         rn.path,
+	return walk(ctx, q,
+		func(ctx context.Context, frontier []uuid.UUID) ([]*model.KGRelationship, error) {
+			return r.adjacentRelationships(ctx, q.TenantID, frontier, q.Direction, q.RelTypes)
+		},
+		func(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]*model.KGEntity, error) {
+			return r.GetEntitiesByIDs(ctx, q.TenantID, ids)
 		})
-	}
-	return neighbors, nil
 }
 
-func (r *KGRepository) getRelsByIDs(ctx context.Context, tenantID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*model.KGRelationship, error) {
-	if len(ids) == 0 {
-		return map[uuid.UUID]*model.KGRelationship{}, nil
+// adjacentRelationships returns the live relationships touching any entity in
+// the frontier, in the requested direction and of the requested types.
+//
+// A relationship is live when now falls inside [valid_from, valid_until).
+// valid_from was recorded and never checked, so a relationship an analyst had
+// declared effective from next month was already being traversed.
+func (r *KGRepository) adjacentRelationships(ctx context.Context, tenantID uuid.UUID,
+	frontier []uuid.UUID, direction string, relTypes []string) ([]*model.KGRelationship, error) {
+
+	var touches string
+	switch direction {
+	case "outbound":
+		touches = `source_id = ANY($2)`
+	case "inbound":
+		touches = `target_id = ANY($2)`
+	default: // both
+		touches = `(source_id = ANY($2) OR target_id = ANY($2))`
 	}
-	rows, err := r.db.Query(ctx,
-		`SELECT `+relSelect+` FROM kg_relationships WHERE tenant_id=$1 AND id=ANY($2)`,
-		tenantID, ids)
+
+	rows, err := r.db.Query(ctx, `
+		SELECT `+relSelect+`
+		FROM kg_relationships
+		WHERE tenant_id = $1
+		  AND `+touches+`
+		  AND (valid_from IS NULL OR valid_from <= NOW())
+		  AND (valid_until IS NULL OR valid_until > NOW())
+		  AND (cardinality($3::text[]) = 0 OR relationship_type = ANY($3))
+		ORDER BY id`,
+		tenantID, frontier, relTypeFilter(relTypes))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	m := make(map[uuid.UUID]*model.KGRelationship, len(ids))
+
+	var out []*model.KGRelationship
 	for rows.Next() {
 		rel, err := scanRel(rows)
 		if err != nil {
 			return nil, err
 		}
-		m[rel.ID] = rel
+		out = append(out, rel)
 	}
-	return m, rows.Err()
+	return out, rows.Err()
 }
 
 // Subgraph returns entities and relationships for a given set of entity IDs.
@@ -584,57 +495,74 @@ func (r *KGRepository) ListObservations(ctx context.Context, f model.Observation
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 // Stats returns the knowledge graph dashboard summary.
+// Stats summarises a tenant's graph.
+//
+// Every query's error used to be discarded, so a failing count read as zero —
+// and the dashboard's "total entities" card, which this feeds, showed an empty
+// estate rather than saying it could not tell. A number nobody can distinguish
+// from "none" is worse than an error.
 func (r *KGRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.KGStats, error) {
 	stats := &model.KGStats{
 		EntitiesByType: make(map[string]int),
 		RelsByType:     make(map[string]int),
 	}
 
-	// Total entities and high-risk
-	r.db.QueryRow(ctx,
+	if err := r.db.QueryRow(ctx,
 		`SELECT COUNT(*), COUNT(*) FILTER (WHERE risk_score >= 7) FROM kg_entities WHERE tenant_id=$1`,
-		tenantID).Scan(&stats.TotalEntities, &stats.HighRiskEntities)
+		tenantID).Scan(&stats.TotalEntities, &stats.HighRiskEntities); err != nil {
+		return nil, fmt.Errorf("count entities: %w", err)
+	}
 
-	// Entities by type
-	rows, err := r.db.Query(ctx,
+	if err := r.countByType(ctx, tenantID,
 		`SELECT entity_type, COUNT(*) FROM kg_entities WHERE tenant_id=$1 GROUP BY entity_type`,
-		tenantID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var t string
-			var c int
-			rows.Scan(&t, &c)
-			stats.EntitiesByType[t] = c
-		}
+		stats.EntitiesByType); err != nil {
+		return nil, fmt.Errorf("entities by type: %w", err)
 	}
 
-	// Total relationships
-	r.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM kg_relationships WHERE tenant_id=$1 AND (valid_until IS NULL OR valid_until > NOW())`,
-		tenantID).Scan(&stats.TotalRelationships)
-
-	// Relationships by type
-	rows2, err := r.db.Query(ctx,
-		`SELECT relationship_type, COUNT(*) FROM kg_relationships WHERE tenant_id=$1 AND (valid_until IS NULL OR valid_until > NOW()) GROUP BY relationship_type`,
-		tenantID)
-	if err == nil {
-		defer rows2.Close()
-		for rows2.Next() {
-			var t string
-			var c int
-			rows2.Scan(&t, &c)
-			stats.RelsByType[t] = c
-		}
+	if err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM kg_relationships
+		 WHERE tenant_id=$1
+		   AND (valid_from IS NULL OR valid_from <= NOW())
+		   AND (valid_until IS NULL OR valid_until > NOW())`,
+		tenantID).Scan(&stats.TotalRelationships); err != nil {
+		return nil, fmt.Errorf("count relationships: %w", err)
 	}
 
-	// Total observations + last 24h
+	if err := r.countByType(ctx, tenantID,
+		`SELECT relationship_type, COUNT(*) FROM kg_relationships
+		 WHERE tenant_id=$1
+		   AND (valid_from IS NULL OR valid_from <= NOW())
+		   AND (valid_until IS NULL OR valid_until > NOW())
+		 GROUP BY relationship_type`,
+		stats.RelsByType); err != nil {
+		return nil, fmt.Errorf("relationships by type: %w", err)
+	}
+
 	since24h := time.Now().UTC().Add(-24 * time.Hour)
-	r.db.QueryRow(ctx,
+	if err := r.db.QueryRow(ctx,
 		`SELECT COUNT(*), COUNT(*) FILTER (WHERE observed_at >= $2) FROM kg_observations WHERE tenant_id=$1`,
-		tenantID, since24h).Scan(&stats.TotalObservations, &stats.RecentObservations)
+		tenantID, since24h).Scan(&stats.TotalObservations, &stats.RecentObservations); err != nil {
+		return nil, fmt.Errorf("count observations: %w", err)
+	}
 
 	return stats, nil
+}
+
+func (r *KGRepository) countByType(ctx context.Context, tenantID uuid.UUID, query string, into map[string]int) error {
+	rows, err := r.db.Query(ctx, query, tenantID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		var count int
+		if err := rows.Scan(&kind, &count); err != nil {
+			return err
+		}
+		into[kind] = count
+	}
+	return rows.Err()
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

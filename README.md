@@ -407,7 +407,27 @@ mais trois règles valent pour quiconque y touche :
 
 Après une écriture manuelle, un incident ou une reprise, `make graph-reconcile`
 liste ce qui diverge ; `make graph-backfill` recopie PostgreSQL dans Neo4j puis
-vérifie.
+vérifie. Le knowledge graph a les mêmes : `make kg-reconcile`, `make kg-backfill`.
+
+### Parcourir un graphe
+
+Les deux graphes partagent une règle : **l'algorithme de parcours vit hors des
+magasins**, et chaque magasin ne répond qu'à une question — « quelles relations
+touchent ces entités ? ». Une différence entre PostgreSQL et Neo4j ne peut alors
+venir que des données ou de cette requête, jamais de deux parcours qui divergent.
+
+Trois pièges, tous rencontrés :
+
+- **Déduplication globale, pas par chemin.** Exclure les répétitions chemin par
+  chemin énumère les chemins simples : sur un nœud de concentration, cinq sauts
+  font des milliards de lignes. L'ensemble des visités est global, et chaque
+  entité revient à la profondeur la plus courte qui l'atteint.
+- **Une réponse partielle silencieuse est pire qu'une erreur.** Au-delà de
+  `maxNeighbors`, la traversée refuse en nommant la limite, plutôt que de
+  renvoyer un sous-ensemble que personne ne peut distinguer du tout.
+- **Une relation « en vigueur », c'est `[valid_from, valid_until)`.** Les deux
+  bornes, des deux côtés, à la lecture comme à la liste — sinon la vue graphe et
+  la liste de relations se contredisent.
 
 ### Secrets
 
@@ -428,7 +448,7 @@ indiscernable d'un succès dans la sortie de CI : chacun lit une variable
 d'environnement qui transforme le saut en échec, et la CI les pose toutes —
 `REDIS_TEST_URL`, `PAM_TEST_DSN`, `COPILOT_TEST_DSN`, `IR_TEST_DSN`,
 `IDENTITY_TEST_DSN`, `DASHBOARD_TEST_CH`, `ATTACKPATH_TEST_DSN`,
-`ATTACKPATH_TEST_NEO4J`. Si vous ajoutez un test qui parle à une base, suivez ce
+`ATTACKPATH_TEST_NEO4J`, `KG_TEST_DSN`, `KG_TEST_NEO4J`. Si vous ajoutez un test qui parle à une base, suivez ce
 motif plutôt que de le faire sauter en silence.
 
 Les tests de `internal/pkg/jwt`, `authmw` et `observe` couvrent des propriétés
@@ -459,6 +479,9 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Les contraintes de relation sont Enterprise | Sur Community, l'unicité d'une arête tient par `MERGE` sur sa clé naturelle — donc aucune autre écriture ne doit créer de relation. |
 | Le pilote Neo4j réessaie 30 s par défaut | Sur le chemin d'une requête, cela fait 30 s par écriture quand le miroir est tombé. `MaxTransactionRetryTime` et un contexte borné. |
 | Une colonne annulable ne se lit pas dans un `int` | `last_run_ms` rendait 500 toute lecture de scénario avant sa première exécution. `COALESCE(col, 0)` à la lecture. |
+| Cypher ne paramètre pas un type de relation | Table fixe indexée par les constantes du modèle, type inconnu refusé avant toute construction de requête. |
+| Une suppression doit atteindre le miroir | Une relation supprimée mais laissée dans Neo4j est parcourue : elle affirme quelque chose de faux, ce qui est pire qu'une absence. |
+| `direction=both` du knowledge graph était du SQL invalide | Le CTE récursif référençait le terme récursif depuis une branche d'amorce. C'était la valeur par défaut du handler et la seule direction d'`Enrich`. |
 
 ---
 
@@ -473,13 +496,13 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 - **`unblock_ip` et `unisolate_host` attendent le `policy_id`** renvoyé par
   l'étape qui a posé la règle. netsec n'expose pas de suppression : la règle
   passe en `log` plutôt que d'être retirée, ce qui laisse la trace.
-- **Neo4j est un miroir, pas la source de vérité.** Attack Path y écrit en
-  double ; PostgreSQL reste la référence et les lectures n'y passent que si
-  `ATTACKPATH_GRAPH_READS=neo4j`. Un échec du miroir ne fait pas échouer
-  l'écriture — il est compté — donc les deux magasins peuvent diverger :
-  `make graph-reconcile` dit en quoi, et sort en code non nul si c'est le cas.
-  Ne basculez les lectures qu'après un rapport en parité. Knowledge Graph, lui,
-  est toujours entièrement en PostgreSQL. Voir §3.5 de l'audit.
+- **Neo4j est un miroir, pas la source de vérité.** Attack Path et Knowledge
+  Graph y écrivent en double ; PostgreSQL reste la référence et les lectures n'y
+  passent que si `ATTACKPATH_GRAPH_READS` / `KG_GRAPH_READS` valent `neo4j`. Un
+  échec du miroir ne fait pas échouer l'écriture — il est compté — donc les deux
+  magasins peuvent diverger : `make graph-reconcile` et `make kg-reconcile`
+  disent en quoi, et sortent en code non nul si c'est le cas. Ne basculez les
+  lectures qu'après un rapport en parité. Voir §3.5 et §3.9 de l'audit.
 - **Les compteurs de détection ont besoin d'un Redis en `noeviction`.** Le Redis
   de développement est en `allkeys-lru`, qui peut évincer une clé de comptage
   sous pression mémoire — donc perdre un seuil sans bruit.

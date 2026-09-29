@@ -12,6 +12,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	"github.com/cyberradar/platform/internal/pkg/graphdb"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/kpi"
@@ -79,15 +80,10 @@ func main() {
 	// source of truth, and a traversal on a drifted graph reports attack paths
 	// that do not exist.
 	var graphOpts []service.Option
-	if uri := os.Getenv("NEO4J_URI"); uri != "" {
-		neoStore, err := repository.NewNeo4jGraphStore(ctx, repository.Neo4jConfig{
-			URI:      uri,
-			Username: os.Getenv("NEO4J_USERNAME"),
-			Password: os.Getenv("NEO4J_PASSWORD"),
-			Database: os.Getenv("NEO4J_DATABASE"),
-		}, graphRepo)
+	if cfg, configured := graphdb.FromEnv(os.Getenv); configured {
+		neoStore, err := repository.NewNeo4jGraphStore(ctx, cfg, graphRepo)
 		if err != nil {
-			logger.Fatal().Err(err).Str("uri", uri).Msg("neo4j connect failed")
+			logger.Fatal().Err(err).Str("uri", cfg.URI).Msg("neo4j connect failed")
 		}
 		defer func() { _ = neoStore.Close(context.Background()) }()
 		graphOpts = append(graphOpts, service.WithMirror(neoStore))
@@ -96,7 +92,7 @@ func main() {
 		if reads == "neo4j" {
 			graphOpts = append(graphOpts, service.WithGraphStore(neoStore))
 		}
-		logger.Info().Str("uri", uri).Str("reads", reads).Msg("neo4j graph mirror enabled")
+		logger.Info().Str("uri", cfg.URI).Str("reads", reads).Msg("neo4j graph mirror enabled")
 	}
 
 	attackSvc := service.NewAttackPathService(graphRepo, logger, graphOpts...)

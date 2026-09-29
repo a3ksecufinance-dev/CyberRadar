@@ -70,6 +70,8 @@ jobs:
       DASHBOARD_TEST_CH: localhost:9000
       ATTACKPATH_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       ATTACKPATH_TEST_NEO4J: bolt://localhost:7687
+      KG_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      KG_TEST_NEO4J: bolt://localhost:7687
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: crp_password_dev
     steps:

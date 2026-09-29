@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate fmt tidy graph-reconcile graph-backfill
+.PHONY: help dev down build test lint migrate fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -64,6 +64,16 @@ graph-backfill: ## Copy the attack graph from PostgreSQL into Neo4j, then verify
 	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
 	go run ./services/attackpath/cmd/reconcile/ -backfill
 
+kg-reconcile: ## Compare the knowledge graph in PostgreSQL and Neo4j
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/knowledgegraph/cmd/reconcile/
+
+kg-backfill: ## Copy the knowledge graph from PostgreSQL into Neo4j, then verify
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/knowledgegraph/cmd/reconcile/ -backfill
+
 migrate-status: ## Show migration status
 	PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
 		-c "SELECT schemaname, tablename, tableowner FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
@@ -86,6 +96,7 @@ build: ## Build all service binaries
 	go build -o bin/vuln-service ./services/vuln/cmd/server/
 	go build -o bin/attackpath-service ./services/attackpath/cmd/server/
 	go build -o bin/attackpath-reconcile ./services/attackpath/cmd/reconcile/
+	go build -o bin/kg-reconcile ./services/knowledgegraph/cmd/reconcile/
 	go build -o bin/knowledgegraph-service ./services/knowledgegraph/cmd/server/
 	go build -o bin/soar-service ./services/soar/cmd/server/
 	go build -o bin/dashboard-service ./services/dashboard/cmd/server/

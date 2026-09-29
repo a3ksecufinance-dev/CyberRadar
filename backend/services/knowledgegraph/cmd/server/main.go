@@ -13,6 +13,7 @@ import (
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	"github.com/cyberradar/platform/internal/pkg/graphdb"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/kpi"
@@ -62,7 +63,35 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	kgRepo := repository.NewKGRepository(pool)
-	kgSvc := service.NewKGService(kgRepo, logger)
+
+	// ── Neo4j, when a deployment has one ──────────────────────────────────────
+	//
+	// Configuring NEO4J_URI turns on the mirror: every entity and relationship
+	// goes to PostgreSQL and then to Neo4j. Traversals stay on PostgreSQL until
+	// KG_GRAPH_READS is set to "neo4j", and that switch is only defensible once
+	// `kg-reconcile` reports parity for the tenants in question.
+	//
+	// Startup fails on an unreachable Neo4j rather than carrying on without it:
+	// a mirror that is configured but silently not written drifts from the
+	// source of truth, and a traversal on a drifted graph asserts connections
+	// that do not exist.
+	var kgOpts []service.Option
+	if cfg, configured := graphdb.FromEnv(os.Getenv); configured {
+		neoStore, err := repository.NewNeo4jGraphStore(ctx, cfg, kgRepo)
+		if err != nil {
+			logger.Fatal().Err(err).Str("uri", cfg.URI).Msg("neo4j connect failed")
+		}
+		defer func() { _ = neoStore.Close(context.Background()) }()
+		kgOpts = append(kgOpts, service.WithMirror(neoStore))
+
+		reads := envOrDefault("KG_GRAPH_READS", "postgres")
+		if reads == "neo4j" {
+			kgOpts = append(kgOpts, service.WithGraphReader(neoStore))
+		}
+		logger.Info().Str("uri", cfg.URI).Str("reads", reads).Msg("neo4j graph mirror enabled")
+	}
+
+	kgSvc := service.NewKGService(kgRepo, logger, kgOpts...)
 	kgH := handler.NewKGHandler(kgSvc)
 
 	// ── Kafka consumer: auto-ingest entities from enriched events ─────────────

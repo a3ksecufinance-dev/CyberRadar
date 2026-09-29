@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/vault/api v1.14.0
 	github.com/jackc/pgx/v5 v5.6.0
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.5
 	github.com/prometheus/client_golang v1.19.1
 	github.com/redis/go-redis/v9 v9.5.3
 	github.com/rs/zerolog v1.33.0

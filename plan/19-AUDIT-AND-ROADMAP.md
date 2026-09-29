@@ -785,6 +785,83 @@ point de départ, au même titre que la matrice de permissions : arbitrer une
 gravité contre une autre est une décision d'appétit au risque qui appartient à
 l'établissement, pas au code.
 
+### 3.9 Le knowledge graph — un parcours qui n'a jamais fonctionné, puis Neo4j
+
+Le knowledge graph a exactement un endpoint de parcours,
+`GET /kg/entities/{id}/neighbors`, et c'est le seul moyen de répondre à la
+question qu'un analyste pose réellement : *à quoi cette adresse IP est-elle
+reliée ?* Il n'a jamais fonctionné.
+
+**`direction=both` — la valeur par défaut — était du SQL invalide.** Le CTE
+récursif comportait trois branches `UNION ALL` ; la deuxième référençait
+`g.path` et `g.depth` sans jointure sur `graph`. PostgreSQL refuse :
+`missing FROM-clause entry for table "g"`. Le handler met `both` par défaut, et
+`Enrich` — la vue enrichie d'une entité — ne connaît pas d'autre direction.
+Vérifié en exécutant la requête telle qu'elle était écrite, pas en la lisant.
+
+**Et `Enrich` transformait l'échec en silence.** L'erreur du parcours était
+journalisée en `warn`, puis l'entité était renvoyée avec une liste de voisins
+vide. L'enrichissement d'une IP a donc toujours répondu « aucune relation
+connue », sans que rien ne distingue cela d'un graphe réellement vide. C'est la
+réponse la plus coûteuse qu'un outil de sécurité puisse donner.
+
+**Trois autres défauts dans le même parcours :**
+
+1. **`rel_types` était analysé et ignoré.** Le handler le découpait, le service
+   le portait, la traversée ne le lisait jamais : restreindre une requête à
+   `CONNECTS_TO` renvoyait la même chose que ne rien restreindre. Même classe
+   que `include_types` du §3.5.
+2. **`valid_from` n'était jamais filtré.** Seul `valid_until` l'était. Une
+   relation déclarée effective le mois prochain était déjà parcourue — et
+   `ListRelationships` la listait aussi, donc la vue graphe et la liste de
+   relations pouvaient se contredire.
+3. **Le CTE énumérait les chemins simples**, pas les entités. L'exclusion
+   (`NOT (id = ANY(path))`) était par chemin, pas globale : sur un nœud de
+   concentration — un rebond partagé, une IP de sortie d'entreprise — cinq sauts
+   avec un facteur de branchement de cent, c'est dix milliards de lignes. Un
+   danger de production, pas une lenteur.
+
+**Le parcours est réécrit en expansion saut par saut**, avec un ensemble de
+visités global : chaque entité revient à la profondeur la plus courte qui
+l'atteint, le travail est linéaire en arêtes, et au-delà de 2000 entités
+atteintes la traversée **refuse** au lieu de renvoyer un sous-ensemble
+arbitraire — une réponse partielle silencieuse à « à quoi est-ce relié » est la
+seule qu'on ne puisse pas vérifier.
+
+**L'algorithme vit hors des magasins** (`internal/repository/traversal.go`).
+Les deux magasins exécutent la même marche et ne diffèrent que sur une question :
+« quelles relations en vigueur touchent ces entités ? ». Une différence entre
+eux ne peut donc venir que des données ou de cette requête, jamais de deux
+implémentations de BFS qui divergent.
+
+**Neo4j, selon le même schéma qu'au §3.5** : `:KGEntity`, contrainte d'unicité
+sur `(tenant_id, id)`, double écriture sur les entités, les relations **et les
+suppressions** — une suppression qui n'atteint pas le miroir y laisse une
+relation que la traversée continue de parcourir, ce qui est pire qu'une relation
+manquante puisqu'elle affirme quelque chose de faux. `kg-reconcile`
+(`make kg-reconcile`) compare et sort en code non nul ; la bascule est
+`KG_GRAPH_READS=neo4j`. Les relations portent leur **vrai type Cypher**
+(`USES`, `RESOLVES_TO`…) plutôt qu'un type générique : Cypher ne paramètre pas
+un type de relation, donc la table des douze types est fixe et indexée par les
+constantes du modèle — aucune chaîne venue d'une requête n'atteint le texte
+Cypher, et un type inconnu est refusé avant toute construction.
+
+**Deux défauts trouvés en passant :**
+
+- **`evidence_source = 'collector'` était valide partout sauf en base.** Le
+  validateur de l'API l'accepte, le modèle le déclare, `kg_observations`
+  l'accepte — et la contrainte CHECK de `kg_relationships` le refusait. Le
+  collector est justement le service qui découvre le plus de relations
+  (`BELONGS_TO` entre un actif et son propriétaire). Migration `000036`.
+- **`Stats` jetait l'erreur de chacune de ses cinq requêtes.** Un échec se
+  lisait zéro : la carte « total entities » du tableau de bord montrait un parc
+  vide plutôt que de dire qu'elle ne savait pas.
+
+**Ce qui reste, ici aussi, c'est l'étape 5** : pousser la marche dans Cypher
+(`apoc.path.expandConfig` avec unicité globale, plus court chemin pondéré) au
+lieu de la piloter depuis Go. Tant que ce n'est pas fait, Neo4j rend les mêmes
+réponses — ce qui est précisément ce que les tests de parité vérifient.
+
 ---
 
 ## 4. Points forts à préserver
@@ -913,10 +990,10 @@ Aucun déploiement production sans cette phase.
   d'audit, et le SOAR autonome (portée `platform`).
 - **SOAR réel** — *fait*, voir §3.3. Les quinze actions appellent les services
   de remédiation ; un échec fait échouer l'étape.
-- **Neo4j** — *fait pour `attackpath`*, voir §3.5 : schéma, double écriture, commande de
-  réconciliation et bascule de lecture, tous exécutés contre un serveur 5.26 réel. Reste l'étape 5
-  (traversée en Cypher) et la migration de `knowledgegraph`, qui tient encore son graphe en
-  PostgreSQL — plus elle est tardive, plus la réécriture des couches repository/service coûte cher.
+- **Neo4j** — *fait*, voir §3.5 (`attackpath`) et §3.9 (`knowledgegraph`) : schéma, double
+  écriture, commande de réconciliation et bascule de lecture pour les deux, exécutés contre un
+  serveur 5.26 réel. Reste l'étape 5 pour l'un comme pour l'autre : pousser la traversée dans
+  Cypher et sortir le chargement du graphe du chemin chaud.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
   partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).
 - **DLQ + backoff exponentiel** sur Kafka — *fait*.

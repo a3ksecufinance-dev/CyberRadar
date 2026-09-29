@@ -1,21 +1,21 @@
-// Command reconcile compares the attack graph in PostgreSQL with the one in
+// Command reconcile compares the knowledge graph in PostgreSQL with the one in
 // Neo4j and reports what they disagree about.
 //
 // It is the safety gate of the Neo4j migration. Mirrored writes can fail — the
 // mirror is deliberately not allowed to fail a write to the source of truth —
-// so the two stores can drift, and a traversal reading a drifted graph reports
-// attack paths that do not exist, or misses the ones that do. Pointing reads at
-// Neo4j (ATTACKPATH_GRAPH_READS=neo4j) is only defensible once this reports
-// parity for the tenants concerned.
+// so the two stores can drift, and a traversal reading a drifted graph asserts
+// connections that do not exist, or misses the ones that do. Pointing reads at
+// Neo4j (KG_GRAPH_READS=neo4j) is only defensible once this reports parity for
+// the tenants concerned.
 //
 //	# what differs, for every active tenant
-//	attackpath-reconcile
+//	kg-reconcile
 //
 //	# copy PostgreSQL over Neo4j first, then verify
-//	attackpath-reconcile -backfill
+//	kg-reconcile -backfill
 //
 //	# one tenant, machine-readable, for a scheduled check
-//	attackpath-reconcile -tenant 0b3f… -json
+//	kg-reconcile -tenant 0b3f… -json
 //
 // It exits non-zero when the stores disagree, so a scheduled run is an alert
 // rather than a log line nobody reads.
@@ -32,7 +32,7 @@ import (
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/graphdb"
 	"github.com/cyberradar/platform/internal/pkg/kpi"
-	"github.com/cyberradar/platform/services/attackpath/internal/repository"
+	"github.com/cyberradar/platform/services/knowledgegraph/internal/repository"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -50,7 +50,7 @@ func main() {
 	defer cancel()
 
 	if err := run(ctx, *tenantFlag, *backfill, *asJSON); err != nil {
-		fmt.Fprintln(os.Stderr, "reconcile:", err)
+		fmt.Fprintln(os.Stderr, "kg-reconcile:", err)
 		os.Exit(2)
 	}
 }
@@ -68,7 +68,7 @@ func run(ctx context.Context, tenantFlag string, backfill, asJSON bool) error {
 	}
 	defer pool.Close()
 
-	store, err := repository.NewNeo4jGraphStore(ctx, cfg, repository.NewGraphRepository(pool))
+	store, err := repository.NewNeo4jGraphStore(ctx, cfg, repository.NewKGRepository(pool))
 	if err != nil {
 		return err
 	}
@@ -86,12 +86,12 @@ func run(ctx context.Context, tenantFlag string, backfill, asJSON bool) error {
 	diverged := 0
 	for _, tenantID := range tenants {
 		if backfill {
-			nodes, edges, err := store.MirrorTenant(ctx, tenantID)
+			entities, rels, err := store.MirrorTenant(ctx, tenantID)
 			if err != nil {
 				return fmt.Errorf("backfill %s: %w", tenantID, err)
 			}
 			if !asJSON {
-				fmt.Printf("%s  backfilled %d nodes, %d edges\n", tenantID, nodes, edges)
+				fmt.Printf("%s  backfilled %d entities, %d relationships\n", tenantID, entities, rels)
 			}
 		}
 		d, err := store.Reconcile(ctx, tenantID)
@@ -142,14 +142,15 @@ func report(d *repository.GraphDivergence) {
 	if !d.InParity() {
 		status = fmt.Sprintf("%d difference(s)", d.Count())
 	}
-	fmt.Printf("%s  postgres %d nodes / %d edges · neo4j %d nodes / %d edges — %s\n",
-		d.TenantID, d.NodesInPostgres, d.EdgesInPostgres, d.NodesInNeo4j, d.EdgesInNeo4j, status)
+	fmt.Printf("%s  postgres %d entities / %d relationships · neo4j %d / %d — %s\n",
+		d.TenantID, d.EntitiesInPostgres, d.RelationshipsInPostgres,
+		d.EntitiesInNeo4j, d.RelationshipsInNeo4j, status)
 
 	line := func(label string, ids []uuid.UUID) {
 		if len(ids) == 0 {
 			return
 		}
-		fmt.Printf("    %-22s %d", label, len(ids))
+		fmt.Printf("    %-32s %d", label, len(ids))
 		for i, id := range ids {
 			if i == 5 {
 				fmt.Printf("  …")
@@ -159,10 +160,10 @@ func report(d *repository.GraphDivergence) {
 		}
 		fmt.Println()
 	}
-	line("nodes only in postgres", d.NodesOnlyInPostgres)
-	line("nodes only in neo4j", d.NodesOnlyInNeo4j)
-	line("nodes differing", d.NodesDiffering)
-	line("edges only in postgres", d.EdgesOnlyInPostgres)
-	line("edges only in neo4j", d.EdgesOnlyInNeo4j)
-	line("edges differing", d.EdgesDiffering)
+	line("entities only in postgres", d.EntitiesOnlyInPostgres)
+	line("entities only in neo4j", d.EntitiesOnlyInNeo4j)
+	line("entities differing", d.EntitiesDiffering)
+	line("relationships only in postgres", d.RelsOnlyInPostgres)
+	line("relationships only in neo4j", d.RelsOnlyInNeo4j)
+	line("relationships differing", d.RelsDiffering)
 }

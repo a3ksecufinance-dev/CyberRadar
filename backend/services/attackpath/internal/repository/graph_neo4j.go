@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/graphdb"
 	"github.com/cyberradar/platform/services/attackpath/internal/model"
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -41,46 +42,17 @@ type Neo4jGraphStore struct {
 	database string
 }
 
-// Neo4jConfig is what a deployment supplies to reach Neo4j.
-type Neo4jConfig struct {
-	URI      string // bolt://host:7687 or neo4j://host:7687
-	Username string
-	Password string
-	Database string // "neo4j" when empty
-}
-
 // NewNeo4jGraphStore connects, verifies the connection and creates the schema.
 //
-// It fails rather than degrading: a mirror that is configured but unreachable
-// would drift from PostgreSQL silently, and a traversal reading a drifted graph
-// reports attack paths that do not exist — or misses the ones that do.
-func NewNeo4jGraphStore(ctx context.Context, cfg Neo4jConfig, pg *GraphRepository) (*Neo4jGraphStore, error) {
-	auth := neo4j.NoAuth()
-	if cfg.Username != "" {
-		auth = neo4j.BasicAuth(cfg.Username, cfg.Password, "")
-	}
-	driver, err := neo4j.NewDriverWithContext(cfg.URI, auth, func(c *neo4j.Config) {
-		// The driver's defaults retry a failed transaction for 30 seconds. A
-		// mirror write happens on the request path, so those defaults turn an
-		// unreachable Neo4j into a half-minute stall on every graph write —
-		// measured, not assumed. The mirror is allowed to fail; it is not
-		// allowed to make the primary store slow.
-		c.MaxTransactionRetryTime = 5 * time.Second
-		c.SocketConnectTimeout = 3 * time.Second
-		c.ConnectionAcquisitionTimeout = 5 * time.Second
-	})
+// The driver settings — in particular the bounded transaction retry — live in
+// internal/pkg/graphdb, so that the two services mirroring a graph cannot end
+// up with different ones.
+func NewNeo4jGraphStore(ctx context.Context, cfg graphdb.Config, pg *GraphRepository) (*Neo4jGraphStore, error) {
+	driver, err := graphdb.Open(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("neo4j driver: %w", err)
+		return nil, err
 	}
-	if err := driver.VerifyConnectivity(ctx); err != nil {
-		_ = driver.Close(ctx)
-		return nil, fmt.Errorf("neo4j at %s: %w", cfg.URI, err)
-	}
-	db := cfg.Database
-	if db == "" {
-		db = "neo4j"
-	}
-	s := &Neo4jGraphStore{GraphRepository: pg, driver: driver, database: db}
+	s := &Neo4jGraphStore{GraphRepository: pg, driver: driver, database: cfg.DatabaseOrDefault()}
 	if err := s.EnsureSchema(ctx); err != nil {
 		_ = driver.Close(ctx)
 		return nil, err
@@ -92,8 +64,7 @@ func NewNeo4jGraphStore(ctx context.Context, cfg Neo4jConfig, pg *GraphRepositor
 func (s *Neo4jGraphStore) Close(ctx context.Context) error { return s.driver.Close(ctx) }
 
 func (s *Neo4jGraphStore) query(ctx context.Context, cypher string, params map[string]any) (*neo4j.EagerResult, error) {
-	return neo4j.ExecuteQuery(ctx, s.driver, cypher, params,
-		neo4j.EagerResultTransformer, neo4j.ExecuteQueryWithDatabase(s.database))
+	return graphdb.Query(ctx, s.driver, s.database, cypher, params)
 }
 
 // ─── Schema ───────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/graphdb"
 	"github.com/cyberradar/platform/services/attackpath/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -26,7 +27,7 @@ func testNeo4j(t *testing.T, pg *GraphRepository) *Neo4jGraphStore {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	store, err := NewNeo4jGraphStore(ctx, Neo4jConfig{
+	store, err := NewNeo4jGraphStore(ctx, graphdb.Config{
 		URI:      uri,
 		Username: os.Getenv("NEO4J_USERNAME"),
 		Password: os.Getenv("NEO4J_PASSWORD"),
