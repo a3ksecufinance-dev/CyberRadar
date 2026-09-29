@@ -465,41 +465,11 @@ cmd_migrate() {
 # are not the same, and the mapping is a judgement rather than a translation.
 cmd_seed() {
 	step "Seeding identities"
-	PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" -v ON_ERROR_STOP=1 -q <<-'SQL'
-		WITH tenant AS (
-		    INSERT INTO tenants (name, slug, status)
-		    VALUES ('Banque Nationale de France', 'bnf', 'active')
-		    -- The unique indexes are partial (WHERE deleted_at IS NULL), so
-		    -- ON CONFLICT has to carry the same predicate to match one.
-		    ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET status = 'active'
-		    RETURNING id
-		), people(email, display_name, privilege, role_name) AS (
-		    VALUES
-		      ('admin@cyberradar.io', 'Platform Administrator', 'super_admin', 'super_admin'),
-		      ('ciso@bnf.fr',         'CISO',                  'elevated',    'ciso'),
-		      ('soc-l2@bnf.fr',       'SOC Analyst L2',        'standard',    'soc_analyst_l2'),
-		      ('soc-l1@bnf.fr',       'SOC Analyst L1',        'standard',    'soc_analyst_l1'),
-		      ('auditor@bnf.fr',      'Auditor',               'standard',    'auditor'),
-		      ('risk@bnf.fr',         'Risk Manager',          'standard',    'compliance_officer'),
-		      ('dpo@bnf.fr',          'Data Protection Officer','standard',   'compliance_officer')
-		), inserted AS (
-		    INSERT INTO identities (tenant_id, username, email, display_name, identity_type, privilege_level, status)
-		    SELECT tenant.id, split_part(p.email, '@', 1), p.email, p.display_name, 'user', p.privilege, 'active'
-		    FROM people p, tenant
-		    ON CONFLICT (tenant_id, username) WHERE deleted_at IS NULL DO UPDATE
-		      SET email = EXCLUDED.email,
-		          display_name = EXCLUDED.display_name,
-		          privilege_level = EXCLUDED.privilege_level,
-		          status = 'active'
-		    RETURNING id, email
-		)
-		INSERT INTO identity_roles (identity_id, role_id)
-		SELECT i.id, r.id
-		FROM inserted i
-		JOIN people p ON p.email = i.email
-		JOIN roles r ON r.name = p.role_name
-		ON CONFLICT DO NOTHING;
-	SQL
+	# The statements live in migrations/seed so that the Docker path and this
+	# script run exactly the same ones, rather than two copies free to drift.
+	PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" \
+		-v ON_ERROR_STOP=1 -q -f "$BACKEND_DIR/migrations/seed/001_identities.sql" \
+		|| { fail "seeding identities"; return 1; }
 	local n
 	n="$(PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" -tAc \
 		"SELECT count(*) FROM identities WHERE status='active'")"

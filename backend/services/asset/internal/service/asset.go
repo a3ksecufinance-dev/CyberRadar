@@ -29,12 +29,10 @@ func (s *AssetService) Create(ctx context.Context, tenantID uuid.UUID, req *mode
 		return nil, apierrors.Internal("create asset", err)
 	}
 
-	// Compute initial risk score
-	score, _ := ScoreAsset(a)
-	if updateErr := s.repo.UpdateRiskScore(ctx, tenantID, a.ID, score); updateErr != nil {
-		s.logger.Warn().Err(updateErr).Str("asset_id", a.ID.String()).Msg("risk_score_update_failed")
-	}
-	a.RiskScore = score
+	// The score is not computed and stored here any more: the repository reads
+	// it from asset_risk, where it is derived from the asset and its open
+	// findings. Storing it meant it was right exactly once — at creation, when
+	// the asset has no findings yet — and wrong from the first scan onwards.
 
 	s.logger.Info().
 		Str("asset_id", a.ID.String()).
@@ -66,7 +64,7 @@ func (s *AssetService) List(ctx context.Context, f model.AssetFilter) (*model.As
 	return result, nil
 }
 
-// Update applies a partial update to an asset and recomputes risk score.
+// Update applies a partial update to an asset.
 func (s *AssetService) Update(ctx context.Context, tenantID, assetID uuid.UUID, req *model.UpdateAssetRequest) (*model.Asset, error) {
 	existing, err := s.GetByID(ctx, tenantID, assetID)
 	if err != nil {
@@ -81,10 +79,6 @@ func (s *AssetService) Update(ctx context.Context, tenantID, assetID uuid.UUID, 
 	if a == nil {
 		return nil, apierrors.New(apierrors.KindNotFound, "asset not found")
 	}
-
-	score, _ := ScoreAsset(a)
-	_ = s.repo.UpdateRiskScore(ctx, tenantID, a.ID, score)
-	a.RiskScore = score
 
 	return a, nil
 }

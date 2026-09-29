@@ -484,6 +484,51 @@ Trois pièges, tous rencontrés :
   bornes, des deux côtés, à la lecture comme à la liste — sinon la vue graphe et
   la liste de relations se contredisent.
 
+### Tester la solution de bout en bout
+
+Deux chemins. Le premier ne demande que Docker ; le second ne demande pas
+Docker du tout. Les deux aboutissent à la même chose : trente services sur les
+mêmes ports, l'interface sur `http://localhost:3000`, et un jeu de
+démonstration à regarder.
+
+**Avec Docker** — il construit les images des services depuis le dépôt :
+
+```bash
+git clone -b claude/elegant-gauss-twfdeb \
+  https://github.com/a3ksecufinance-dev/CyberRadar.git
+cd CyberRadar/backend
+
+make dev            # infrastructure + Keycloak, migrations, identités, services
+make demo           # le jeu de démonstration, via l'API
+
+cd ../frontend && cp .env.example .env.local && npm install && npm run dev
+```
+
+`make migrate`, `make seed` et `make demo` ont besoin de `psql` et de Go sur la
+machine ; tout le reste tourne en conteneur.
+
+**Sans Docker** — voir la section suivante : `./scripts/dev-local.sh up` puis
+`./scripts/dev-local.sh demo`.
+
+**Puis** : `http://localhost:3000`, connexion `admin@cyberradar.io` /
+`Admin@CyberRadar2025!`. La console Keycloak est sur `http://localhost:8080`
+(`admin` / même mot de passe).
+
+Ce qu'il faut regarder en premier, une fois connecté :
+
+| Page | Ce que le jeu de démonstration y met |
+|---|---|
+| Tableau de bord | 5 alertes ouvertes, 5 incidents, 11 indicateurs actifs, 21 chemins d'attaque |
+| Actifs | 14 actifs, score de risque de 3,5 à 7,5, 3 au-dessus du seuil |
+| Vulnérabilités | 10 CVE réelles, 15 constats, CVSS moyen 8,8 |
+| SIEM | 5 alertes **levées par le moteur** à partir de 39 événements injectés |
+| Chemins d'attaque | 3 scénarios analysés, 21 chemins, 2 points de passage obligé |
+| Conformité | DORA, PCI DSS, SWIFT CSP, ISO 27001 et leurs écarts |
+
+Le Copilot demande une clé de modèle : `ANTHROPIC_API_KEY=sk-ant-… make dev`
+(ou la même variable devant `dev-local.sh`). Sans elle il est sauté, et le
+reste fonctionne.
+
 ### Installer la plateforme sur une machine
 
 `deployments/docker-compose.yml` reste la référence du déploiement. Quand Docker
@@ -522,6 +567,37 @@ Trois choses qu'une installation révèle et qu'aucun test ne montrait :
   rendait inatteignable.
 - **Le Copilot exige une clé de modèle** et refuse de démarrer sans. Le script
   le saute en le disant, plutôt que de le laisser mort dans la liste.
+
+### Le score de risque d'un actif
+
+`assets.vuln_critical`, `vuln_high`, `vuln_medium` et `vuln_low` étaient lues
+par le calcul de score et **écrites par personne** — aucun des trente-trois
+modules ne les affectait. Tout un terme de la formule était donc mort : un parc
+de neuf actifs critiques portant dix CVE activement exploitées répondait
+`high_risk: 0`, et le score de chaque actif ne reflétait que sa criticité
+déclarée et ses drapeaux. Le nombre avait l'air réfléchi. C'était de
+l'arithmétique sur des zéros.
+
+Un cache que personne ne rafraîchit est pire que pas de cache : il est faux
+d'une manière qui se lit comme une autorité. Les colonnes ont donc disparu, et
+deux vues les remplacent, en deux couches pour que la couture suive la
+propriété :
+
+- `asset_vulnerability_summary` **appartient au domaine vulnérabilité** : c'est
+  ce qu'il publie d'un actif, les constats ouverts par sévérité. Un constat
+  résolu ne compte plus — sinon un actif ne pourrait jamais s'améliorer en se
+  faisant corriger.
+- `asset_risk` **appartient au domaine actif** : la table plus ces compteurs
+  plus le score. Le service d'actifs lit cette vue et ne touche jamais aux
+  tables de vulnérabilité.
+
+La formule existe donc deux fois — en Go, où elle s'explique (`/assets/{id}/risk`
+détaille chaque terme), et en SQL, pour qu'on puisse trier et compter cent
+mille actifs dans la base plutôt qu'en mémoire. C'est un coût, payé contre un
+test d'intégration qui fait tourner les deux sur les mêmes lignes et échoue à
+la première divergence : quatorze cas, dont chaque plafond atteint puis
+dépassé, parce qu'un plafond appliqué d'un seul côté est d'accord sur tous les
+actifs ordinaires et diverge exactement sur ceux qui comptent.
 
 ### Remplir la plateforme pour une démonstration
 

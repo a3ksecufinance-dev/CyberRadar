@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate seed demo fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -11,14 +11,16 @@ help: ## Show this help
 # ─── Infrastructure ───────────────────────────────────────────────────────────
 
 infra-up: ## Start all infrastructure containers
-	$(DOCKER_COMPOSE) up -d postgres clickhouse neo4j redis kafka vault jaeger prometheus grafana
+	# Keycloak belongs here: the interface signs in against it, so an estate
+	# brought up without it starts every service and lets nobody in.
+	$(DOCKER_COMPOSE) up -d postgres keycloak clickhouse neo4j redis kafka vault jaeger prometheus grafana
 	@echo "⏳ Waiting for services to be healthy..."
 	@sleep 5
 
 infra-down: ## Stop infrastructure containers
 	$(DOCKER_COMPOSE) down
 
-dev: jwt-keys infra-up migrate ## Start infra + run migrations + start all services
+dev: jwt-keys infra-up migrate seed ## Start infra, migrate, seed identities, start all services
 	$(DOCKER_COMPOSE) up -d tenant-service identity-service audit-service notification-service collector-service pipeline-worker asset-service pam-service siem-service ueba-service ti-service vuln-service attackpath-service knowledgegraph-service soar-service dashboard-service copilot-service apifw-service compliance-service easm-service fraud-service dlp-service netsec-service risk-service iga-service cspm-service ir-service scs-service ot-service mobile-service dspm-service syslog-connector
 
 down: ## Stop all containers
@@ -164,6 +166,13 @@ docker-build: ## Build Docker images for all services
 
 syslog-certs: ## Generate self-signed TLS certs for syslog connector (dev only)
 	./scripts/gen-syslog-certs.sh
+
+seed: ## Give the realm's users an identity on the platform (nobody can sign in without this)
+	@echo "Seeding identities..."
+	@PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
+		-v ON_ERROR_STOP=1 -q -f migrations/seed/001_identities.sql
+	@PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation -tAc \
+		"SELECT count(*) || ' identities' FROM identities WHERE status='active'"
 
 demo: ## Fill the tenant with a demonstration estate, through the platform's own API
 	go run ./internal/cmd/demoseed/

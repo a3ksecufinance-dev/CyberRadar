@@ -87,6 +87,13 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 	return r.GetByID(ctx, tenantID, id)
 }
 
+// The reads below select from asset_risk, not from assets.
+//
+// The view is the table plus the two things that cannot be stored without
+// going stale: the counts of open findings by severity, and the risk score
+// derived from them. They used to be columns, and nothing ever wrote them —
+// so every asset scored as though it had no vulnerabilities at all.
+
 // GetByID fetches a single asset by ID, enforcing tenant isolation.
 func (r *AssetRepository) GetByID(ctx context.Context, tenantID, assetID uuid.UUID) (*model.Asset, error) {
 	const q = `
@@ -99,7 +106,7 @@ func (r *AssetRepository) GetByID(ctx context.Context, tenantID, assetID uuid.UU
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
-		FROM assets
+		FROM asset_risk
 		WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`
 
 	row := r.db.QueryRow(ctx, q, assetID, tenantID)
@@ -174,7 +181,7 @@ func (r *AssetRepository) List(ctx context.Context, f model.AssetFilter) (*model
 	whereClause := strings.Join(where, " AND ")
 
 	// Count query
-	countQ := fmt.Sprintf("SELECT COUNT(*) FROM assets WHERE %s", whereClause)
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM asset_risk WHERE %s", whereClause)
 	var total int
 	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("asset list count: %w", err)
@@ -191,7 +198,7 @@ func (r *AssetRepository) List(ctx context.Context, f model.AssetFilter) (*model
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
-		FROM assets WHERE %s
+		FROM asset_risk WHERE %s
 		ORDER BY risk_score DESC, criticality DESC, created_at DESC
 		LIMIT $%d OFFSET $%d`, whereClause, n, n+1)
 	args = append(args, limit, offset)
@@ -313,13 +320,6 @@ func (r *AssetRepository) SoftDelete(ctx context.Context, tenantID, assetID uuid
 	return nil
 }
 
-// UpdateRiskScore refreshes the computed risk score of an asset.
-func (r *AssetRepository) UpdateRiskScore(ctx context.Context, tenantID, assetID uuid.UUID, score float64) error {
-	const q = `UPDATE assets SET risk_score = $1 WHERE id = $2 AND tenant_id = $3`
-	_, err := r.db.Exec(ctx, q, score, assetID, tenantID)
-	return err
-}
-
 // UpdateLastSeen touches the last_seen_at timestamp.
 func (r *AssetRepository) UpdateLastSeen(ctx context.Context, tenantID uuid.UUID, ip string) error {
 	const q = `
@@ -392,7 +392,7 @@ func (r *AssetRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 		       COUNT(*) FILTER (WHERE is_pci_scope),
 		       COUNT(*) FILTER (WHERE last_seen_at IS NULL),
 		       COUNT(*) FILTER (WHERE last_seen_at < NOW() - INTERVAL '30 days')
-		FROM assets WHERE tenant_id = $1 AND deleted_at IS NULL`
+		FROM asset_risk WHERE tenant_id = $1 AND deleted_at IS NULL`
 
 	if err := r.db.QueryRow(ctx, q1, tenantID).Scan(
 		&stats.Total, &stats.HighRisk, &stats.CBSConnected,
