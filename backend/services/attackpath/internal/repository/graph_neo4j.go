@@ -188,119 +188,128 @@ func (s *Neo4jGraphStore) loadActiveEdges(ctx context.Context, tenantID uuid.UUI
 // ─── Mirror writes ────────────────────────────────────────────────────────────
 
 // MirrorNode copies a node PostgreSQL has just accepted into Neo4j.
-//
-// Every field is written, including the identifier: PostgreSQL decides what a
-// node is, and a repeated mirror must converge on that rather than preserve
-// whatever Neo4j happened to hold.
 func (s *Neo4jGraphStore) MirrorNode(ctx context.Context, n *model.AttackNode) error {
-	props, err := json.Marshal(n.Properties)
-	if err != nil {
-		return fmt.Errorf("mirror node %s: encode properties: %w", n.ID, err)
+	return s.MirrorNodes(ctx, []*model.AttackNode{n})
+}
+
+// MirrorNodes writes a batch in one statement.
+//
+// One statement per node costs a round trip each: backfilling a tenant of
+// twenty thousand nodes and a hundred and thirty thousand edges took five
+// minutes that way. Batching is not an optimisation here, it is what makes a
+// backfill runnable on a real tenant at all.
+//
+// Every field is written, identifier included: PostgreSQL decides what a node
+// is, and a repeated mirror must converge on that rather than preserve whatever
+// Neo4j happened to hold.
+func (s *Neo4jGraphStore) MirrorNodes(ctx context.Context, nodes []*model.AttackNode) error {
+	if len(nodes) == 0 {
+		return nil
 	}
-	_, err = s.query(ctx, `
-		MERGE (n:AttackNode {tenant_id: $tenant, ref_id: $ref_id, node_type: $node_type})
-		ON CREATE SET n.created_at = $created_at
-		SET n.id                 = $id,
-		    n.label              = $label,
-		    n.risk_score         = $risk_score,
-		    n.criticality        = $criticality,
-		    n.is_internet_facing = $is_internet_facing,
-		    n.is_privileged      = $is_privileged,
-		    n.is_critical_system = $is_critical_system,
-		    n.is_compromised     = $is_compromised,
-		    n.has_critical_vuln  = $has_critical_vuln,
-		    n.has_known_exploit  = $has_known_exploit,
-		    n.open_vuln_count    = $open_vuln_count,
-		    n.network_zone       = $network_zone,
-		    n.ip_address         = $ip_address,
-		    n.hostname           = $hostname,
-		    n.properties_json    = $properties_json,
-		    n.last_updated_at    = $last_updated_at`,
-		map[string]any{
-			"tenant":             n.TenantID.String(),
-			"ref_id":             n.RefID.String(),
-			"node_type":          n.NodeType,
-			"id":                 n.ID.String(),
-			"label":              n.Label,
-			"risk_score":         n.RiskScore,
-			"criticality":        int64(n.Criticality),
-			"is_internet_facing": n.IsInternetFacing,
-			"is_privileged":      n.IsPrivileged,
-			"is_critical_system": n.IsCriticalSystem,
-			"is_compromised":     n.IsCompromised,
-			"has_critical_vuln":  n.HasCriticalVuln,
-			"has_known_exploit":  n.HasKnownExploit,
-			"open_vuln_count":    int64(n.OpenVulnCount),
-			"network_zone":       n.NetworkZone,
-			"ip_address":         n.IPAddress,
-			"hostname":           n.Hostname,
-			"properties_json":    string(props),
-			"created_at":         utc(n.CreatedAt),
-			"last_updated_at":    utc(n.LastUpdatedAt),
+	rows := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		props, err := json.Marshal(n.Properties)
+		if err != nil {
+			return fmt.Errorf("mirror node %s: encode properties: %w", n.ID, err)
+		}
+		rows = append(rows, map[string]any{
+			"ref_id":     n.RefID.String(),
+			"node_type":  n.NodeType,
+			"created_at": utc(n.CreatedAt),
+			"props": map[string]any{
+				"id":                 n.ID.String(),
+				"label":              n.Label,
+				"risk_score":         n.RiskScore,
+				"criticality":        int64(n.Criticality),
+				"is_internet_facing": n.IsInternetFacing,
+				"is_privileged":      n.IsPrivileged,
+				"is_critical_system": n.IsCriticalSystem,
+				"is_compromised":     n.IsCompromised,
+				"has_critical_vuln":  n.HasCriticalVuln,
+				"has_known_exploit":  n.HasKnownExploit,
+				"open_vuln_count":    int64(n.OpenVulnCount),
+				"network_zone":       n.NetworkZone,
+				"ip_address":         n.IPAddress,
+				"hostname":           n.Hostname,
+				"properties_json":    string(props),
+				"last_updated_at":    utc(n.LastUpdatedAt),
+			},
 		})
-	if err != nil {
-		return fmt.Errorf("mirror node %s: %w", n.ID, err)
+	}
+	if _, err := s.query(ctx, `
+		UNWIND $rows AS row
+		MERGE (n:AttackNode {tenant_id: $tenant, ref_id: row.ref_id, node_type: row.node_type})
+		ON CREATE SET n.created_at = row.created_at
+		SET n += row.props`,
+		map[string]any{"tenant": nodes[0].TenantID.String(), "rows": rows}); err != nil {
+		return fmt.Errorf("mirror %d nodes: %w", len(nodes), err)
 	}
 	return nil
 }
 
 // MirrorEdge copies an edge PostgreSQL has just accepted into Neo4j.
+func (s *Neo4jGraphStore) MirrorEdge(ctx context.Context, e *model.AttackEdge) error {
+	return s.MirrorEdges(ctx, []*model.AttackEdge{e})
+}
+
+// MirrorEdges writes a batch in one statement.
 //
-// It reports an error when either endpoint is missing from Neo4j. Without that
+// It reports an error when an endpoint is missing from Neo4j. Without that
 // check the MERGE matches nothing and reports success, which is how a mirror
 // quietly loses an edge: PostgreSQL has it, Neo4j does not, and the traversal
-// on the Neo4j side never sees the path it opens.
-func (s *Neo4jGraphStore) MirrorEdge(ctx context.Context, e *model.AttackEdge) error {
-	props, err := json.Marshal(e.Properties)
-	if err != nil {
-		return fmt.Errorf("mirror edge %s: encode properties: %w", e.ID, err)
+// on the Neo4j side never sees the path it opens. Batched, the check is a
+// count: fewer edges written than sent means some endpoint was absent.
+func (s *Neo4jGraphStore) MirrorEdges(ctx context.Context, edges []*model.AttackEdge) error {
+	if len(edges) == 0 {
+		return nil
 	}
-	var vulnID any
-	if e.VulnID != nil {
-		vulnID = e.VulnID.String()
+	rows := make([]any, 0, len(edges))
+	for _, e := range edges {
+		props, err := json.Marshal(e.Properties)
+		if err != nil {
+			return fmt.Errorf("mirror edge %s: encode properties: %w", e.ID, err)
+		}
+		var vulnID any
+		if e.VulnID != nil {
+			vulnID = e.VulnID.String()
+		}
+		rows = append(rows, map[string]any{
+			"source_id":  e.SourceID.String(),
+			"target_id":  e.TargetID.String(),
+			"edge_type":  e.EdgeType,
+			"created_at": utc(e.CreatedAt),
+			"props": map[string]any{
+				"id":                  e.ID.String(),
+				"source_id":           e.SourceID.String(),
+				"target_id":           e.TargetID.String(),
+				"attack_complexity":   e.AttackComplexity,
+				"privileges_required": e.PrivilegesRequired,
+				"vuln_id":             vulnID,
+				"cve_id":              e.CVEID,
+				"mitre_technique":     e.MitreTechnique,
+				"weight":              e.Weight,
+				"is_active":           e.IsActive,
+				"evidence_source":     e.EvidenceSource,
+				"properties_json":     string(props),
+				"updated_at":          utc(e.UpdatedAt),
+			},
+		})
 	}
 	res, err := s.query(ctx, `
-		MATCH (src:AttackNode {tenant_id: $tenant, id: $source_id})
-		MATCH (dst:AttackNode {tenant_id: $tenant, id: $target_id})
-		MERGE (src)-[e:ATTACKS {tenant_id: $tenant, edge_type: $edge_type}]->(dst)
-		ON CREATE SET e.created_at = $created_at
-		SET e.id                  = $id,
-		    e.source_id           = $source_id,
-		    e.target_id           = $target_id,
-		    e.attack_complexity   = $attack_complexity,
-		    e.privileges_required = $privileges_required,
-		    e.vuln_id             = $vuln_id,
-		    e.cve_id              = $cve_id,
-		    e.mitre_technique     = $mitre_technique,
-		    e.weight              = $weight,
-		    e.is_active           = $is_active,
-		    e.evidence_source     = $evidence_source,
-		    e.properties_json     = $properties_json,
-		    e.updated_at          = $updated_at
-		RETURN e.id AS id`,
-		map[string]any{
-			"tenant":              e.TenantID.String(),
-			"id":                  e.ID.String(),
-			"source_id":           e.SourceID.String(),
-			"target_id":           e.TargetID.String(),
-			"edge_type":           e.EdgeType,
-			"attack_complexity":   e.AttackComplexity,
-			"privileges_required": e.PrivilegesRequired,
-			"vuln_id":             vulnID,
-			"cve_id":              e.CVEID,
-			"mitre_technique":     e.MitreTechnique,
-			"weight":              e.Weight,
-			"is_active":           e.IsActive,
-			"evidence_source":     e.EvidenceSource,
-			"properties_json":     string(props),
-			"created_at":          utc(e.CreatedAt),
-			"updated_at":          utc(e.UpdatedAt),
-		})
+		UNWIND $rows AS row
+		MATCH (src:AttackNode {tenant_id: $tenant, id: row.source_id})
+		MATCH (dst:AttackNode {tenant_id: $tenant, id: row.target_id})
+		MERGE (src)-[e:ATTACKS {tenant_id: $tenant, edge_type: row.edge_type}]->(dst)
+		ON CREATE SET e.created_at = row.created_at
+		SET e += row.props
+		RETURN count(e) AS written`,
+		map[string]any{"tenant": edges[0].TenantID.String(), "rows": rows})
 	if err != nil {
-		return fmt.Errorf("mirror edge %s: %w", e.ID, err)
+		return fmt.Errorf("mirror %d edges: %w", len(edges), err)
 	}
-	if len(res.Records) == 0 {
-		return fmt.Errorf("mirror edge %s: node %s or %s is not in neo4j", e.ID, e.SourceID, e.TargetID)
+	if written := recInt(res.Records[0], "written"); written != len(rows) {
+		return fmt.Errorf("mirror edges: wrote %d of %d — an endpoint node is not in neo4j",
+			written, len(rows))
 	}
 	return nil
 }
@@ -401,19 +410,32 @@ func (s *Neo4jGraphStore) MirrorTenant(ctx context.Context, tenantID uuid.UUID) 
 	if err != nil {
 		return 0, 0, fmt.Errorf("mirror tenant: postgres: %w", err)
 	}
+	// In batches, not one statement each: a tenant of twenty thousand nodes and
+	// a hundred and thirty thousand edges took five minutes one at a time,
+	// which makes a backfill something nobody runs.
+	const batch = 1000
+	nodeList := make([]*model.AttackNode, 0, len(g.Nodes))
 	for _, n := range g.Nodes {
-		if err := s.MirrorNode(ctx, n); err != nil {
+		nodeList = append(nodeList, n)
+	}
+	for start := 0; start < len(nodeList); start += batch {
+		chunk := nodeList[start:min(start+batch, len(nodeList))]
+		if err := s.MirrorNodes(ctx, chunk); err != nil {
 			return nodes, edges, err
 		}
-		nodes++
+		nodes += len(chunk)
 	}
+
+	edgeList := []*model.AttackEdge{}
 	for _, out := range g.Out {
-		for _, e := range out {
-			if err := s.MirrorEdge(ctx, e); err != nil {
-				return nodes, edges, err
-			}
-			edges++
+		edgeList = append(edgeList, out...)
+	}
+	for start := 0; start < len(edgeList); start += batch {
+		chunk := edgeList[start:min(start+batch, len(edgeList))]
+		if err := s.MirrorEdges(ctx, chunk); err != nil {
+			return nodes, edges, err
 		}
+		edges += len(chunk)
 	}
 	return nodes, edges, nil
 }

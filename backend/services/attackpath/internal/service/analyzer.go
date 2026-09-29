@@ -38,26 +38,26 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 		return err
 	}
 
-	graph, err := a.store.LoadGraph(ctx, scenario.TenantID)
-	if err != nil {
-		_ = a.store.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusFailed)
-		return err
-	}
-
-	targets := make(map[uuid.UUID]bool, len(scenario.TargetNodeIDs))
-	for _, tid := range scenario.TargetNodeIDs {
-		targets[tid] = true
-	}
-
+	// No graph is loaded. Every run used to pull the tenant's whole graph into
+	// the process before the walk started — 462 ms from PostgreSQL and 5.8 s
+	// from Neo4j on a twenty-thousand-node tenant, measured. The store
+	// enumerates the routes instead, and stops at the budget.
 	var allPaths []*model.AttackPath
 	truncated := false
 	for _, entryID := range scenario.EntryNodeIDs {
-		if len(allPaths) >= maxPathsPerScenario {
+		budget := maxPathsPerScenario - len(allPaths)
+		if budget <= 0 {
 			truncated = true
 			break
 		}
-		paths, cut := a.walk(graph, scenario, entryID, targets, maxPathsPerScenario-len(allPaths))
-		allPaths = append(allPaths, paths...)
+		found, cut, err := a.store.FindPaths(ctx, scenario, entryID, budget)
+		if err != nil {
+			_ = a.store.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusFailed)
+			return err
+		}
+		for _, dp := range found {
+			allPaths = append(allPaths, a.buildPath(scenario, dp))
+		}
 		truncated = truncated || cut
 	}
 
@@ -68,10 +68,17 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 	}
 
 	durationMS := int(time.Since(start).Milliseconds())
-	shortest, critical := pathStats(allPaths)
+	summary := summarise(allPaths)
 	riskScore := scenarioRisk(allPaths)
 
-	if err := a.store.UpdateScenarioResult(ctx, scenario.ID, len(allPaths), shortest, critical, riskScore, durationMS); err != nil {
+	if err := a.store.UpdateScenarioResult(ctx, scenario.ID, model.ScenarioOutcome{
+		PathCount:        len(allPaths),
+		ShortestPath:     summary.Shortest,
+		CriticalPath:     summary.Critical,
+		CheapestPathCost: summary.CheapestCost,
+		RiskScore:        riskScore,
+		DurationMS:       durationMS,
+	}); err != nil {
 		return err
 	}
 
@@ -96,36 +103,36 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 // whether it stopped at the cap.
 //
 // Depth first with backtracking, not breadth first with copied state: the
-// previous breadth-first search deep-copied the visited set and both sequences
+// earlier breadth-first search deep-copied the visited set and both sequences
 // at every edge it expanded, so memory grew with nodes × edges. Here one
 // visited set and two slices are shared and unwound, so the working set is the
 // depth of the walk — at most max_hops.
-func (a *Analyzer) walk(
+//
+// It is a free function rather than a method because it is no longer the only
+// way paths are found: both stores enumerate them now, and this is the
+// reference the two are checked against.
+func walk(
 	g *model.Graph,
 	scenario *model.AttackScenario,
 	entryID uuid.UUID,
 	targets map[uuid.UUID]bool,
 	budget int,
-) ([]*model.AttackPath, bool) {
+) ([]model.DiscoveredPath, bool) {
 	entryNode, ok := g.Nodes[entryID]
 	if !ok {
 		return nil, false // an entry node that is not in the graph reaches nothing
 	}
 
-	var found []*model.AttackPath
+	var found []model.DiscoveredPath
 	truncated := false
 
 	onPath := map[uuid.UUID]bool{entryID: true}
-	nodeSeq := []uuid.UUID{entryID}
-	edgeSeq := []uuid.UUID{}
-	// The edges themselves travel with the walk. Looking them up afterwards
-	// would mean scanning the adjacency list, which is the size of the graph.
+	nodesOnPath := []*model.AttackNode{entryNode}
 	edgesOnPath := []*model.AttackEdge{}
-	cost := 0.0
 
 	var step func(current uuid.UUID)
 	step = func(current uuid.UUID) {
-		if truncated || len(nodeSeq) > scenario.MaxHops {
+		if truncated || len(nodesOnPath) > scenario.MaxHops {
 			return
 		}
 		for _, edge := range g.Out[current] {
@@ -143,13 +150,16 @@ func (a *Analyzer) walk(
 			}
 
 			onPath[next] = true
-			nodeSeq = append(nodeSeq, next)
-			edgeSeq = append(edgeSeq, edge.ID)
+			nodesOnPath = append(nodesOnPath, node)
 			edgesOnPath = append(edgesOnPath, edge)
-			cost += edge.Weight
 
 			if isTarget {
-				found = append(found, a.buildPath(g, scenario, entryNode, node, nodeSeq, edgeSeq, edgesOnPath, cost))
+				// The sequences are reused across the walk, so each path keeps
+				// its own copy.
+				found = append(found, model.DiscoveredPath{
+					Nodes: append([]*model.AttackNode(nil), nodesOnPath...),
+					Edges: append([]*model.AttackEdge(nil), edgesOnPath...),
+				})
 				if len(found) >= budget {
 					truncated = true
 				}
@@ -158,10 +168,8 @@ func (a *Analyzer) walk(
 				step(next)
 			}
 
-			cost -= edge.Weight
 			edgesOnPath = edgesOnPath[:len(edgesOnPath)-1]
-			edgeSeq = edgeSeq[:len(edgeSeq)-1]
-			nodeSeq = nodeSeq[:len(nodeSeq)-1]
+			nodesOnPath = nodesOnPath[:len(nodesOnPath)-1]
 			onPath[next] = false
 
 			if truncated {
@@ -190,20 +198,24 @@ func typeIncluded(scenario *model.AttackScenario, node *model.AttackNode) bool {
 	return false
 }
 
-// buildPath records one path and what it says about the attack.
-func (a *Analyzer) buildPath(
-	g *model.Graph,
-	scenario *model.AttackScenario,
-	entry, target *model.AttackNode,
-	nodeSeq, edgeSeq []uuid.UUID,
-	edgesOnPath []*model.AttackEdge,
-	totalCost float64,
-) *model.AttackPath {
-	hopCount := len(nodeSeq) - 1
+// buildPath scores one discovered route and records what it says about the
+// attack.
+//
+// It works from the path's own nodes and edges. It used to need the whole
+// graph, to look up whether an intermediate node was privileged — which is one
+// of the reasons the graph had to be in memory at all.
+func (a *Analyzer) buildPath(scenario *model.AttackScenario, found model.DiscoveredPath) *model.AttackPath {
+	entry, target := found.Entry(), found.Target()
+	hopCount := len(found.Edges)
 
-	// The sequences are reused across the walk, so the path keeps its own copy.
-	nodes := append([]uuid.UUID(nil), nodeSeq...)
-	edges := append([]uuid.UUID(nil), edgeSeq...)
+	nodeSeq := make([]uuid.UUID, 0, len(found.Nodes))
+	for _, n := range found.Nodes {
+		nodeSeq = append(nodeSeq, n.ID)
+	}
+	edgeSeq := make([]uuid.UUID, 0, len(found.Edges))
+	for _, e := range found.Edges {
+		edgeSeq = append(edgeSeq, e.ID)
+	}
 
 	path := &model.AttackPath{
 		ID:               uuid.New(),
@@ -211,10 +223,11 @@ func (a *Analyzer) buildPath(
 		ScenarioID:       scenario.ID,
 		EntryNodeID:      entry.ID,
 		TargetNodeID:     target.ID,
-		NodeSequence:     nodes,
-		EdgeSequence:     edges,
+		NodeSequence:     nodeSeq,
+		EdgeSequence:     edgeSeq,
 		HopCount:         hopCount,
-		PathScore:        pathScore(totalCost, hopCount),
+		TotalCost:        found.Cost(),
+		PathScore:        pathScore(found.Cost(), hopCount),
 		Likelihood:       math.Pow(hopDecay, float64(hopCount)),
 		Impact:           impactOf(target),
 		HasInternetEntry: entry.IsInternetFacing,
@@ -225,14 +238,14 @@ func (a *Analyzer) buildPath(
 	// These three were declared, persisted and read back by the API, and never
 	// computed: every path in the database recorded false for all of them.
 	// They are exactly what an analyst filters on.
-	for _, edge := range edgesOnPath {
+	for _, edge := range found.Edges {
 		if edge.EdgeType == model.EdgeTypeExploit || edge.CVEID != "" || edge.VulnID != nil {
 			path.HasExploitStep = true
 			break
 		}
 	}
-	for _, nodeID := range nodes[1:] {
-		if n, ok := g.Nodes[nodeID]; ok && n.IsPrivileged {
+	for _, node := range found.Nodes[1:] {
+		if node.IsPrivileged {
 			path.HasPrivEsc = true
 			break
 		}
@@ -330,23 +343,38 @@ func computeChokePoints(paths []*model.AttackPath) {
 	}
 }
 
-func pathStats(paths []*model.AttackPath) (shortest, critical *int) {
+// scenarioResult is what a run recorded.
+type scenarioResult struct {
+	Shortest     *int     // fewest hops
+	Critical     *int     // hops of the highest-scoring route
+	CheapestCost *float64 // the weighted shortest route
+}
+
+// summarise reduces a run's routes to the numbers the scenario records.
+//
+// critical used to be the hop count of the LONGEST route, which is close to the
+// opposite of what "most critical" means: the route an attacker takes is the
+// one that scores highest, and length counts against a route rather than for
+// it. And cheapest is the weighted shortest route — the accumulated edge weight
+// the walk had always computed and nothing had ever kept.
+func summarise(paths []*model.AttackPath) scenarioResult {
 	if len(paths) == 0 {
-		return nil, nil
+		return scenarioResult{}
 	}
-	minHops := math.MaxInt
-	maxHops := 0
+	minHops, bestScore, cheapest := math.MaxInt, math.Inf(-1), math.Inf(1)
+	criticalHops := 0
 	for _, p := range paths {
 		if p.HopCount < minHops {
 			minHops = p.HopCount
 		}
-		if p.HopCount > maxHops {
-			maxHops = p.HopCount
+		if p.PathScore > bestScore {
+			bestScore, criticalHops = p.PathScore, p.HopCount
+		}
+		if p.TotalCost < cheapest {
+			cheapest = p.TotalCost
 		}
 	}
-	s := minHops
-	c := maxHops
-	return &s, &c
+	return scenarioResult{Shortest: &minHops, Critical: &criticalHops, CheapestCost: &cheapest}
 }
 
 func scenarioRisk(paths []*model.AttackPath) float64 {

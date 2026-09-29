@@ -160,7 +160,7 @@ func parityPostgres(t *testing.T) (*pgxpool.Pool, *repository.GraphRepository) {
 	return pool, repository.NewGraphRepository(pool)
 }
 
-func parityNeo4j(t *testing.T, pg *repository.GraphRepository) *repository.Neo4jGraphStore {
+func parityNeo4j(t testing.TB, pg *repository.GraphRepository) *repository.Neo4jGraphStore {
 	t.Helper()
 	uri, required := os.LookupEnv("ATTACKPATH_TEST_NEO4J")
 	if !required {

@@ -100,37 +100,46 @@ type AttackScenario struct {
 	IncludeTypes  []string    `json:"include_types"`
 	Status        string      `json:"status"`
 	PathCount     int         `json:"path_count"`
-	ShortestPath  *int        `json:"shortest_path,omitempty"`
-	CriticalPath  *int        `json:"critical_path,omitempty"`
-	LastRunAt     *time.Time  `json:"last_run_at,omitempty"`
-	LastRunMS     int         `json:"last_run_ms,omitempty"`
-	RiskScore     float64     `json:"risk_score"`
-	CreatedBy     *uuid.UUID  `json:"created_by,omitempty"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	// ShortestPath is the fewest hops; CheapestPathCost is the weighted
+	// shortest route, which is the one an attacker would take. CriticalPath is
+	// the hop count of the highest-scoring route — it used to hold the longest
+	// one and call it the most critical.
+	ShortestPath     *int       `json:"shortest_path,omitempty"`
+	CriticalPath     *int       `json:"critical_path,omitempty"`
+	CheapestPathCost *float64   `json:"cheapest_path_cost,omitempty"`
+	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
+	LastRunMS        int        `json:"last_run_ms,omitempty"`
+	RiskScore        float64    `json:"risk_score"`
+	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // AttackPath is a discovered chain of nodes and edges from entry to target.
 type AttackPath struct {
-	ID               uuid.UUID   `json:"id"`
-	TenantID         uuid.UUID   `json:"tenant_id"`
-	ScenarioID       uuid.UUID   `json:"scenario_id"`
-	EntryNodeID      uuid.UUID   `json:"entry_node_id"`
-	TargetNodeID     uuid.UUID   `json:"target_node_id"`
-	NodeSequence     []uuid.UUID `json:"node_sequence"`
-	EdgeSequence     []uuid.UUID `json:"edge_sequence"`
-	HopCount         int         `json:"hop_count"`
-	PathScore        float64     `json:"path_score"`
-	Likelihood       float64     `json:"likelihood"`
-	Impact           float64     `json:"impact"`
-	PathType         string      `json:"path_type"`
-	HasInternetEntry bool        `json:"has_internet_entry"`
-	HasExploitStep   bool        `json:"has_exploit_step"`
-	HasPrivEsc       bool        `json:"has_priv_esc"`
-	MitreTactics     []string    `json:"mitre_tactics"`
-	ChokePointNodeID *uuid.UUID  `json:"choke_point_node_id,omitempty"`
-	ChokePointEdgeID *uuid.UUID  `json:"choke_point_edge_id,omitempty"`
-	DiscoveredAt     time.Time   `json:"discovered_at"`
+	ID           uuid.UUID   `json:"id"`
+	TenantID     uuid.UUID   `json:"tenant_id"`
+	ScenarioID   uuid.UUID   `json:"scenario_id"`
+	EntryNodeID  uuid.UUID   `json:"entry_node_id"`
+	TargetNodeID uuid.UUID   `json:"target_node_id"`
+	NodeSequence []uuid.UUID `json:"node_sequence"`
+	EdgeSequence []uuid.UUID `json:"edge_sequence"`
+	HopCount     int         `json:"hop_count"`
+	// TotalCost is the accumulated traversal weight of the route's edges.
+	// Hops are not effort: a one-hop route needing an admin credential and a
+	// remote exploit costs an attacker more than three hops over open shares.
+	TotalCost        float64    `json:"total_cost"`
+	PathScore        float64    `json:"path_score"`
+	Likelihood       float64    `json:"likelihood"`
+	Impact           float64    `json:"impact"`
+	PathType         string     `json:"path_type"`
+	HasInternetEntry bool       `json:"has_internet_entry"`
+	HasExploitStep   bool       `json:"has_exploit_step"`
+	HasPrivEsc       bool       `json:"has_priv_esc"`
+	MitreTactics     []string   `json:"mitre_tactics"`
+	ChokePointNodeID *uuid.UUID `json:"choke_point_node_id,omitempty"`
+	ChokePointEdgeID *uuid.UUID `json:"choke_point_edge_id,omitempty"`
+	DiscoveredAt     time.Time  `json:"discovered_at"`
 	// Enriched for API responses
 	Nodes []AttackNode `json:"nodes,omitempty"`
 	Edges []AttackEdge `json:"edges,omitempty"`
@@ -222,4 +231,19 @@ type PathFilter struct {
 	PathType   string
 	Limit      int
 	Offset     int
+}
+
+// ScenarioOutcome is what one scenario run recorded.
+//
+// It is a struct rather than seven positional arguments: the previous
+// signature took two *int and a float64 in a row, which is exactly the shape
+// where a shortest path and a critical path get swapped without the compiler
+// noticing.
+type ScenarioOutcome struct {
+	PathCount        int
+	ShortestPath     *int
+	CriticalPath     *int
+	CheapestPathCost *float64
+	RiskScore        float64
+	DurationMS       int
 }

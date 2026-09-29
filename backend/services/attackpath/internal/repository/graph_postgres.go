@@ -354,14 +354,16 @@ func (r *GraphRepository) ListScenarios(ctx context.Context, tenantID uuid.UUID)
 	return out, nil
 }
 
-func (r *GraphRepository) UpdateScenarioResult(ctx context.Context, scenarioID uuid.UUID, pathCount int, shortestPath, criticalPath *int, riskScore float64, durationMS int) error {
+func (r *GraphRepository) UpdateScenarioResult(ctx context.Context, scenarioID uuid.UUID, outcome model.ScenarioOutcome) error {
 	now := time.Now().UTC()
 	_, err := r.db.Exec(ctx, `
 		UPDATE attack_scenarios SET
 			status='completed', path_count=$1, shortest_path=$2, critical_path=$3,
-			risk_score=$4, last_run_at=$5, last_run_ms=$6, updated_at=NOW()
-		WHERE id=$7`,
-		pathCount, shortestPath, criticalPath, riskScore, now, durationMS, scenarioID)
+			cheapest_path_cost=$4, risk_score=$5, last_run_at=$6, last_run_ms=$7,
+			updated_at=NOW()
+		WHERE id=$8`,
+		outcome.PathCount, outcome.ShortestPath, outcome.CriticalPath,
+		outcome.CheapestPathCost, outcome.RiskScore, now, outcome.DurationMS, scenarioID)
 	return err
 }
 
@@ -387,13 +389,13 @@ func (r *GraphRepository) SavePaths(ctx context.Context, paths []*model.AttackPa
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO attack_paths
 				(id, tenant_id, scenario_id, entry_node_id, target_node_id,
-				 node_sequence, edge_sequence, hop_count, path_score, likelihood, impact,
-				 path_type, has_internet_entry, has_exploit_step, has_priv_esc,
-				 mitre_tactics, choke_point_node_id, choke_point_edge_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+				 node_sequence, edge_sequence, hop_count, total_cost, path_score,
+				 likelihood, impact, path_type, has_internet_entry, has_exploit_step,
+				 has_priv_esc, mitre_tactics, choke_point_node_id, choke_point_edge_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 			ON CONFLICT DO NOTHING`,
 			p.ID, p.TenantID, p.ScenarioID, p.EntryNodeID, p.TargetNodeID,
-			p.NodeSequence, p.EdgeSequence, p.HopCount,
+			p.NodeSequence, p.EdgeSequence, p.HopCount, p.TotalCost,
 			p.PathScore, p.Likelihood, p.Impact,
 			p.PathType, p.HasInternetEntry, p.HasExploitStep, p.HasPrivEsc,
 			p.MitreTactics, p.ChokePointNodeID, p.ChokePointEdgeID,
@@ -437,7 +439,7 @@ func (r *GraphRepository) ListPaths(ctx context.Context, f model.PathFilter) ([]
 
 	q := fmt.Sprintf(`
 		SELECT id, tenant_id, scenario_id, entry_node_id, target_node_id,
-		       node_sequence, edge_sequence, hop_count, path_score, likelihood, impact,
+		       node_sequence, edge_sequence, hop_count, total_cost, path_score, likelihood, impact,
 		       path_type, has_internet_entry, has_exploit_step, has_priv_esc,
 		       mitre_tactics, choke_point_node_id, choke_point_edge_id, discovered_at
 		FROM attack_paths WHERE %s
@@ -535,6 +537,7 @@ const nodeSelect = `
 const scenarioSelect = `
 	SELECT id, tenant_id, name, description, entry_node_ids, target_node_ids,
 	       max_hops, include_types, status, path_count, shortest_path, critical_path,
+	       cheapest_path_cost,
 	       -- last_run_ms is NULL until the scenario has run, and the model holds
 	       -- it as a plain int: without this every scenario read failed between
 	       -- creation and the first run, which is every scenario an analyst has
@@ -599,7 +602,7 @@ func scanScenario(row scannable) (*model.AttackScenario, error) {
 	err := row.Scan(
 		&s.ID, &s.TenantID, &s.Name, &desc, &s.EntryNodeIDs, &s.TargetNodeIDs,
 		&s.MaxHops, &s.IncludeTypes, &s.Status, &s.PathCount,
-		&s.ShortestPath, &s.CriticalPath, &s.LastRunAt, &s.LastRunMS,
+		&s.ShortestPath, &s.CriticalPath, &s.CheapestPathCost, &s.LastRunAt, &s.LastRunMS,
 		&s.RiskScore, &s.CreatedBy, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -627,7 +630,7 @@ func scanPath(row scannable) (*model.AttackPath, error) {
 	p := &model.AttackPath{}
 	err := row.Scan(
 		&p.ID, &p.TenantID, &p.ScenarioID, &p.EntryNodeID, &p.TargetNodeID,
-		&p.NodeSequence, &p.EdgeSequence, &p.HopCount,
+		&p.NodeSequence, &p.EdgeSequence, &p.HopCount, &p.TotalCost,
 		&p.PathScore, &p.Likelihood, &p.Impact,
 		&p.PathType, &p.HasInternetEntry, &p.HasExploitStep, &p.HasPrivEsc,
 		&p.MitreTactics, &p.ChokePointNodeID, &p.ChokePointEdgeID, &p.DiscoveredAt,

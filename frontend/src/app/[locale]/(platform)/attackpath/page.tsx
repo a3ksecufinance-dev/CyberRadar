@@ -137,7 +137,12 @@ export default function AttackPathPage() {
                       </CardTitle>
                     </div>
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-slate-500">{path.hop_count} hops</span>
+                      {/* Hops and cost say different things: one hop needing an
+                          admin credential and a remote exploit is more work
+                          than three across open shares. */}
+                      <span className="text-slate-500">
+                        {path.hop_count} hops · cost {path.total_cost.toFixed(1)}
+                      </span>
                       {path.has_exploit_step && (
                         <span className="rounded bg-red-950 px-1.5 py-0.5 text-[10px] text-red-400">EXPLOIT</span>
                       )}

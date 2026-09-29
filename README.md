@@ -409,12 +409,38 @@ Après une écriture manuelle, un incident ou une reprise, `make graph-reconcile
 liste ce qui diverge ; `make graph-backfill` recopie PostgreSQL dans Neo4j puis
 vérifie. Le knowledge graph a les mêmes : `make kg-reconcile`, `make kg-backfill`.
 
+Les bancs (`go test -run XXX -bench . -benchtime 5x` dans
+`services/attackpath/internal/service` et
+`services/knowledgegraph/internal/repository`) construisent un tenant de
+20 000 entités et comparent les deux magasins. Ils sont là pour trancher une
+question de conception, pas pour décorer : faites-les tourner après un
+`VACUUM ANALYZE` et sur une base sans jeu d'essai résiduel, sinon les chiffres
+PostgreSQL varient d'un facteur vingt-cinq.
+
 ### Parcourir un graphe
 
-Les deux graphes partagent une règle : **l'algorithme de parcours vit hors des
-magasins**, et chaque magasin ne répond qu'à une question — « quelles relations
-touchent ces entités ? ». Une différence entre PostgreSQL et Neo4j ne peut alors
-venir que des données ou de cette requête, jamais de deux parcours qui divergent.
+Les deux graphes ne se parcourent pas de la même façon, et la différence est
+mesurée, pas supposée.
+
+**Chemins d'attaque : le magasin énumère les routes.** `FindPaths` — un CTE
+récursif en PostgreSQL, un motif de longueur variable en Cypher — rend les
+routes et rien d'autre. Auparavant chaque exécution de scénario chargeait tous
+les nœuds et arêtes du tenant dans le processus : 462 ms depuis PostgreSQL,
+5,8 s depuis Neo4j, avant que la marche ne commence. La marche en mémoire reste
+comme **implémentation de référence**, et un test tient les trois au même
+résultat. 481 ms → 15 ms sur un tenant de 20 000 nœuds.
+
+**Knowledge graph : le parcours reste piloté depuis Go**, un saut à la fois.
+Il n'a jamais chargé le graphe, donc il n'y avait rien à retirer du chemin
+chaud ; et la fenêtre `[valid_from, valid_until)` ne s'exprime dans aucune
+primitive de parcours Neo4j — `apoc.path.expandConfig` ne filtre que sur le type
+d'une relation, et filtrer après coup perd des entités réellement joignables.
+Voir §3.9 de l'audit pour les chiffres.
+
+Ce qui vaut pour les deux : **l'algorithme vit hors des magasins**, et chaque
+magasin ne répond qu'à une question — « quelles relations touchent ces
+entités ? ». Une différence entre PostgreSQL et Neo4j ne peut alors venir que
+des données ou de cette requête, jamais de deux parcours qui divergent.
 
 Trois pièges, tous rencontrés :
 
@@ -482,6 +508,10 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Cypher ne paramètre pas un type de relation | Table fixe indexée par les constantes du modèle, type inconnu refusé avant toute construction de requête. |
 | Une suppression doit atteindre le miroir | Une relation supprimée mais laissée dans Neo4j est parcourue : elle affirme quelque chose de faux, ce qui est pire qu'une absence. |
 | `direction=both` du knowledge graph était du SQL invalide | Le CTE récursif référençait le terme récursif depuis une branche d'amorce. C'était la valeur par défaut du handler et la seule direction d'`Enrich`. |
+| Un miroir Neo4j s'écrit par lots | Une instruction par ligne : 5 min pour backfiller 20 000 nœuds et 137 000 arêtes, contre 18 s par lots de mille. |
+| Un `MATCH` Cypher part d'un index, pas d'un `WHERE id IN` | `MATCH (a:X {tenant_id:$t}) WHERE a.id IN $ids` balaie le tenant entier. `UNWIND $ids` puis `MATCH (a:X {tenant_id:$t, id:id})` utilise la contrainte. |
+| Les motifs de longueur variable excluent une arête répétée, pas un nœud | Sans test d'unicité explicite, une route repassant par le même hôte est comptée comme une seconde attaque. |
+| Les sauts ne sont pas de l'effort | `shortest_path` est le nombre de sauts ; `cheapest_path_cost` est le poids accumulé — c'est lui qui dit ce que l'attaque la plus facile coûte réellement. |
 
 ---
 

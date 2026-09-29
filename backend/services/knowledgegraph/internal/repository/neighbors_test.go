@@ -16,7 +16,7 @@ import (
 // Skipping when none is reachable keeps the suite usable on a laptop, but a
 // skip is indistinguishable from a pass in CI output, so setting KG_TEST_DSN
 // turns the skip into a failure. CI sets it.
-func kgTestDB(t *testing.T) (*pgxpool.Pool, *KGRepository) {
+func kgTestDB(t testing.TB) (*pgxpool.Pool, *KGRepository) {
 	t.Helper()
 
 	dsn, required := os.LookupEnv("KG_TEST_DSN")
@@ -40,7 +40,7 @@ func kgTestDB(t *testing.T) (*pgxpool.Pool, *KGRepository) {
 	return pool, NewKGRepository(pool)
 }
 
-func kgTenant(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+func kgTenant(t testing.TB, pool *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	id := uuid.New()

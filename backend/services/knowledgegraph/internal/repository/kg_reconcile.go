@@ -84,17 +84,32 @@ func (s *Neo4jGraphStore) MirrorTenant(ctx context.Context, tenantID uuid.UUID) 
 	if err != nil {
 		return 0, 0, fmt.Errorf("mirror tenant: postgres: %w", err)
 	}
+	// In batches, not one statement each: a tenant of twenty thousand entities
+	// and a hundred and sixty thousand relationships took five and a half
+	// minutes one at a time, which makes a backfill something nobody runs.
+	const batch = 1000
+	entityList := make([]*model.KGEntity, 0, len(g.entities))
 	for _, e := range g.entities {
-		if err := s.MirrorEntity(ctx, e); err != nil {
-			return entities, rels, err
-		}
-		entities++
+		entityList = append(entityList, e)
 	}
-	for _, rel := range g.rels {
-		if err := s.MirrorRelationship(ctx, rel); err != nil {
+	for start := 0; start < len(entityList); start += batch {
+		chunk := entityList[start:min(start+batch, len(entityList))]
+		if err := s.MirrorEntities(ctx, chunk); err != nil {
 			return entities, rels, err
 		}
-		rels++
+		entities += len(chunk)
+	}
+
+	relList := make([]*model.KGRelationship, 0, len(g.rels))
+	for _, rel := range g.rels {
+		relList = append(relList, rel)
+	}
+	for start := 0; start < len(relList); start += batch {
+		chunk := relList[start:min(start+batch, len(relList))]
+		if err := s.MirrorRelationships(ctx, chunk); err != nil {
+			return entities, rels, err
+		}
+		rels += len(chunk)
 	}
 	return entities, rels, nil
 }

@@ -468,13 +468,66 @@ laisser les deux magasins dans des états différents). Vérifié à nouveau :
   l'adresse, l'`INSERT` ne la portait pas, le `SELECT` non plus. Un champ qui
   fait semblant.
 
-**Ce qui reste — l'étape 5.** Pousser la traversée dans Cypher
-(`shortestPath`, plus court chemin **pondéré**, centralité d'intermédiarité pour
-les points d'étranglement) et retirer `LoadGraph` du chemin chaud. C'est là
-qu'est le gain réel : aujourd'hui les deux magasins chargent le graphe entier du
-tenant dans le processus, donc Neo4j ne fait encore que **rendre les mêmes
-réponses**. Cette étape n'a de sens qu'après une période de double écriture en
-production et une réconciliation stable.
+**Étape 5 — faite, et pas comme prévu.** L'intitulé disait « pousser la
+traversée dans Cypher ». La mesure a montré que la formulation visait le mauvais
+levier.
+
+`LoadGraph` charge tous les nœuds et toutes les arêtes actives du tenant dans le
+processus **avant** que la marche ne commence, à chaque exécution de scénario,
+quoi que le scénario demande. Sur un tenant de 20 000 nœuds et 137 000 arêtes :
+**462 ms depuis PostgreSQL, 5,8 s depuis Neo4j**. Le coût n'est pas le langage
+de requête, c'est le transfert.
+
+Le parcours est donc désormais **énuméré par le magasin**, par un CTE récursif
+côté PostgreSQL et un motif de longueur variable côté Neo4j, tous deux bornés
+par le budget de 200 chemins — le `LIMIT` arrête l'énumération au lieu de
+rogner son résultat. Plus rien ne traverse le réseau que les routes elles-mêmes.
+
+| | temps par scénario | routes trouvées |
+|---|---|---|
+| `LoadGraph` + marche en mémoire (avant) | 481 ms | 16 |
+| `FindPaths` PostgreSQL | **14,6 ms** | 16 |
+| `FindPaths` Neo4j | **18,1 ms** | 16 |
+
+**33× plus rapide**, et les deux magasins se tiennent désormais à 25 % l'un de
+l'autre — parce que ni l'un ni l'autre ne transfère le graphe.
+
+**Trois implémentations, un seul comportement.** La marche en mémoire reste, non
+plus comme chemin de production mais comme **implémentation de référence** :
+c'est elle que fixent les seize tests de traversée, et un test compare les trois
+sur cinq scénarios — cycles, `include_types`, cibles multiples, limites de
+sauts. Le piège rencontré : les motifs de longueur variable de Neo4j excluent
+une *arête* répétée, pas un *nœud* répété, donc sans test d'unicité explicite
+une route repassant par le même hôte aurait été comptée comme une seconde
+attaque. Aucun plugin n'est requis : APOC élaguerait pendant l'expansion plutôt
+qu'après, mais un déploiement en environnement fermé ne télécharge pas de
+plugin au démarrage d'un conteneur, et la mesure ne justifie pas la dépendance.
+
+**Le plus court chemin pondéré, enfin enregistré.** `weight` était accumulé à
+chaque marche et jeté. `shortest_path` valait le nombre de sauts minimal — donc
+un saut unique exigeant un identifiant administrateur et un exploit distant
+passait devant trois sauts sur des partages ouverts. Les sauts ne sont pas de
+l'effort. `attack_paths.total_cost` porte maintenant le poids accumulé de chaque
+route et `attack_scenarios.cheapest_path_cost` le plus faible du scénario
+(migration `000037`).
+
+**Et `critical_path` enregistrait le chemin le plus LONG** en l'appelant « le
+plus critique » — à peu près l'inverse : l'attaquant prend la route qui score le
+plus haut, et la longueur joue contre une route, pas pour elle. Corrigé ; les
+valeurs existantes sont remises à `NULL` par la migration plutôt que laissées à
+être mal lues.
+
+**Le miroir écrivait une instruction par ligne.** Backfiller ce même tenant
+prenait **5 min 03**. Par lots de mille : **1 min 49**. Ce n'est pas une
+optimisation, c'est ce qui rend un backfill exécutable sur un vrai tenant.
+
+**Ce qui reste, et pourquoi c'est laissé.** La centralité d'intermédiarité pour
+les points d'étranglement — aujourd'hui un comptage d'occurrences sur les routes
+découvertes — demande le plugin GDS. Il est téléchargeable, mais c'est un
+plugin d'analytique lourd, et les mesures ci-dessus disent que le chemin Neo4j
+n'est pas le plus rapide ici : ajouter cette dépendance pour une meilleure
+métrique de point d'étranglement ne se justifie pas avant que la bascule des
+lectures ait été faite en production et tenue.
 
 **L'isolation tenant, arbitrage tranché.** En PostgreSQL c'est une colonne
 présente dans chaque `WHERE` ; en Cypher, une propriété sans filet. Une base par
@@ -857,10 +910,68 @@ Cypher, et un type inconnu est refusé avant toute construction.
   lisait zéro : la carte « total entities » du tableau de bord montrait un parc
   vide plutôt que de dire qu'elle ne savait pas.
 
-**Ce qui reste, ici aussi, c'est l'étape 5** : pousser la marche dans Cypher
-(`apoc.path.expandConfig` avec unicité globale, plus court chemin pondéré) au
-lieu de la piloter depuis Go. Tant que ce n'est pas fait, Neo4j rend les mêmes
-réponses — ce qui est précisément ce que les tests de parité vérifient.
+**Étape 5 — mesurée, puis refusée, et voici pourquoi.**
+
+J'avais écrit qu'il fallait pousser la marche dans Cypher avec
+`apoc.path.expandConfig`. En l'essayant, deux obstacles, dans cet ordre.
+
+**Le premier est une question de justesse.** `apoc.path.expandConfig` est la
+seule primitive Neo4j qui fasse un parcours en largeur avec un ensemble de
+visités **global** — exactement l'algorithme d'ici. Elle ne sait filtrer que sur
+le *type* d'une relation, jamais sur ses propriétés. Or une relation n'est
+parcourable que si l'instant présent tombe dans `[valid_from, valid_until)`.
+Filtrer après coup ne marche pas : le parcours marque une entité visitée dès
+qu'il l'atteint, donc s'il l'a atteinte par une relation périmée, elle est
+écartée et jamais réatteinte par une relation valide. Le résultat manquerait des
+entités réellement joignables. `ANY SHORTEST` de Cypher 5.26 accepte bien un
+prédicat de relation, mais avec une cible non liée le planificateur produit un
+`StatefulShortestPath(Into)` précédé d'un produit cartésien : une recherche par
+entité candidate, soit N parcours au lieu d'un.
+
+Une autre voie existait — ne mettre dans Neo4j que les relations *en vigueur*, et
+laisser un balayage périodique les faire entrer et sortir. Elle rend toutes les
+primitives disponibles, au prix d'une réponse qui dépend de la date du dernier
+balayage. Pour un graphe de sécurité, « cette relation a expiré il y a une
+heure » est une réponse fausse dans le sens qui compte. Refusée.
+
+**Le second est une question de gain.** Contrairement aux chemins d'attaque, ce
+parcours-ci **n'a jamais chargé le graphe dans le processus** : il interroge le
+magasin à chaque saut, cinq fois au maximum. Il n'y avait donc pas de
+`LoadGraph` à retirer. Mesuré sur un tenant de 20 000 entités et 137 000
+relations, en grappes :
+
+| sauts | PostgreSQL | Neo4j |
+|---|---|---|
+| 1 | 0,8–1,1 ms | 3,4–4,7 ms |
+| 2 | 3,2–3,8 ms | 13,0 ms |
+| 3 | 9,1–9,2 ms | 74–83 ms |
+| 4 | 24–35 ms | 198–205 ms |
+
+Deux exécutions concordantes après `VACUUM ANALYZE` — une troisième, sur des
+tables gonflées par un jeu d'essai laissé en place, avait donné des chiffres
+vingt-cinq fois différents, ce qui a coûté une itération et vaut d'être dit.
+**PostgreSQL est 4 à 8× plus rapide, à toutes les profondeurs.** Réserve
+honnête : le PostgreSQL de cet environnement est un paquet système réglé, le
+Neo4j un serveur embarqué aux réglages par défaut, sur la même VM à quatre
+cœurs. Le rapport est indicatif, pas un verdict général sur les deux produits.
+
+**Ce qui a été fait à la place**, sur la foi de ces mesures :
+
+- **La requête d'adjacence Neo4j partait d'un balayage.** Écrite
+  `MATCH (a:KGEntity {tenant_id: $t}) WHERE a.id IN $frontier`, elle parcourait
+  les vingt mille entités du tenant pour en filtrer cent trente. Un `UNWIND` sur
+  le front utilise l'index de la contrainte `(tenant_id, id)` — le plan passe à
+  `NodeUniqueIndexSeek`.
+- **Le motif non orienté comptait deux fois** toute relation interne au front :
+  1809 lignes projetées et triées pour 1185 relations. `WITH DISTINCT r`
+  supprime le doublon avant que ses douze propriétés ne soient lues.
+- **Le miroir écrivait une instruction par ligne** : backfiller ce tenant
+  prenait **5 min 21**, contre **18 s** par lots de mille.
+
+Un banc (`BenchmarkNeighbors`, `BenchmarkAdjacency`) est livré avec, et c'est
+lui qui a séparé le coût de la requête de celui du décodage : 70 ms des 72 sont
+dans la requête, 2,5 ms dans la reconstruction des UUID. Sans cette séparation
+j'aurais optimisé le mauvais côté.
 
 ---
 
@@ -991,9 +1102,12 @@ Aucun déploiement production sans cette phase.
 - **SOAR réel** — *fait*, voir §3.3. Les quinze actions appellent les services
   de remédiation ; un échec fait échouer l'étape.
 - **Neo4j** — *fait*, voir §3.5 (`attackpath`) et §3.9 (`knowledgegraph`) : schéma, double
-  écriture, commande de réconciliation et bascule de lecture pour les deux, exécutés contre un
-  serveur 5.26 réel. Reste l'étape 5 pour l'un comme pour l'autre : pousser la traversée dans
-  Cypher et sortir le chargement du graphe du chemin chaud.
+  écriture, réconciliation et bascule de lecture pour les deux, exécutés contre un serveur 5.26
+  réel. L'étape 5 a été faite pour les chemins d'attaque — l'énumération se fait dans le magasin,
+  33× plus vite — et **refusée** pour le knowledge graph, dont le parcours ne chargeait rien et dont
+  la fenêtre de validité ne s'exprime dans aucune primitive de parcours Neo4j. Les mesures sont
+  en §3.9. Reste la centralité d'intermédiarité (plugin GDS), laissée tant que les lectures n'ont
+  pas basculé en production.
 - **État partagé Redis** pour les compteurs SIEM et UEBA — *fait*, voir §3.1. Le PAM n'en faisait pas
   partie : ses compteurs étaient déjà en base, avec un autre défaut (tableau §3).
 - **DLQ + backoff exponentiel** sur Kafka — *fait*.

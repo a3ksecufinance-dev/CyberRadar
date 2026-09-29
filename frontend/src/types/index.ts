@@ -553,8 +553,13 @@ export interface AttackScenario {
   include_types: string[] | null
   status: string
   path_count: number
+  /** Fewest hops of any route found. */
   shortest_path?: number
+  /** Hop count of the highest-scoring route — not the longest one. */
   critical_path?: number
+  /** Total edge weight of the weighted shortest route: how much work the
+   *  easiest attack actually takes. Absent when the run found no route. */
+  cheapest_path_cost?: number
   last_run_at?: string
   last_run_ms?: number
   risk_score: number
@@ -571,6 +576,8 @@ export interface AttackPath {
   node_sequence: string[] | null
   edge_sequence: string[] | null
   hop_count: number
+  /** Accumulated traversal weight of this route's edges. Hops are not effort. */
+  total_cost: number
   path_score: number
   likelihood: number
   impact: number

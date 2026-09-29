@@ -17,7 +17,7 @@ import (
 // Skipping when none is reachable keeps the suite usable on a laptop, but a
 // skip is indistinguishable from a pass in CI output, so setting
 // KG_TEST_NEO4J turns the skip into a failure. CI sets it.
-func kgTestNeo4j(t *testing.T, pg *KGRepository) *Neo4jGraphStore {
+func kgTestNeo4j(t testing.TB, pg *KGRepository) *Neo4jGraphStore {
 	t.Helper()
 
 	uri, required := os.LookupEnv("KG_TEST_NEO4J")

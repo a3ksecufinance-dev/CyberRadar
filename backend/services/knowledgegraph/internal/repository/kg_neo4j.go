@@ -151,42 +151,15 @@ func (s *Neo4jGraphStore) Neighbors(ctx context.Context, q model.NeighborQuery) 
 func (s *Neo4jGraphStore) adjacentRelationships(ctx context.Context, tenantID uuid.UUID,
 	frontier []uuid.UUID, direction string, relTypes []string) ([]*model.KGRelationship, error) {
 
-	// The pattern is directed for outbound and inbound and undirected for
-	// both. The tenant is asserted on the relationship and on both endpoints:
-	// a relationship that somehow joined two tenants is then unreachable from
-	// either, rather than leaking one bank's graph into the other's traversal.
-	var pattern string
-	switch direction {
-	case "outbound":
-		pattern = `(a:KGEntity {tenant_id: $tenant})-[r]->(b:KGEntity {tenant_id: $tenant})`
-	case "inbound":
-		pattern = `(a:KGEntity {tenant_id: $tenant})<-[r]-(b:KGEntity {tenant_id: $tenant})`
-	default: // both
-		pattern = `(a:KGEntity {tenant_id: $tenant})-[r]-(b:KGEntity {tenant_id: $tenant})`
-	}
-
-	res, err := s.query(ctx, `
-		MATCH `+pattern+`
-		WHERE a.id IN $frontier
-		  AND r.tenant_id = $tenant
-		  AND (r.valid_from IS NULL OR r.valid_from <= $now)
-		  AND (r.valid_until IS NULL OR r.valid_until > $now)
-		  AND (size($rel_types) = 0 OR type(r) IN $rel_types)`+relReturn+`
-		ORDER BY r.id`,
-		map[string]any{
-			"tenant":    tenantID.String(),
-			"frontier":  uuidStrings(frontier),
-			"rel_types": relTypeFilter(relTypes),
-			"now":       time.Now().UTC(),
-		})
+	res, err := s.adjacencyRecords(ctx, tenantID, frontier, direction, relTypes)
 	if err != nil {
 		return nil, err
 	}
 
-	// An undirected match returns a relationship once per endpoint in the
-	// frontier, so the same one can arrive twice. The walk is idempotent on
-	// entities already visited, but a duplicate would still be counted against
-	// the traversal's cap, so drop it here.
+	// The query already applies DISTINCT; this is the belt to that braces. A
+	// duplicate reaching the walk would be counted against the traversal's cap
+	// and make the cap depend on the store, which is exactly the kind of
+	// difference the parity tests exist to rule out.
 	seen := make(map[uuid.UUID]bool, len(res.Records))
 	out := make([]*model.KGRelationship, 0, len(res.Records))
 	for _, rec := range res.Records {
@@ -201,6 +174,58 @@ func (s *Neo4jGraphStore) adjacentRelationships(ctx context.Context, tenantID uu
 		out = append(out, rel)
 	}
 	return out, nil
+}
+
+// adjacencyRecords runs the query without decoding it, so a benchmark can tell
+// the cost of the query from the cost of turning strings back into UUIDs.
+func (s *Neo4jGraphStore) adjacencyRecords(ctx context.Context, tenantID uuid.UUID,
+	frontier []uuid.UUID, direction string, relTypes []string) (*neo4j.EagerResult, error) {
+
+	// The pattern is directed for outbound and inbound and undirected for
+	// both. The tenant is asserted on the relationship and on both endpoints:
+	// a relationship that somehow joined two tenants is then unreachable from
+	// either, rather than leaking one bank's graph into the other's traversal.
+	var pattern string
+	switch direction {
+	case "outbound":
+		pattern = `(a)-[r]->(b:KGEntity {tenant_id: $tenant})`
+	case "inbound":
+		pattern = `(a)<-[r]-(b:KGEntity {tenant_id: $tenant})`
+	default: // both
+		pattern = `(a)-[r]-(b:KGEntity {tenant_id: $tenant})`
+	}
+
+	// UNWIND, rather than `MATCH (a:KGEntity {tenant_id: $tenant}) WHERE
+	// a.id IN $frontier`: written that way the planner scans every entity the
+	// tenant has and filters, which on a twenty-thousand-entity tenant made a
+	// single hop seven times slower than the same hop in PostgreSQL. Driving
+	// the match from each frontier identifier uses the (tenant_id, id)
+	// constraint index instead — measured, not assumed.
+	res, err := s.query(ctx, `
+		UNWIND $frontier AS frontier_id
+		MATCH (a:KGEntity {tenant_id: $tenant, id: frontier_id})
+		MATCH `+pattern+`
+		WHERE r.tenant_id = $tenant
+		  AND (r.valid_from IS NULL OR r.valid_from <= $now)
+		  AND (r.valid_until IS NULL OR r.valid_until > $now)
+		  AND (size($rel_types) = 0 OR type(r) IN $rel_types)
+		// An undirected match yields a relationship once per endpoint in the
+		// frontier, so one joining two frontier entities arrives twice. On a
+		// dense frontier that was half again as many rows to project, sort and
+		// send. DISTINCT costs nothing here and the duplicate is dropped before
+		// its twelve properties are ever read.
+		WITH DISTINCT r`+relReturn+`
+		ORDER BY r.id`,
+		map[string]any{
+			"tenant":    tenantID.String(),
+			"frontier":  uuidStrings(frontier),
+			"rel_types": relTypeFilter(relTypes),
+			"now":       time.Now().UTC(),
+		})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func (s *Neo4jGraphStore) entitiesByIDs(ctx context.Context, tenantID uuid.UUID,
@@ -274,106 +299,127 @@ func (s *Neo4jGraphStore) Subgraph(ctx context.Context, tenantID uuid.UUID,
 // ─── Mirror writes ────────────────────────────────────────────────────────────
 
 // MirrorEntity copies an entity PostgreSQL has just accepted into Neo4j.
+func (s *Neo4jGraphStore) MirrorEntity(ctx context.Context, e *model.KGEntity) error {
+	return s.MirrorEntities(ctx, []*model.KGEntity{e})
+}
+
+// MirrorEntities writes a batch in one statement.
+//
+// One statement per entity costs a round trip each: backfilling a tenant of
+// twenty thousand entities and a hundred and sixty thousand relationships took
+// five and a half minutes that way. Batching is not an optimisation here, it is
+// what makes a backfill runnable on a real tenant at all.
 //
 // Every field is written, identifier included: PostgreSQL decides what an
 // entity is, and a repeated mirror must converge on that rather than preserve
 // whatever Neo4j happened to hold.
-func (s *Neo4jGraphStore) MirrorEntity(ctx context.Context, e *model.KGEntity) error {
-	props, err := json.Marshal(e.Properties)
-	if err != nil {
-		return fmt.Errorf("mirror entity %s: encode properties: %w", e.ID, err)
+func (s *Neo4jGraphStore) MirrorEntities(ctx context.Context, entities []*model.KGEntity) error {
+	if len(entities) == 0 {
+		return nil
 	}
-	tags := e.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-	_, err = s.query(ctx, `
-		MERGE (n:KGEntity {tenant_id: $tenant, id: $id})
-		SET n.entity_type     = $entity_type,
-		    n.external_id     = $external_id,
-		    n.name            = $name,
-		    n.description     = $description,
-		    n.risk_score      = $risk_score,
-		    n.confidence      = $confidence,
-		    n.tags            = $tags,
-		    n.properties_json = $properties_json,
-		    n.first_seen_at   = $first_seen_at,
-		    n.last_seen_at    = $last_seen_at,
-		    n.created_at      = $created_at,
-		    n.updated_at      = $updated_at`,
-		map[string]any{
-			"tenant":          e.TenantID.String(),
-			"id":              e.ID.String(),
-			"entity_type":     e.EntityType,
-			"external_id":     e.ExternalID,
-			"name":            e.Name,
-			"description":     e.Description,
-			"risk_score":      e.RiskScore,
-			"confidence":      e.Confidence,
-			"tags":            tags,
-			"properties_json": string(props),
-			"first_seen_at":   utc(e.FirstSeenAt),
-			"last_seen_at":    utc(e.LastSeenAt),
-			"created_at":      utc(e.CreatedAt),
-			"updated_at":      utc(e.UpdatedAt),
+	rows := make([]any, 0, len(entities))
+	for _, e := range entities {
+		props, err := json.Marshal(e.Properties)
+		if err != nil {
+			return fmt.Errorf("mirror entity %s: encode properties: %w", e.ID, err)
+		}
+		tags := e.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		rows = append(rows, map[string]any{
+			"id": e.ID.String(),
+			"props": map[string]any{
+				"entity_type":     e.EntityType,
+				"external_id":     e.ExternalID,
+				"name":            e.Name,
+				"description":     e.Description,
+				"risk_score":      e.RiskScore,
+				"confidence":      e.Confidence,
+				"tags":            tags,
+				"properties_json": string(props),
+				"first_seen_at":   utc(e.FirstSeenAt),
+				"last_seen_at":    utc(e.LastSeenAt),
+				"created_at":      utc(e.CreatedAt),
+				"updated_at":      utc(e.UpdatedAt),
+			},
 		})
-	if err != nil {
-		return fmt.Errorf("mirror entity %s: %w", e.ID, err)
+	}
+	if _, err := s.query(ctx, `
+		UNWIND $rows AS row
+		MERGE (n:KGEntity {tenant_id: $tenant, id: row.id})
+		SET n += row.props`,
+		map[string]any{"tenant": entities[0].TenantID.String(), "rows": rows}); err != nil {
+		return fmt.Errorf("mirror %d entities: %w", len(entities), err)
 	}
 	return nil
 }
 
 // MirrorRelationship copies a relationship PostgreSQL has just accepted.
+func (s *Neo4jGraphStore) MirrorRelationship(ctx context.Context, rel *model.KGRelationship) error {
+	return s.MirrorRelationships(ctx, []*model.KGRelationship{rel})
+}
+
+// MirrorRelationships writes a batch, one statement per relationship type.
 //
-// It reports an error when either endpoint is missing from Neo4j. Without that
+// It reports an error when an endpoint is missing from Neo4j. Without that
 // check the MERGE matches nothing and reports success, which is how a mirror
 // quietly loses an edge: PostgreSQL has it, Neo4j does not, and a traversal on
-// the Neo4j side never sees the connection it makes.
-func (s *Neo4jGraphStore) MirrorRelationship(ctx context.Context, rel *model.KGRelationship) error {
-	if err := checkRelationshipType(rel.RelationshipType); err != nil {
-		return fmt.Errorf("mirror relationship %s: %w", rel.ID, err)
-	}
-	props, err := json.Marshal(rel.Properties)
-	if err != nil {
-		return fmt.Errorf("mirror relationship %s: encode properties: %w", rel.ID, err)
+// the Neo4j side never sees the connection it makes. Batched, the check is a
+// count: fewer relationships written than sent means some endpoint was absent.
+func (s *Neo4jGraphStore) MirrorRelationships(ctx context.Context, rels []*model.KGRelationship) error {
+	if len(rels) == 0 {
+		return nil
 	}
 
-	res, err := s.query(ctx, `
-		MATCH (a:KGEntity {tenant_id: $tenant, id: $source_id})
-		MATCH (b:KGEntity {tenant_id: $tenant, id: $target_id})
-		MERGE (a)-[r:`+rel.RelationshipType+` {tenant_id: $tenant}]->(b)
-		SET r.id              = $id,
-		    r.source_id       = $source_id,
-		    r.target_id       = $target_id,
-		    r.weight          = $weight,
-		    r.confidence      = $confidence,
-		    r.evidence_source = $evidence_source,
-		    r.properties_json = $properties_json,
-		    r.valid_from      = $valid_from,
-		    r.valid_until     = $valid_until,
-		    r.created_at      = $created_at,
-		    r.updated_at      = $updated_at
-		RETURN r.id AS id`,
-		map[string]any{
-			"tenant":          rel.TenantID.String(),
-			"id":              rel.ID.String(),
-			"source_id":       rel.SourceID.String(),
-			"target_id":       rel.TargetID.String(),
-			"weight":          rel.Weight,
-			"confidence":      rel.Confidence,
-			"evidence_source": rel.EvidenceSource,
-			"properties_json": string(props),
-			"valid_from":      nullableTime(rel.ValidFrom),
-			"valid_until":     nullableTime(rel.ValidUntil),
-			"created_at":      utc(rel.CreatedAt),
-			"updated_at":      utc(rel.UpdatedAt),
+	// Cypher cannot parameterise a relationship type, so the batch is split by
+	// type and each group gets the statement for its own — built from the
+	// fixed table, never from the value on the row.
+	byType := map[string][]any{}
+	tenantID := rels[0].TenantID
+	for _, rel := range rels {
+		if err := checkRelationshipType(rel.RelationshipType); err != nil {
+			return fmt.Errorf("mirror relationship %s: %w", rel.ID, err)
+		}
+		props, err := json.Marshal(rel.Properties)
+		if err != nil {
+			return fmt.Errorf("mirror relationship %s: encode properties: %w", rel.ID, err)
+		}
+		byType[rel.RelationshipType] = append(byType[rel.RelationshipType], map[string]any{
+			"source_id": rel.SourceID.String(),
+			"target_id": rel.TargetID.String(),
+			"props": map[string]any{
+				"id":              rel.ID.String(),
+				"source_id":       rel.SourceID.String(),
+				"target_id":       rel.TargetID.String(),
+				"weight":          rel.Weight,
+				"confidence":      rel.Confidence,
+				"evidence_source": rel.EvidenceSource,
+				"properties_json": string(props),
+				"valid_from":      nullableTime(rel.ValidFrom),
+				"valid_until":     nullableTime(rel.ValidUntil),
+				"created_at":      utc(rel.CreatedAt),
+				"updated_at":      utc(rel.UpdatedAt),
+			},
 		})
-	if err != nil {
-		return fmt.Errorf("mirror relationship %s: %w", rel.ID, err)
 	}
-	if len(res.Records) == 0 {
-		return fmt.Errorf("mirror relationship %s: entity %s or %s is not in neo4j",
-			rel.ID, rel.SourceID, rel.TargetID)
+
+	for relType, rows := range byType {
+		res, err := s.query(ctx, `
+			UNWIND $rows AS row
+			MATCH (a:KGEntity {tenant_id: $tenant, id: row.source_id})
+			MATCH (b:KGEntity {tenant_id: $tenant, id: row.target_id})
+			MERGE (a)-[r:`+relType+` {tenant_id: $tenant}]->(b)
+			SET r += row.props
+			RETURN count(r) AS written`,
+			map[string]any{"tenant": tenantID.String(), "rows": rows})
+		if err != nil {
+			return fmt.Errorf("mirror %d %s relationships: %w", len(rows), relType, err)
+		}
+		if written := recInt(res.Records[0], "written"); written != len(rows) {
+			return fmt.Errorf("mirror %s: wrote %d of %d — an endpoint entity is not in neo4j",
+				relType, written, len(rows))
+		}
 	}
 	return nil
 }
@@ -467,6 +513,11 @@ func recValue(rec *neo4j.Record, key string) any {
 func recString(rec *neo4j.Record, key string) string {
 	s, _ := recValue(rec, key).(string)
 	return s
+}
+
+func recInt(rec *neo4j.Record, key string) int {
+	i, _ := recValue(rec, key).(int64)
+	return int(i)
 }
 
 func recStrings(rec *neo4j.Record, key string) []string {

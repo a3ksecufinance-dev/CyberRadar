@@ -17,7 +17,7 @@ import (
 // Skipping when none is reachable keeps the suite usable on a laptop, but a
 // skip is indistinguishable from a pass in CI output, so setting
 // ATTACKPATH_TEST_NEO4J turns the skip into a failure. CI sets it.
-func testNeo4j(t *testing.T, pg *GraphRepository) *Neo4jGraphStore {
+func testNeo4j(t testing.TB, pg *GraphRepository) *Neo4jGraphStore {
 	t.Helper()
 
 	uri, required := os.LookupEnv("ATTACKPATH_TEST_NEO4J")

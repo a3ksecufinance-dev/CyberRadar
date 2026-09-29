@@ -56,13 +56,22 @@ func scenario(b *builder, maxHops int, entry string, targets ...string) *model.A
 
 func analyzer() *Analyzer { return NewAnalyzer(nil, zerolog.Nop()) }
 
+// run enumerates and scores, which is what the analyzer does with what a store
+// hands it. GraphPathFinder is the reference implementation the two stores are
+// checked against, so these tests also fix what those two have to agree with.
 func run(t *testing.T, b *builder, s *model.AttackScenario) ([]*model.AttackPath, bool) {
 	t.Helper()
-	targets := map[uuid.UUID]bool{}
-	for _, id := range s.TargetNodeIDs {
-		targets[id] = true
+	found, truncated, err := NewGraphPathFinder(b.graph()).
+		FindPaths(context.Background(), s, s.EntryNodeIDs[0], maxPathsPerScenario)
+	if err != nil {
+		t.Fatalf("FindPaths: %v", err)
 	}
-	return analyzer().walk(b.graph(), s, s.EntryNodeIDs[0], targets, maxPathsPerScenario)
+	a := analyzer()
+	paths := make([]*model.AttackPath, 0, len(found))
+	for _, dp := range found {
+		paths = append(paths, a.buildPath(s, dp))
+	}
+	return paths, truncated
 }
 
 // ─── Traversal ────────────────────────────────────────────────────────────────
@@ -351,10 +360,14 @@ type fakeStore struct {
 	result   struct {
 		pathCount int
 		risk      float64
+		outcome   model.ScenarioOutcome
 	}
 }
 
-func (s *fakeStore) LoadGraph(context.Context, uuid.UUID) (*model.Graph, error) { return s.graph, nil }
+func (s *fakeStore) FindPaths(ctx context.Context, scenario *model.AttackScenario,
+	entryID uuid.UUID, budget int) ([]model.DiscoveredPath, bool, error) {
+	return NewGraphPathFinder(s.graph).FindPaths(ctx, scenario, entryID, budget)
+}
 func (s *fakeStore) SetScenarioStatus(_ context.Context, _ uuid.UUID, status string) error {
 	s.statuses = append(s.statuses, status)
 	return nil
@@ -363,8 +376,9 @@ func (s *fakeStore) SavePaths(_ context.Context, paths []*model.AttackPath) erro
 	s.saved = paths
 	return nil
 }
-func (s *fakeStore) UpdateScenarioResult(_ context.Context, _ uuid.UUID, pathCount int, _, _ *int, risk float64, _ int) error {
-	s.result.pathCount, s.result.risk = pathCount, risk
+func (s *fakeStore) UpdateScenarioResult(_ context.Context, _ uuid.UUID, outcome model.ScenarioOutcome) error {
+	s.result.pathCount, s.result.risk = outcome.PathCount, outcome.RiskScore
+	s.result.outcome = outcome
 	return nil
 }
 
@@ -392,5 +406,71 @@ func TestRunScenarioRecordsWhatItFound(t *testing.T) {
 	}
 	if store.result.risk <= 0 {
 		t.Errorf("risk score = %.2f, want above zero for a reachable critical target", store.result.risk)
+	}
+}
+
+// ─── What a run records ───────────────────────────────────────────────────────
+
+// critical_path used to hold the hop count of the LONGEST route and call it the
+// most critical one, which is close to the opposite: an attacker takes the
+// route that scores highest, and length counts against a route rather than for
+// it.
+func TestTheCriticalPathIsTheHighestScoringOne(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("mid")
+	b.node("far")
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	// A direct, cheap route and a long, costly one.
+	b.edge("web", "db")
+	b.edge("web", "mid", func(e *model.AttackEdge) { e.Weight = 3 })
+	b.edge("mid", "far", func(e *model.AttackEdge) { e.Weight = 3 })
+	b.edge("far", "db", func(e *model.AttackEdge) { e.Weight = 3 })
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	if len(paths) != 2 {
+		t.Fatalf("found %d routes, want 2", len(paths))
+	}
+	got := summarise(paths)
+
+	if got.Shortest == nil || *got.Shortest != 1 {
+		t.Errorf("shortest = %v, want the one-hop route", got.Shortest)
+	}
+	if got.Critical == nil || *got.Critical != 1 {
+		t.Errorf("critical = %v, want the hop count of the highest-scoring route, not the longest", got.Critical)
+	}
+	if got.CheapestCost == nil || *got.CheapestCost != 1 {
+		t.Errorf("cheapest cost = %v, want the direct route's weight of 1", got.CheapestCost)
+	}
+}
+
+// The weighted shortest route is not the one with the fewest hops: a single hop
+// that needs an admin credential and a remote exploit is more work than three
+// hops across open shares. The accumulated weight was computed on every walk
+// and never kept.
+func TestTheCheapestRouteIsNotAlwaysTheShortest(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("a")
+	b.node("bb")
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	b.edge("web", "db", func(e *model.AttackEdge) { e.Weight = 9 }) // one hard hop
+	b.edge("web", "a", func(e *model.AttackEdge) { e.Weight = 1 })  // three easy ones
+	b.edge("a", "bb", func(e *model.AttackEdge) { e.Weight = 1 })
+	b.edge("bb", "db", func(e *model.AttackEdge) { e.Weight = 1 })
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	got := summarise(paths)
+
+	if got.Shortest == nil || *got.Shortest != 1 {
+		t.Errorf("shortest = %v, want 1 hop", got.Shortest)
+	}
+	if got.CheapestCost == nil || *got.CheapestCost != 3 {
+		t.Errorf("cheapest cost = %v, want the three-hop route at 3", got.CheapestCost)
+	}
+	for _, p := range paths {
+		if p.HopCount == 3 && p.TotalCost != 3 {
+			t.Errorf("the three-hop route recorded cost %v, want 3", p.TotalCost)
+		}
 	}
 }
