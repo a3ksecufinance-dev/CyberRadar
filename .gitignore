@@ -41,3 +41,7 @@ Thumbs.db
 *.log
 ~$*.docx
 *.docx
+
+# Local install (backend/scripts/dev-local.sh): pids, logs, and the data
+# directories of the infrastructure it starts.
+backend/.dev-local/

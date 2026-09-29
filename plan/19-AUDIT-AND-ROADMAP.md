@@ -973,6 +973,75 @@ lui qui a séparé le coût de la requête de celui du décodage : 70 ms des 72 
 dans la requête, 2,5 ms dans la reconstruction des UUID. Sans cette séparation
 j'aurais optimisé le mauvais côté.
 
+### 3.10 L'installation — ce que faire tourner la plateforme a montré
+
+La plateforme n'avait jamais été installée. Tout avait été vérifié par `curl`,
+par des tests, par des builds — jamais en ouvrant l'interface sur les services.
+L'installer a pris une matinée et révélé quatre défauts qu'aucune de ces
+vérifications ne pouvait atteindre.
+
+**1. Aucun CORS n'existait, nulle part.** L'interface est servie depuis une
+origine et chaque service répond sur son port : chaque appel est donc
+inter-origine. Le navigateur les bloquait tous. L'interface affichait sa
+coquille, chaque panneau disait « Failed to fetch », et **aucun journal de
+service ne contenait quoi que ce soit** — la requête n'arrivait jamais. `curl`
+n'en avait jamais eu besoin. Le préflight doit par ailleurs être traité avant
+l'authentification : un `OPTIONS`, que le navigateur envoie sans identifiants,
+repart sinon en 401 et le navigateur bloque la requête réelle.
+
+**2. L'interface et les services n'avaient pas le même émetteur de jetons.**
+Le frontend s'authentifie auprès de Keycloak et envoyait le jeton Keycloak ; les
+trente services ne vérifiaient que des RS256 signés par `identity-service`. Deux
+systèmes d'authentification, aucun pont : on pouvait se connecter et ne rien
+lire. `identity-service` a en outre son propre `/auth/login` email + mot de
+passe avec MFA — deux chemins d'authentification utilisateur dans le même
+produit.
+
+*Décision prise avec l'utilisateur* : les services valident Keycloak directement
+(`internal/pkg/oidc`, JWKS, algorithme épinglé). Mais le jeton n'est cru que sur
+**qui** est l'appelant. Le tenant, les rôles et les permissions viennent des
+tables de la plateforme (`internal/pkg/rbac`), parce que les deux vocabulaires
+de rôles diffèrent — `dpo`, `risk_manager`, `platform_admin` côté realm ;
+`tenant_admin`, `threat_hunter`, `super_admin` côté plateforme — et les faire
+correspondre reviendrait à en maintenir deux pour toujours. Une personne que
+l'annuaire connaît et que la plateforme ignore reçoit **403**, pas 401 : elle a
+prouvé qui elle est, et recommencer la connexion ne changerait rien.
+
+**3. PostgreSQL par défaut ne peut pas faire tourner la plateforme.** Trente
+services avec un pool de 25 maximum et 5 minimum, c'est 150 connexions
+immobilisées avant que rien ne se passe et 750 demandées en pointe, contre un
+serveur à `max_connections = 100`. En Docker Compose exactement pareil : l'image
+`pgvector/pgvector:pg16` garde le défaut. Les services perdants du départ
+mouraient sur « sorry, too many clients already ». Minimum ramené à 2, bornes
+réglables (`DB_MAX_CONNS`, `DB_MIN_CONNS`), `max_connections=400` inscrit dans
+le compose — et il faudra un pooler en production.
+
+**4. La connexion échouait pour tout le monde hors Vercel.** Auth.js refuse de
+faire confiance à l'en-tête `Host` sans opt-in explicite, et le contrôle a lieu
+dans le middleware Edge de Next — où une valeur de `.env.local` ne parvient pas.
+Il faut `AUTH_TRUST_HOST` dans l'environnement du processus. Le symptôme est un
+500 disant seulement « a problem with the server configuration ».
+
+Et un cinquième, côté interface : **SWR partait avant la session**. La clé ne
+dépendait pas du jeton, donc le premier rendu appelait sans en-tête, le service
+répondait 401, et SWR gardait cet échec sous une clé qui ne changeait plus
+quand le jeton arrivait. Le panneau restait cassé toute la session pendant que
+le même appel depuis une console renvoyait 200.
+
+**Ce qui est livré avec.** `backend/scripts/dev-local.sh` monte la plateforme
+entière en natif — infrastructure, migrations, identités, trente services,
+interface — pour les machines où Docker ne peut pas tirer d'image. Un test
+(`internal/pkg/deploycheck`) compare sa liste de services à celle du
+`docker-compose` **et** à la table de ports du frontend : un service ajouté d'un
+seul côté ne casse aucune compilation, il ne démarre simplement pas. Le script
+dit aussi ce qu'il ne fait pas : les migrations ne sont pas rejouables et il
+renvoie vers `reset` plutôt que d'échouer à mi-chemin ; le Copilot exige une clé
+de modèle et il le saute en le disant.
+
+**Vérifié en interface**, connecté en `admin@cyberradar.io` par Keycloak : le
+tableau de bord et cinq autres pages — SIEM, actifs, vulnérabilités, chemins
+d'attaque, conformité, incidents — chargent sans une seule erreur d'API.
+
 ---
 
 ## 4. Points forts à préserver

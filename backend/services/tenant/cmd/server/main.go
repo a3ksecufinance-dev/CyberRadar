@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/internal/pkg/observe"
@@ -56,6 +57,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("failed to connect to postgres")
 	}
 	defer dbPool.Close()
+
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, dbPool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
 	logger.Info().Msg("postgres connected")
 
 	// ─── Wiring ──────────────────────────────────────────────
@@ -65,6 +74,11 @@ func main() {
 
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
 
 	// Global middleware
 	r.Use(observe.Middleware("tenant-service"))
@@ -91,7 +105,7 @@ func main() {
 
 	// API routes (JWT auth middleware applied)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
 		r.Use(authmw.RequirePermissionByMethod("tenants"))
 		tenantHandler.RegisterRoutes(r)
 	})

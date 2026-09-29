@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/notification/internal/handler"
@@ -44,6 +45,11 @@ func main() {
 	notifHandler := handler.NewNotificationHandler(notifSvc)
 
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
 	r.Use(observe.Middleware("notification-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
@@ -57,6 +63,12 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// No identity provider here: this service holds no PostgreSQL connection,
+		// so it cannot resolve what a person authenticated elsewhere may do, and
+		// the web interface never calls it — it serves service-to-service traffic,
+		// which carries the platform's own tokens. Giving it a pool would be the
+		// way to change that; authmw.ProviderFromEnv refuses without one rather
+		// than authenticating people and granting them nothing.
 		r.Use(authmw.RequireJWT(jwtVerifier, logger))
 		r.Use(authmw.RequirePermissionByMethod("notifications"))
 		notifHandler.RegisterRoutes(r)

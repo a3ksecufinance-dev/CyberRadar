@@ -455,6 +455,75 @@ Trois pièges, tous rencontrés :
   bornes, des deux côtés, à la lecture comme à la liste — sinon la vue graphe et
   la liste de relations se contredisent.
 
+### Installer la plateforme sur une machine
+
+`deployments/docker-compose.yml` reste la référence du déploiement. Quand Docker
+n'est pas disponible ou ne peut pas tirer d'images — réseau verrouillé, poste
+hors ligne, runner sans démon — `backend/scripts/dev-local.sh` monte la même
+chose en natif, sur les mêmes ports :
+
+```bash
+cd backend
+CRP_KAFKA_HOME=/opt/kafka_2.13-3.7.1 \
+CRP_KEYCLOAK_HOME=/opt/keycloak-24.0.4 \
+CRP_CLICKHOUSE_BIN=clickhouse \
+./scripts/dev-local.sh up
+```
+
+`up` enchaîne infrastructure, migrations, identités, services et interface, puis
+affiche un état. Les étapes s'exécutent aussi séparément (`infra`, `migrate`,
+`seed`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
+suit un journal, `down` n'arrête que ce que le script a démarré. Un test
+(`internal/pkg/deploycheck`) compare sa liste de services à celle du
+`docker-compose` et à la table de ports du frontend : un service ajouté d'un
+seul côté ne planterait aucune compilation, il ne démarrerait simplement pas.
+
+Trois choses qu'une installation révèle et qu'aucun test ne montrait :
+
+- **PostgreSQL par défaut ne suffit pas.** Trente services contre un serveur à
+  100 connexions : la plateforme ne démarre pas, et les perdants du départ
+  meurent sur « sorry, too many clients already ». Le compose fixe désormais
+  `max_connections=400` et les pools se règlent par `DB_MAX_CONNS` /
+  `DB_MIN_CONNS`. Une vraie production met un pooler devant.
+- **Les migrations ne sont pas rejouables.** Il n'y a pas d'outil versionné :
+  `migrate` refuse une base déjà migrée et renvoie vers `reset`.
+- **Le Copilot exige une clé de modèle** et refuse de démarrer sans. Le script
+  le saute en le disant, plutôt que de le laisser mort dans la liste.
+
+### Se connecter à l'interface
+
+L'interface s'authentifie auprès de Keycloak ; les services **valident
+eux-mêmes** ce jeton contre les clés publiées du realm (`internal/pkg/oidc`),
+puis résolvent le tenant, les rôles et les permissions dans les tables de la
+plateforme (`internal/pkg/rbac`). Autrement dit : **Keycloak dit qui vous êtes,
+la matrice RBAC dit ce que vous pouvez.**
+
+Les deux vocabulaires de rôles ne sont pas les mêmes — le realm livre `dpo`,
+`risk_manager`, `platform_admin`, la plateforme a `tenant_admin`,
+`threat_hunter`, `super_admin` — et les faire correspondre reviendrait à en
+maintenir deux. Conséquence directe : **une personne que l'annuaire connaît et
+que la plateforme ignore reçoit un 403 explicite**, pas un 401 ni une interface
+vide. C'est la bonne réponse : un compte ajouté à un annuaire d'entreprise n'est
+pas un compte sur la plateforme de sécurité d'une banque. `dev-local.sh seed`
+crée les identités correspondant aux utilisateurs du realm.
+
+Trois pièges rencontrés en la faisant tourner pour la première fois :
+
+- **Aucun CORS n'existait.** L'interface est sur une origine, chaque service sur
+  son port : le navigateur bloquait tout, chaque panneau affichait « Failed to
+  fetch », et aucun journal ne disait rien — la requête n'arrivait jamais. Le
+  préflight doit en plus être traité **avant** l'authentification, sinon le
+  `OPTIONS`, que le navigateur envoie sans identifiants, repart en 401.
+- **`AUTH_TRUST_HOST` doit être dans l'environnement du processus**, pas
+  seulement dans `.env.local` : Auth.js fait le contrôle dans le middleware Edge
+  de Next, où une valeur de `.env.local` ne parvient pas. Sans lui, la connexion
+  échoue en 500 disant seulement « a problem with the server configuration ».
+- **SWR ne doit pas partir sans jeton.** La clé vaut `null` tant que la session
+  n'a pas résolu ; sinon le premier rendu part sans en-tête, le service répond
+  401, et SWR garde cet échec sous une clé qui ne change pas quand le jeton
+  arrive — le panneau reste cassé toute la session pendant que le même appel
+  depuis une console renvoie 200.
+
 ### Secrets
 
 `internal/pkg/vault` lit Vault quand il est configuré, l'environnement sinon.
@@ -474,7 +543,7 @@ indiscernable d'un succès dans la sortie de CI : chacun lit une variable
 d'environnement qui transforme le saut en échec, et la CI les pose toutes —
 `REDIS_TEST_URL`, `PAM_TEST_DSN`, `COPILOT_TEST_DSN`, `IR_TEST_DSN`,
 `IDENTITY_TEST_DSN`, `DASHBOARD_TEST_CH`, `ATTACKPATH_TEST_DSN`,
-`ATTACKPATH_TEST_NEO4J`, `KG_TEST_DSN`, `KG_TEST_NEO4J`. Si vous ajoutez un test qui parle à une base, suivez ce
+`ATTACKPATH_TEST_NEO4J`, `KG_TEST_DSN`, `KG_TEST_NEO4J`, `RBAC_TEST_DSN`. Si vous ajoutez un test qui parle à une base, suivez ce
 motif plutôt que de le faire sauter en silence.
 
 Les tests de `internal/pkg/jwt`, `authmw` et `observe` couvrent des propriétés
@@ -505,6 +574,11 @@ labels). Ne les affaiblissez pas pour faire passer un changement.
 | Les contraintes de relation sont Enterprise | Sur Community, l'unicité d'une arête tient par `MERGE` sur sa clé naturelle — donc aucune autre écriture ne doit créer de relation. |
 | Le pilote Neo4j réessaie 30 s par défaut | Sur le chemin d'une requête, cela fait 30 s par écriture quand le miroir est tombé. `MaxTransactionRetryTime` et un contexte borné. |
 | Une colonne annulable ne se lit pas dans un `int` | `last_run_ms` rendait 500 toute lecture de scénario avant sa première exécution. `COALESCE(col, 0)` à la lecture. |
+| Trente services ne tiennent pas dans 100 connexions | `max_connections=400` côté serveur, `DB_MAX_CONNS` / `DB_MIN_CONNS` côté service. Sinon la plateforme ne démarre pas. |
+| Le préflight CORS passe avant l'authentification | Un `OPTIONS` est envoyé sans identifiants : s'il atteint le middleware JWT, il repart en 401 et le navigateur bloque la vraie requête. |
+| Keycloak authentifie, la plateforme autorise | Les rôles du realm ne sont pas ceux de la matrice. Une personne sans identité ici reçoit 403, pas 401. |
+| `AUTH_TRUST_HOST` doit être exporté | Le contrôle a lieu dans le middleware Edge, que `.env.local` n'atteint pas. |
+| Une clé SWR ne doit pas exister sans jeton | Sinon le premier rendu met un 401 en cache sous une clé qui ne changera plus. |
 | Cypher ne paramètre pas un type de relation | Table fixe indexée par les constantes du modèle, type inconnu refusé avant toute construction de requête. |
 | Une suppression doit atteindre le miroir | Une relation supprimée mais laissée dans Neo4j est parcourue : elle affirme quelque chose de faux, ce qui est pire qu'une absence. |
 | `direction=both` du knowledge graph était du SQL invalide | Le CTE récursif référençait le terme récursif depuis une branche d'amorce. C'était la valeur par défaut du handler et la seule direction d'`Enrich`. |

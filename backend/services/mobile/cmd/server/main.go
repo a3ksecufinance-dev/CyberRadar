@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
@@ -56,6 +57,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, pool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
+
 	producer := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: []string{kafkaBrokers},
 		Topic:   kafkaTopic,
@@ -67,6 +76,11 @@ func main() {
 	h := handler.New(svc, logger)
 
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
 	r.Use(observe.Middleware("mobile-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
@@ -80,7 +94,7 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(authmw.RequireJWT(jwtVerifier, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
 		r.Use(authmw.RequirePermissionByMethod("mobile"))
 		r.Mount("/mobile", h.Routes())
 	})
