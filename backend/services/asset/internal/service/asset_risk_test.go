@@ -97,6 +97,85 @@ func TestTheStoredFormulaAndTheSQLFormulaAgree(t *testing.T) {
 	tenantID := seedRiskFixture(t, pool)
 	repo := repository.NewAssetRepository(pool)
 
+	// Under each standard profile in turn. A formula that agrees on one set of
+	// weights and diverges on another is exactly what duplicating it in two
+	// languages invites, and the default profile is the one set of weights
+	// least likely to expose it.
+	for _, code := range standardProfiles(t, pool) {
+		t.Run(code, func(t *testing.T) {
+			adoptProfile(t, pool, tenantID, code)
+			compareFormulas(t, ctx, repo, tenantID)
+		})
+	}
+}
+
+// standardProfiles lists the profiles the platform ships, from the database
+// rather than from a list here: a profile added by a migration is then covered
+// without anyone remembering.
+func standardProfiles(t *testing.T, pool *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(),
+		`SELECT code FROM risk_profiles WHERE tenant_id IS NULL AND effective_to IS NULL ORDER BY code`)
+	if err != nil {
+		t.Fatalf("list standard profiles: %v", err)
+	}
+	defer rows.Close()
+
+	var codes []string
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			t.Fatalf("scan profile code: %v", err)
+		}
+		codes = append(codes, code)
+	}
+	if len(codes) < 2 {
+		t.Fatalf("%d standard profiles; the migration seeds four", len(codes))
+	}
+	return codes
+}
+
+// adoptProfile gives the fixture tenant a copy of a standard profile, the way
+// the API does: the previous version is closed, a new one opens.
+func adoptProfile(t *testing.T, pool *pgxpool.Pool, tenantID uuid.UUID, code string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx,
+		`UPDATE risk_profiles SET effective_to = NOW()
+		 WHERE tenant_id = $1 AND effective_to IS NULL`, tenantID); err != nil {
+		t.Fatalf("close the previous profile: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO risk_profiles (tenant_id, code, name, description, based_on, version,
+		       criticality_step, criticality_cap,
+		       vuln_critical, vuln_high, vuln_medium, vuln_low, vuln_cap,
+		       cbs_connected, swift_connected, pci_scope, exposure_cap,
+		       never_seen, critical_production, banking_type, context_cap,
+		       total_cap, high_risk_threshold)
+		SELECT $1, code, name, description, code,
+		       COALESCE((SELECT MAX(version) FROM risk_profiles WHERE tenant_id = $1), 0) + 1,
+		       criticality_step, criticality_cap,
+		       vuln_critical, vuln_high, vuln_medium, vuln_low, vuln_cap,
+		       cbs_connected, swift_connected, pci_scope, exposure_cap,
+		       never_seen, critical_production, banking_type, context_cap,
+		       total_cap, high_risk_threshold
+		FROM risk_profiles WHERE tenant_id IS NULL AND code = $2 AND effective_to IS NULL`,
+		tenantID, code); err != nil {
+		t.Fatalf("adopt %s: %v", code, err)
+	}
+}
+
+func compareFormulas(t *testing.T, ctx context.Context, repo *repository.AssetRepository, tenantID uuid.UUID) {
+	t.Helper()
+
+	profile, err := repo.RiskProfile(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("risk profile: %v", err)
+	}
+	if !profile.IsTenantProfile {
+		t.Fatalf("the fixture tenant is being scored under the standard profile, not its own")
+	}
+
 	list, err := repo.List(ctx, model.AssetFilter{TenantID: tenantID, Limit: 500})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -108,22 +187,27 @@ func TestTheStoredFormulaAndTheSQLFormulaAgree(t *testing.T) {
 	for _, a := range list.Assets {
 		t.Run(a.Name, func(t *testing.T) {
 			// a.RiskScore is what SQL computed; ScoreAsset is what Go does
-			// with the same counters, which SQL also supplied.
-			fromGo, breakdown := ScoreAsset(a)
+			// with the same counters and the same profile, which SQL also
+			// supplied.
+			fromGo, breakdown := ScoreAsset(a, profile)
 			if math.Abs(fromGo-a.RiskScore) > 0.0001 {
-				t.Errorf("SQL says %.4f, Go says %.4f\n"+
+				t.Errorf("under profile %s: SQL says %.4f, Go says %.4f\n"+
 					"  criticality %d, type %s, env %s, seen %t, cbs/swift/pci %t/%t/%t\n"+
 					"  findings C%d H%d M%d L%d\n"+
 					"  Go breakdown: crit %.2f vuln %.2f exposure %.2f behaviour %.2f context %.2f",
-					a.RiskScore, fromGo,
+					profile.Code, a.RiskScore, fromGo,
 					a.Criticality, a.AssetType, a.Environment, a.LastSeenAt != nil,
 					a.IsCBSConnected, a.IsSWIFTConnected, a.IsPCIScope,
 					a.VulnCritical, a.VulnHigh, a.VulnMedium, a.VulnLow,
 					breakdown.CriticalityScore, breakdown.VulnScore,
 					breakdown.ExposureScore, breakdown.BehaviorScore, breakdown.ContextScore)
 			}
-			if a.RiskScore < 0 || a.RiskScore > 10 {
-				t.Errorf("risk_score = %.4f, outside 0–10", a.RiskScore)
+			if a.RiskScore < 0 || a.RiskScore > profile.TotalCap {
+				t.Errorf("risk_score = %.4f, outside 0–%.1f", a.RiskScore, profile.TotalCap)
+			}
+			if a.RiskProfileCode != profile.Code {
+				t.Errorf("the asset reports profile %q, the tenant is on %q",
+					a.RiskProfileCode, profile.Code)
 			}
 		})
 	}
@@ -245,4 +329,63 @@ func seedRiskFixture(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	})
 
 	return tenantID
+}
+
+// The platform ships its standard weights twice: as the 'balanced' rows in
+// migrations/postgres/000039, and as DefaultRiskProfile in code for callers with
+// no database. Two sets of defaults that drift apart mean a fresh install scores
+// differently from a documented one.
+func TestTheSeededDefaultsAndTheCodeDefaultsAgree(t *testing.T) {
+	pool := riskTestDB(t)
+
+	var seeded model.RiskProfile
+	err := pool.QueryRow(context.Background(), `
+		SELECT code, criticality_step, criticality_cap,
+		       vuln_critical, vuln_high, vuln_medium, vuln_low, vuln_cap,
+		       cbs_connected, swift_connected, pci_scope, exposure_cap,
+		       never_seen, critical_production, banking_type, context_cap,
+		       total_cap, high_risk_threshold
+		FROM risk_profiles
+		WHERE tenant_id IS NULL AND code = 'balanced' AND effective_to IS NULL`).Scan(
+		&seeded.Code, &seeded.CriticalityStep, &seeded.CriticalityCap,
+		&seeded.VulnCritical, &seeded.VulnHigh, &seeded.VulnMedium, &seeded.VulnLow, &seeded.VulnCap,
+		&seeded.CBSConnected, &seeded.SWIFTConnected, &seeded.PCIScope, &seeded.ExposureCap,
+		&seeded.NeverSeen, &seeded.CriticalProduction, &seeded.BankingType, &seeded.ContextCap,
+		&seeded.TotalCap, &seeded.HighRiskThreshold,
+	)
+	if err != nil {
+		t.Fatalf("read the seeded balanced profile: %v", err)
+	}
+
+	code := DefaultRiskProfile()
+	for _, f := range []struct {
+		name          string
+		seeded, coded float64
+	}{
+		{"criticality_step", seeded.CriticalityStep, code.CriticalityStep},
+		{"criticality_cap", seeded.CriticalityCap, code.CriticalityCap},
+		{"vuln_critical", seeded.VulnCritical, code.VulnCritical},
+		{"vuln_high", seeded.VulnHigh, code.VulnHigh},
+		{"vuln_medium", seeded.VulnMedium, code.VulnMedium},
+		{"vuln_low", seeded.VulnLow, code.VulnLow},
+		{"vuln_cap", seeded.VulnCap, code.VulnCap},
+		{"cbs_connected", seeded.CBSConnected, code.CBSConnected},
+		{"swift_connected", seeded.SWIFTConnected, code.SWIFTConnected},
+		{"pci_scope", seeded.PCIScope, code.PCIScope},
+		{"exposure_cap", seeded.ExposureCap, code.ExposureCap},
+		{"never_seen", seeded.NeverSeen, code.NeverSeen},
+		{"critical_production", seeded.CriticalProduction, code.CriticalProduction},
+		{"banking_type", seeded.BankingType, code.BankingType},
+		{"context_cap", seeded.ContextCap, code.ContextCap},
+		{"total_cap", seeded.TotalCap, code.TotalCap},
+		{"high_risk_threshold", seeded.HighRiskThreshold, code.HighRiskThreshold},
+	} {
+		if math.Abs(f.seeded-f.coded) > 0.0001 {
+			t.Errorf("%s: the migration seeds %.4f, DefaultRiskProfile has %.4f",
+				f.name, f.seeded, f.coded)
+		}
+	}
+	if code.Code != seeded.Code {
+		t.Errorf("DefaultRiskProfile is %q, the seeded default is %q", code.Code, seeded.Code)
+	}
 }

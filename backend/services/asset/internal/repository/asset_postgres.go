@@ -104,6 +104,7 @@ func (r *AssetRepository) GetByID(ctx context.Context, tenantID, assetID uuid.UU
 		       owner_id, department, location, business_service,
 		       is_cbs_connected, is_swift_connected, is_pci_scope,
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
+		       risk_profile_code,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
 		FROM asset_risk
@@ -196,6 +197,7 @@ func (r *AssetRepository) List(ctx context.Context, f model.AssetFilter) (*model
 		       owner_id, department, location, business_service,
 		       is_cbs_connected, is_swift_connected, is_pci_scope,
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
+		       risk_profile_code,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
 		FROM asset_risk WHERE %s
@@ -320,6 +322,36 @@ func (r *AssetRepository) SoftDelete(ctx context.Context, tenantID, assetID uuid
 	return nil
 }
 
+// RiskProfile is the risk appetite in force for a tenant.
+//
+// It reads tenant_risk_profile, which falls back to the standard profile for a
+// tenant that has not chosen one — so a fresh install scores with the values
+// the platform documents rather than with nothing.
+func (r *AssetRepository) RiskProfile(ctx context.Context, tenantID uuid.UUID) (*model.RiskProfile, error) {
+	const q = `
+		SELECT profile_id, code, name, version, is_tenant_profile, COALESCE(based_on, ''),
+		       criticality_step, criticality_cap,
+		       vuln_critical, vuln_high, vuln_medium, vuln_low, vuln_cap,
+		       cbs_connected, swift_connected, pci_scope, exposure_cap,
+		       never_seen, critical_production, banking_type, context_cap,
+		       total_cap, high_risk_threshold
+		FROM tenant_risk_profile WHERE tenant_id = $1`
+
+	var p model.RiskProfile
+	err := r.db.QueryRow(ctx, q, tenantID).Scan(
+		&p.ID, &p.Code, &p.Name, &p.Version, &p.IsTenantProfile, &p.BasedOn,
+		&p.CriticalityStep, &p.CriticalityCap,
+		&p.VulnCritical, &p.VulnHigh, &p.VulnMedium, &p.VulnLow, &p.VulnCap,
+		&p.CBSConnected, &p.SWIFTConnected, &p.PCIScope, &p.ExposureCap,
+		&p.NeverSeen, &p.CriticalProduction, &p.BankingType, &p.ContextCap,
+		&p.TotalCap, &p.HighRiskThreshold,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("risk profile: %w", err)
+	}
+	return &p, nil
+}
+
 // UpdateLastSeen touches the last_seen_at timestamp.
 func (r *AssetRepository) UpdateLastSeen(ctx context.Context, tenantID uuid.UUID, ip string) error {
 	const q = `
@@ -386,7 +418,8 @@ func (r *AssetRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 	// Total + risk/flag counts
 	const q1 = `
 		SELECT COUNT(*),
-		       COUNT(*) FILTER (WHERE risk_score >= 7),
+		       -- What counts as high risk is the tenant's own line, not ours.
+		       COUNT(*) FILTER (WHERE risk_score >= risk_high_threshold),
 		       COUNT(*) FILTER (WHERE is_cbs_connected),
 		       COUNT(*) FILTER (WHERE is_swift_connected),
 		       COUNT(*) FILTER (WHERE is_pci_scope),
@@ -535,6 +568,7 @@ func scanAsset(row scannable) (*model.Asset, error) {
 		&ownerID, &dept, &loc, &bizSvc,
 		&a.IsCBSConnected, &a.IsSWIFTConnected, &a.IsPCIScope,
 		&a.RiskScore, &a.VulnCritical, &a.VulnHigh, &a.VulnMedium, &a.VulnLow,
+		&a.RiskProfileCode,
 		&a.Tags, &metadata, &discoveredBy,
 		&lastSeen, &a.FirstSeenAt, &a.CreatedAt, &a.UpdatedAt,
 	)

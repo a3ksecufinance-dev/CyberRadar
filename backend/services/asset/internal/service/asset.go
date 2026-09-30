@@ -101,8 +101,26 @@ func (s *AssetService) RiskBreakdown(ctx context.Context, tenantID, assetID uuid
 	if err != nil {
 		return nil, err
 	}
-	_, rb := ScoreAsset(a)
+	// The breakdown explains the score under the weights that produced it. An
+	// explanation that does not name its profile explains nothing: the reader
+	// cannot tell a high score from a strict risk appetite.
+	profile, err := s.repo.RiskProfile(ctx, tenantID)
+	if err != nil {
+		return nil, apierrors.Internal("risk profile", err)
+	}
+	_, rb := ScoreAsset(a, profile)
 	return rb, nil
+}
+
+// RiskProfile returns the risk appetite in force for a tenant, so an interface
+// can show the weights beside the scores they produced — and offer to change
+// them.
+func (s *AssetService) RiskProfile(ctx context.Context, tenantID uuid.UUID) (*model.RiskProfile, error) {
+	p, err := s.repo.RiskProfile(ctx, tenantID)
+	if err != nil {
+		return nil, apierrors.Internal("risk profile", err)
+	}
+	return p, nil
 }
 
 // Stats returns aggregated statistics for the tenant.

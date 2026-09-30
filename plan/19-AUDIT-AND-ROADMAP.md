@@ -1173,6 +1173,81 @@ Et deux dans le lanceur local, trouvés en faisant tourner tout cela :
   en `EADDRINUSE`. Les processus sont maintenant lancés dans leur propre groupe,
   et c'est le groupe qui est arrêté.
 
+### 3.14 Paramétrable — et la ligne où cela s'arrête
+
+Le score de risque portait ses pondérations en dur. Le problème n'était pas la
+propreté : **les pondérations ne sont pas des faits sur le parc, ce sont
+l'appétence au risque d'une institution**. CVSS 9,8 vaut 9,8 partout ; qu'une
+vulnérabilité critique sur un actif exposé et dans le périmètre carte vaille 7
+ou 9 est une décision que la fonction risque d'une banque prend, défend devant
+son régulateur, et révise. Un éditeur qui tranche à sa place a tort, ou se fera
+contester à chaque appel d'offres.
+
+Le modèle retenu, et qui vaut comme **patron pour le reste de la plateforme** :
+
+**La question à se poser sur chaque valeur : est-ce un fait ou un jugement ?**
+Un fait ne se paramètre pas — le score CVSS, l'appartenance au catalogue KEV,
+l'horodatage d'un événement. Un jugement se paramètre toujours : une
+pondération, un seuil, un délai de correction contractuel, ce qui compte comme
+« risque élevé », quelles détections sont actives, quels référentiels
+s'appliquent. Rendre un fait configurable est une porte ouverte à la
+falsification ; laisser un jugement en dur, c'est imposer le nôtre.
+
+**Des valeurs standards livrées, pas un formulaire vide.** Quatre profils —
+équilibré, orienté vulnérabilités, orienté PCI DSS, orienté SWIFT CSCF — parce
+qu'une banque n'a pas une appétence unique : ce qu'un évaluateur carte demande
+et ce qu'une attestation CSCF demande ne sont pas la même question. Le client en
+adopte un puis l'ajuste, et **l'écart au profil standard est ce qu'il défend
+devant son auditeur** — beaucoup plus solide qu'un ensemble de nombres sans
+généalogie. Un tenant qui n'a rien choisi est noté sous le profil standard, et
+l'API le **dit** (`chosen: false`) : présenter un défaut comme une décision du
+client, c'est finir par défendre l'appétence de quelqu'un d'autre en audit.
+
+**Versionné et daté, jamais modifié en place.** Sous DORA et ISO 27001, un score
+qui a fondé une décision doit s'expliquer des mois plus tard, et la première
+question est « quelle était la formule ce jour-là ». Une ligne éditée sur place
+ne peut pas y répondre. Chaque changement ouvre une version et ferme la
+précédente, avec l'auteur et une note libre — la note est ce que l'auditeur lit
+d'abord : *pourquoi* ce choix.
+
+**Des colonnes nommées, pas un blob JSON.** Une pondération porte alors une
+contrainte qui la borne, la vue SQL la joint sans rien extraire, et un facteur
+ajouté au modèle est une migration que quelqu'un a relue — pas une clé qui
+apparaît en production.
+
+**Un ensemble de facteurs fixe, pondérable — pas un langage d'expressions.** Et
+c'est le point sur lequel je serais le plus ferme : un client capable d'écrire
+des formules arbitraires obtient un nombre que plus personne n'explique, sans
+répartition par facteur, incomparable d'un tenant à l'autre, et impossible à
+défendre. Le contrat qui tient est **toute liberté sur le jugement, aucune sur
+le vocabulaire**. Un facteur qui manque vraiment est une conversation produit,
+pas un champ de configuration.
+
+**L'autorité n'est pas administrative.** Les routes sont derrière `risk:read` /
+`risk:write`, pas `tenants:*`. Dans la matrice seedée, le CISO peut changer
+l'appétence et un administrateur de tenant ne peut pas : c'est le bon sens de la
+séparation.
+
+**Ce que cela coûte.** La formule existe désormais deux fois — en SQL dans la vue
+`asset_risk`, pour trier et compter cent mille actifs dans la base, et en Go pour
+la répartition qui l'explique. Le test d'intégration fait tourner les deux sur
+les mêmes lignes **sous chacun des quatre profils standards**, et un second test
+vérifie que les valeurs seedées par la migration et celles codées dans
+`DefaultRiskProfile` coïncident : deux jeux de défauts qui divergent
+signifieraient qu'une installation neuve note autrement qu'une installation
+documentée.
+
+**Mesuré.** Le profil `balanced` reproduit exactement l'ancienne formule : rendre
+la chose paramétrable n'a changé aucun chiffre. En adoptant `swift_cscf` avec le
+poids SWIFT porté à 2,5 et le seuil à 6, `swift-gw-01` passe de 5,40 à 7,15,
+`hsm-pay-01` de 6,00 à 7,75, et le compteur « risque élevé » de 3 à 7 — et la
+répartition nomme le profil et sa version.
+
+**Ce qui reste.** La page Réglages ne sait pas encore écrire ce profil ; l'API
+est là, l'écran non. Et le même patron reste à appliquer aux autres jugements en
+dur : les seuils de détection UEBA, les délais SLA de correction, les
+pondérations du score de chemin d'attaque, les seuils de score des règles SIEM.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
@@ -1336,8 +1411,10 @@ Reste :
 - **Auditer les services non exercés** — *fait*, voir §3.12. Les 118 routes de
   lecture des 29 services qui tournent répondent ; la seule qui échouait était
   la recherche dans la piste d'audit, cassée depuis toujours.
-- **Faire valider les pondérations de `risk_score`** par la fonction risque
-  avant que le score de sécurité soit présenté comme une mesure (§3.8).
+- **Pondérations de `risk_score`** — *fait autrement*, voir §3.14 : elles ne sont
+  plus à valider, elles sont **paramétrables par client**, versionnées et datées.
+  Ce qui reste du point d'origine : chaque client doit trancher son propre
+  profil ; la plateforme ne peut pas le faire à sa place.
 - Endpoint de réglages du tenant, pour que la page Réglages puisse écrire.
 - Visualisation du graphe d'attaque (Cytoscape.js ou react-force-graph).
 - Heatmap MITRE ATT&CK.

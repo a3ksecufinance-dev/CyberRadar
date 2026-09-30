@@ -31,6 +31,9 @@ func (h *AssetHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/assets", h.List)
 	r.Post("/assets", h.Create)
 	r.Get("/assets/stats", h.Stats)
+	// The weights every score on this page was produced with. An interface that
+	// shows a number should be able to show what produced it.
+	r.Get("/assets/risk-profile", h.RiskProfile)
 	r.Get("/assets/discovery", h.ListDiscovery)
 
 	r.Route("/assets/{assetID}", func(r chi.Router) {
@@ -158,6 +161,17 @@ func (h *AssetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.NoContent(w)
+}
+
+// RiskProfile handles GET /assets/risk-profile
+func (h *AssetHandler) RiskProfile(w http.ResponseWriter, r *http.Request) {
+	tenantID := mustTenantID(r)
+	profile, err := h.svc.RiskProfile(r.Context(), tenantID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.OK(w, profile)
 }
 
 // RiskBreakdown handles GET /assets/{assetID}/risk

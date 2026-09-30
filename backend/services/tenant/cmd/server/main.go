@@ -72,6 +72,12 @@ func main() {
 	tenantSvc := service.NewTenantService(tenantRepo, logger)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 
+	// Risk appetite is tenant configuration, so it lives here — but under its
+	// own authority, not the tenants:* one. See RegisterRoutes.
+	riskProfileRepo := repository.NewRiskProfileRepository(dbPool)
+	riskProfileSvc := service.NewRiskProfileService(riskProfileRepo, logger)
+	riskProfileHandler := handler.NewRiskProfileHandler(riskProfileSvc)
+
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
 	// Before everything else: a browser sends a preflight without
@@ -106,8 +112,17 @@ func main() {
 	// API routes (JWT auth middleware applied)
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
-		r.Use(authmw.RequirePermissionByMethod("tenants"))
-		tenantHandler.RegisterRoutes(r)
+
+		// Two groups, because they are two authorities. Creating a tenant is
+		// administrative; setting a risk appetite is a risk-management
+		// decision, and in the seeded matrix the CISO holds the second and not
+		// the first. Mounting the profile inside the tenants group would have
+		// required both.
+		r.Group(func(r chi.Router) {
+			r.Use(authmw.RequirePermissionByMethod("tenants"))
+			tenantHandler.RegisterRoutes(r)
+		})
+		riskProfileHandler.RegisterRoutes(r)
 	})
 
 	// ─── Server ──────────────────────────────────────────────

@@ -102,6 +102,12 @@ type Asset struct {
 	VulnMedium   int     `json:"vuln_medium"`
 	VulnLow      int     `json:"vuln_low"`
 
+	// RiskProfileCode names the weights that produced RiskScore. It travels
+	// with the score on purpose: the same asset scores differently under a
+	// card-scope profile and a payment-zone one, and a number shown without
+	// saying which one produced it is a number nobody can defend.
+	RiskProfileCode string `json:"risk_profile_code,omitempty"`
+
 	Tags     []string               `json:"tags"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 
@@ -258,4 +264,51 @@ type RiskBreakdown struct {
 	BehaviorScore    float64   `json:"behavior_score"`
 	ContextScore     float64   `json:"context_score"`
 	Factors          []string  `json:"factors"`
+
+	// Profile is the risk appetite the breakdown was computed under. An
+	// explanation that does not name its weights explains nothing: the reader
+	// cannot tell a high score from a strict profile.
+	Profile *RiskProfile `json:"profile,omitempty"`
+}
+
+// RiskProfile is one institution's risk appetite: what each factor of the asset
+// score is worth, and where this institution draws the line it calls high risk.
+//
+// The weights are a judgement, not a fact. CVSS 9.8 is 9.8 everywhere; whether
+// a critical finding on an internet-facing card-scope asset scores 7 or 9 is a
+// decision a bank's risk function makes and defends. The platform ships
+// standard profiles and the tenant adjusts; the fields are fixed so the score
+// stays explicable and comparable.
+type RiskProfile struct {
+	ID      uuid.UUID `json:"id"`
+	Code    string    `json:"code"`
+	Name    string    `json:"name"`
+	Version int       `json:"version"`
+	// IsTenantProfile is false when this tenant has not chosen one and is being
+	// scored under the platform's standard profile.
+	IsTenantProfile bool   `json:"is_tenant_profile"`
+	BasedOn         string `json:"based_on,omitempty"`
+
+	CriticalityStep float64 `json:"criticality_step"`
+	CriticalityCap  float64 `json:"criticality_cap"`
+
+	VulnCritical float64 `json:"vuln_critical"`
+	VulnHigh     float64 `json:"vuln_high"`
+	VulnMedium   float64 `json:"vuln_medium"`
+	VulnLow      float64 `json:"vuln_low"`
+	VulnCap      float64 `json:"vuln_cap"`
+
+	CBSConnected   float64 `json:"cbs_connected"`
+	SWIFTConnected float64 `json:"swift_connected"`
+	PCIScope       float64 `json:"pci_scope"`
+	ExposureCap    float64 `json:"exposure_cap"`
+
+	NeverSeen float64 `json:"never_seen"`
+
+	CriticalProduction float64 `json:"critical_production"`
+	BankingType        float64 `json:"banking_type"`
+	ContextCap         float64 `json:"context_cap"`
+
+	TotalCap          float64 `json:"total_cap"`
+	HighRiskThreshold float64 `json:"high_risk_threshold"`
 }

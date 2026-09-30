@@ -683,6 +683,69 @@ piste d'audit répondait 500 depuis que le code existe.
 contrôle ne vaut que sur ce que le jeu de démonstration remplit — d'où l'ordre
 `demo` puis `smoke`.
 
+### L'appétence au risque est celle du client
+
+Les pondérations du score d'actif ne sont pas des faits sur le parc, ce sont
+l'appétence au risque d'une institution. CVSS 9,8 vaut 9,8 partout ; qu'une
+vulnérabilité critique sur un actif exposé et dans le périmètre carte vaille 7 ou
+9 est une décision que la fonction risque prend et défend devant son régulateur.
+
+```bash
+GET  /api/v1/risk-profiles/presets    # les quatre profils livrés
+GET  /api/v1/risk-profiles/active     # celui en vigueur, et si le client l'a choisi
+GET  /api/v1/risk-profiles/history    # toutes les versions, avec auteur et note
+PUT  /api/v1/risk-profiles/active     # une nouvelle version  (risk:write)
+```
+
+```bash
+curl -X PUT localhost:8001/api/v1/risk-profiles/active -H "Authorization: Bearer $TOKEN"   -d '{"based_on":"swift_cscf","name":"Appétence BNF 2026",
+       "notes":"Validé par le comité des risques du 30/09.",
+       "weights":{"swift_connected":2.5,"high_risk_threshold":6.0}}'
+```
+
+Quatre profils standards — équilibré, orienté vulnérabilités, orienté PCI DSS,
+orienté SWIFT CSCF — parce qu'une banque n'a pas une appétence unique : ce qu'un
+évaluateur carte demande et ce qu'une attestation CSCF demande ne sont pas la
+même question. Le client en adopte un puis l'ajuste, et **l'écart au profil
+standard est ce qu'il défend devant son auditeur**.
+
+Six décisions de conception, qui valent comme patron pour le reste de la
+plateforme :
+
+- **Fait ou jugement.** Un fait ne se paramètre pas — score CVSS, appartenance
+  au KEV, horodatage. Un jugement se paramètre toujours — pondération, seuil,
+  délai contractuel, ce qui compte comme « risque élevé ». Rendre un fait
+  configurable ouvre la porte à la falsification ; laisser un jugement en dur,
+  c'est imposer le nôtre.
+- **Des valeurs standards, pas un formulaire vide.** Un tenant qui n'a rien
+  choisi est noté sous le profil standard, et l'API le dit (`chosen: false`) :
+  présenter un défaut comme une décision du client, c'est finir par défendre
+  l'appétence de quelqu'un d'autre en audit.
+- **Versionné et daté, jamais modifié en place.** Un score qui a fondé une
+  décision doit s'expliquer des mois plus tard, et la première question est
+  « quelle était la formule ce jour-là ». Chaque changement ouvre une version et
+  ferme la précédente, avec l'auteur et une note — la note est ce que l'auditeur
+  lit d'abord.
+- **Des colonnes nommées, pas un blob JSON.** Une pondération porte alors une
+  contrainte qui la borne, la vue SQL la joint sans rien extraire, et un facteur
+  ajouté est une migration relue plutôt qu'une clé qui apparaît en production.
+- **Un ensemble de facteurs fixe, pondérable — pas un langage d'expressions.**
+  Un client qui peut écrire des formules arbitraires obtient un nombre que plus
+  personne n'explique, sans répartition, incomparable d'un tenant à l'autre.
+  Toute liberté sur le jugement, aucune sur le vocabulaire.
+- **L'autorité n'est pas administrative.** `risk:read` / `risk:write`, pas
+  `tenants:*` : le CISO change l'appétence, un administrateur de tenant non.
+
+Le profil `balanced` reproduit exactement l'ancienne formule — rendre la chose
+paramétrable n'a changé aucun chiffre. En adoptant `swift_cscf` avec le poids
+SWIFT à 2,5 et le seuil à 6 : `swift-gw-01` passe de 5,40 à 7,15, `hsm-pay-01`
+de 6,00 à 7,75, le compteur « risque élevé » de 3 à 7, et
+`GET /assets/{id}/risk` nomme le profil et sa version.
+
+**Reste** : la page Réglages ne sait pas encore écrire ce profil, et le même
+patron reste à appliquer aux autres jugements en dur — seuils UEBA, délais SLA,
+pondérations des chemins d'attaque, seuils des règles SIEM.
+
 ### Le score de risque d'un actif
 
 `assets.vuln_critical`, `vuln_high`, `vuln_medium` et `vuln_low` étaient lues
