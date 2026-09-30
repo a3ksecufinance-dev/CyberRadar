@@ -1104,6 +1104,42 @@ enregistrer les hits, et c'est voulu : un hit enregistré doit reposer sur la
 réponse de la base, pas sur un champ posé en amont. Les deux ne partagent que
 l'extraction des candidats.
 
+### 3.12 Les lectures que personne n'avait jamais exécutées
+
+Deux défauts du même genre avaient été trouvés en exerçant six services à la
+main — une colonne nullable lue dans une `string` Go, qui compile, passe la
+revue, et répond 500 la première fois que la colonne est vide. Vingt-quatre
+services n'avaient jamais été exercés du tout.
+
+`internal/pkg/apicheck` lit maintenant **toutes** les routes de liste de tous
+les services contre une plateforme qui tourne, et échoue sur le moindre 5xx.
+Les chemins viennent de deux sources : la table `ROUTES` de l'interface, **lue
+depuis `frontend/src/lib/api.ts`** plutôt que recopiée — une route que
+l'interface gagne est couverte sans que personne y pense, et une route renommée
+ne laisse pas une sonde périmée passer contre un endpoint que plus rien
+n'appelle — et une table explicite pour les quatorze services que l'interface
+n'appelle pas encore. Un test de couverture échoue si un service déployé n'a
+aucune sonde ; `collector` y est nommé comme exception, avec sa raison (il
+n'expose que de l'écriture machine).
+
+**Ce que la première exécution a trouvé.** 118 routes, un seul 500 :
+`GET /api/v1/audit/events`. La recherche dans la piste d'audit passait au
+pilote ClickHouse une `map[string]any` contenant un `time.Time` là où un
+paramètre de requête nommé doit être une chaîne — `clickhouse.Named`, comme le
+reste du dépôt le fait déjà. Le pilote refusait la requête entière. **Toute
+lecture de la piste d'audit répondait 500 depuis que le code existe**, et rien
+ne le disait : un 500 issu d'une erreur domaine enveloppée en `Internal` ne
+laissait aucune ligne de journal jusqu'à ce que ce soit corrigé (§3.10). Les
+deux corrections se sont trouvées le même jour, et la seconde a nommé la
+première en une ligne.
+
+**Une limite à connaître avant de se fier à un succès** : la lecture d'une
+table vide ne peut pas rencontrer de NULL. Le contrôle ne vaut que sur ce que
+le jeu de démonstration remplit — d'où `dev-local.sh demo` puis
+`dev-local.sh smoke`, dans cet ordre. La CI n'exécute que la moitié qui ne
+demande pas de plateforme : faire tourner trente services dans un job reste à
+faire.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
@@ -1264,9 +1300,9 @@ les trois défauts qui vidaient le tableau de bord corrigés.
 
 Reste :
 
-- Auditer les autres services pour la lecture de colonnes nullables dans des
-  `string` Go — deux occurrences trouvées (IR, OT) en exécutant six services ;
-  vingt-quatre n'ont pas été exercés.
+- **Auditer les services non exercés** — *fait*, voir §3.12. Les 118 routes de
+  lecture des 29 services qui tournent répondent ; la seule qui échouait était
+  la recherche dans la piste d'audit, cassée depuis toujours.
 - **Faire valider les pondérations de `risk_score`** par la fonction risque
   avant que le score de sécurité soit présenté comme une mesure (§3.8).
 - Endpoint de réglages du tenant, pour que la page Réglages puisse écrire.

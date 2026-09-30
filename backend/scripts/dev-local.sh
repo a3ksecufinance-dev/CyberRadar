@@ -10,6 +10,7 @@
 #
 #   ./scripts/dev-local.sh up         everything, in order
 #   ./scripts/dev-local.sh demo       fill the tenant with a demonstration estate
+#   ./scripts/dev-local.sh smoke      read every service's lists, fail on any 5xx
 #   ./scripts/dev-local.sh status     what is listening and what is healthy
 #   ./scripts/dev-local.sh logs siem-service
 #   ./scripts/dev-local.sh down       stop everything this script started
@@ -489,6 +490,19 @@ cmd_demo() {
 		./bin/demo-seed "$@")
 }
 
+# cmd_smoke reads every service's list endpoints and fails on any 5xx.
+#
+# It is the check that a class of defect no build sees — a nullable column
+# scanned into a Go string — has not come back. Run it after `demo`: a read of
+# an empty table cannot hit a NULL, so a pass against an empty install means
+# very little.
+cmd_smoke() {
+	step "Reading every service's list endpoints"
+	(cd "$BACKEND_DIR" && APICHECK_DSN="$DATABASE_URL" \
+		JWT_PRIVATE_KEY_PATH="$BACKEND_DIR/deployments/jwt/private.pem" \
+		go test ./internal/pkg/apicheck/ -run TestEveryReadRouteAnswers -v -count=1)
+}
+
 # ─── Services ─────────────────────────────────────────────────────────────────
 
 cmd_build() {
@@ -640,6 +654,7 @@ case "${1:-up}" in
 	reset) cmd_reset ;;
 	seed) cmd_seed ;;
 	demo) shift; cmd_demo "$@" ;;
+	smoke) cmd_smoke ;;
 	infra) cmd_infra ;;
 	migrate) cmd_migrate ;;
 	build) cmd_build ;;
@@ -648,5 +663,5 @@ case "${1:-up}" in
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
 esac

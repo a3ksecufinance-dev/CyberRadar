@@ -29,8 +29,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/db"
-	"github.com/cyberradar/platform/internal/pkg/jwt"
-	"github.com/cyberradar/platform/internal/pkg/rbac"
+	"github.com/cyberradar/platform/internal/pkg/devtoken"
 	"github.com/google/uuid"
 )
 
@@ -115,9 +114,9 @@ func bootstrap(ctx context.Context, dsn, keyPath, email string, quiet bool) (str
 	}
 	defer pool.Close()
 
-	grant, err := rbac.NewResolver(pool).ByEmail(ctx, email)
+	token, grant, err := devtoken.Mint(ctx, pool, keyPath, email)
 	if err != nil {
-		return "", uuid.Nil, fmt.Errorf("resolve %s: %w (has scripts/dev-local.sh seed been run?)", email, err)
+		return "", uuid.Nil, err
 	}
 
 	var collectorRole uuid.UUID
@@ -133,27 +132,11 @@ func bootstrap(ctx context.Context, dsn, keyPath, email string, quiet bool) (str
 		collectorRole = uuid.Nil
 	}
 
-	signer, err := jwt.NewSignerFromFile(keyPath, time.Hour, time.Hour)
-	if err != nil {
-		return "", uuid.Nil, fmt.Errorf("load %s: %w", keyPath, err)
-	}
-	pair, err := signer.GenerateTokenPair(jwt.Subject{
-		TenantID:    grant.TenantID.String(),
-		UserID:      grant.IdentityID.String(),
-		Email:       grant.Email,
-		Roles:       grant.Roles,
-		Permissions: grant.Permissions,
-		IsAdmin:     grant.IsAdmin,
-	})
-	if err != nil {
-		return "", uuid.Nil, fmt.Errorf("mint token: %w", err)
-	}
-
 	if !quiet {
 		fmt.Printf("acting as %s (%s) — %d permissions\n",
 			grant.Email, strings.Join(grant.Roles, ", "), len(grant.Permissions))
 	}
-	return pair.AccessToken, collectorRole, nil
+	return token, collectorRole, nil
 }
 
 func baseURLs() map[string]string {

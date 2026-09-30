@@ -594,7 +594,7 @@ CRP_KEYCLOAK_HOME=/opt/keycloak-24.0.4 \
 
 `up` enchaîne infrastructure, migrations, identités, services et interface, puis
 affiche un état. Les étapes s'exécutent aussi séparément (`infra`, `migrate`,
-`seed`, `demo`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
+`seed`, `demo`, `smoke`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
 suit un journal, `down` n'arrête que ce que le script a démarré. Un test
 (`internal/pkg/deploycheck`) compare sa liste de services à celle du
 `docker-compose` et à la table de ports du frontend : un service ajouté d'un
@@ -616,6 +616,33 @@ Trois choses qu'une installation révèle et qu'aucun test ne montrait :
   rendait inatteignable.
 - **Le Copilot exige une clé de modèle** et refuse de démarrer sans. Le script
   le saute en le disant, plutôt que de le laisser mort dans la liste.
+
+### Vérifier que toutes les lectures répondent
+
+```bash
+./scripts/dev-local.sh demo && ./scripts/dev-local.sh smoke   # ou : make smoke
+```
+
+`internal/pkg/apicheck` lit **toutes** les routes de liste de tous les services
+et échoue sur le moindre 5xx. C'est le contrôle d'une classe de défaut
+qu'aucune compilation ne voit : une colonne nullable lue dans une `string` Go
+compile, passe la revue, et répond 500 la première fois que la colonne est
+vide. Deux avaient été trouvées en exerçant six services à la main ;
+vingt-quatre n'avaient jamais été exercés.
+
+Les chemins viennent de la table `ROUTES` de l'interface, **lue** depuis
+`frontend/src/lib/api.ts` plutôt que recopiée, plus une table explicite pour
+les quatorze services que l'interface n'appelle pas encore. Un test de
+couverture échoue si un service déployé n'a aucune sonde.
+
+Première exécution : 118 routes, un seul 500 — la recherche dans la piste
+d'audit, qui passait au pilote ClickHouse une `map[string]any` contenant un
+`time.Time` là où un paramètre nommé doit être une chaîne. Toute lecture de la
+piste d'audit répondait 500 depuis que le code existe.
+
+**Une limite** : la lecture d'une table vide ne peut pas rencontrer de NULL. Le
+contrôle ne vaut que sur ce que le jeu de démonstration remplit — d'où l'ordre
+`demo` puis `smoke`.
 
 ### Le score de risque d'un actif
 
