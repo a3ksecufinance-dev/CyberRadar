@@ -419,6 +419,10 @@ services:
       - KAFKA_GROUP_ID=crp-pipeline
       - CLICKHOUSE_DSN=clickhouse://crp_user:crp_password_dev@clickhouse:9000/crp_audit
       - CLICKHOUSE_BATCH_SIZE=1000
+      # The indicator index is loaded from here. Without it the enrichment step
+      # matches nothing, and no rule keyed on ioc_matched can ever fire.
+      - DATABASE_URL=postgres://crp_user:crp_password_dev@postgres:5432/crp_foundation?sslmode=disable
+      - IOC_REFRESH_SECONDS=60
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=info
     depends_on:

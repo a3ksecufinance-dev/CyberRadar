@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/iocindex"
 	"github.com/cyberradar/platform/services/ti/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -607,15 +608,13 @@ func scanIOC(row scannable) (*model.IOC, error) {
 }
 
 // normalizeValue canonicalizes an IOC value for dedup matching.
+// normalizeValue delegates to iocindex, which the ingest path also uses.
+//
+// Two definitions would be worse than one in the wrong place: a lookup
+// normalised differently from the stored value misses every time, and misses
+// silently — "not a known indicator" is indistinguishable from a bug.
 func normalizeValue(iocType, value string) string {
-	v := strings.ToLower(strings.TrimSpace(value))
-	// Strip http(s):// scheme for URLs when storing normalized form
-	if iocType == model.IOCTypeDomain || iocType == model.IOCTypeURL {
-		v = strings.TrimPrefix(v, "http://")
-		v = strings.TrimPrefix(v, "https://")
-		v = strings.TrimRight(v, "/")
-	}
-	return v
+	return iocindex.Normalize(iocType, value)
 }
 
 func nvlS(s string) *string {

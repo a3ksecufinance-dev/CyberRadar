@@ -193,15 +193,35 @@ var demoRules = []map[string]any{
 		"actions": []map[string]any{{"type": "notify"}, {"type": "create_case"}},
 	},
 	{
+		// The one rule that reads the tenant's own threat intelligence. It
+		// asks whether enrichment matched an indicator at all, which is what
+		// ioc_matched now carries — and what no rule could ask before, because
+		// nothing populated the field.
 		"name":        "Contact avec un indicateur de compromission connu",
-		"description": "Un flux sortant dont la destination figure au renseignement.",
+		"description": "Un flux dont une valeur figure au renseignement du tenant, quel que soit le champ.",
 		"category":    "Network", "severity": "CRITICAL",
 		"mitre_tactic": "TA0011", "mitre_technique": "T1071.001",
 		"dedup_window_s": 300,
 		"conditions": map[string]any{
 			"field_matches": []map[string]any{
+				{"field": "ioc_matched", "op": "exists", "value": ""},
+			},
+		},
+		"actions": []map[string]any{{"type": "notify"}, {"type": "block_ip"}},
+	},
+	{
+		// Narrower, and the pair is the point: one rule says "anything the
+		// feed knows", this one says "a command-and-control address". Both are
+		// impossible to express without the field.
+		"name":        "Balise vers une adresse de commande et de contrôle",
+		"description": "Une adresse IP de l'événement figure au renseignement comme serveur de commande.",
+		"category":    "Network", "severity": "CRITICAL",
+		"mitre_tactic": "TA0011", "mitre_technique": "T1071.001",
+		"dedup_window_s": 600,
+		"conditions": map[string]any{
+			"field_matches": []map[string]any{
+				{"field": "ioc_matched", "op": "contains", "value": "ip:"},
 				{"field": "category", "op": "eq", "value": "Network"},
-				{"field": "threat_score", "op": "gte", "value": "6"},
 			},
 		},
 		"actions": []map[string]any{{"type": "notify"}, {"type": "block_ip"}},
@@ -228,12 +248,33 @@ func (s *seeder) seedRules(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	updated := 0
 	for _, r := range demoRules {
-		if _, err := s.ensure(ctx, idx, r["name"].(string), "siem", "/api/v1/siem/rules", r); err != nil {
+		name := r["name"].(string)
+		existing, found := idx[name]
+		id, err := s.ensure(ctx, idx, name, "siem", "/api/v1/siem/rules", r)
+		if err != nil {
 			return err
 		}
+		if !found {
+			continue
+		}
+		// A rule that is already there gets the current definition rather than
+		// being left alone. These rules are the demonstration's own, and what
+		// they detect changes as the platform gains fields to detect on — a
+		// second run that left a stale condition in place would show a rule
+		// that no longer matches what its name says.
+		if err := s.c.put(ctx, "siem", fmt.Sprintf("/api/v1/siem/rules/%s", existing), r, nil); err != nil {
+			return fmt.Errorf("update rule %q: %w", name, err)
+		}
+		_ = id
+		updated++
 	}
-	fmt.Printf("   %d rules loaded in the engine\n", len(idx))
+	if updated > 0 {
+		fmt.Printf("   %d rules in the engine (%d refreshed)\n", len(idx), updated)
+	} else {
+		fmt.Printf("   %d rules loaded in the engine\n", len(idx))
+	}
 	return nil
 }
 

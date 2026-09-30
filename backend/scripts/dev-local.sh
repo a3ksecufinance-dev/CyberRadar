@@ -524,6 +524,7 @@ cmd_services() {
 		start pipeline-worker env \
 			"DATABASE_URL=$DATABASE_URL" "KAFKA_BROKERS=localhost:9092" \
 			"KAFKA_GROUP_ID=crp-pipeline" "CLICKHOUSE_DSN=$CLICKHOUSE_DSN" \
+			"IOC_REFRESH_SECONDS=${CRP_IOC_REFRESH_SECONDS:-15}" \
 			"CLICKHOUSE_BATCH_SIZE=1000" "LOG_LEVEL=${CRP_LOG_LEVEL:-info}" \
 			"$BACKEND_DIR/bin/pipeline-worker"
 	fi

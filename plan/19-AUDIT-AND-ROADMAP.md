@@ -1044,6 +1044,66 @@ d'attaque, conformité, incidents — chargent sans une seule erreur d'API.
 
 ---
 
+### 3.11 Le renseignement ne pilotait aucune détection
+
+L'enrichisseur du pipeline renvoyait `[]` pour les IOC, avec un commentaire le
+disant. Le seul composant qui matchait réellement des indicateurs était un
+second consommateur du **même topic** que le moteur de règles — donc à côté de
+lui, pas avant. Conséquence : aucune règle ne pouvait être écrite sur une
+correspondance, et les indicateurs du tenant n'avaient **aucun effet sur la
+détection**. Onze indicateurs chargés, zéro détection possible.
+
+**Où la question doit être posée.** Dans l'enrichissement, avant que le moteur
+de règles voie l'événement. C'est la détection la plus précieuse qu'une
+plateforme de ce type puisse faire : « quelque chose ici a parlé à une adresse
+que le flux connaît ».
+
+**Pourquoi un index en mémoire** (`internal/pkg/iocindex`) et non un appel au
+service TI. Un événement porte jusqu'à une demi-douzaine de valeurs candidates ;
+aux débits annoncés cela fait des centaines de milliers de recherches par
+seconde, qu'aucune base et aucun cache réseau ne servira. Le coût est que
+l'index est un instantané : un indicateur ajouté maintenant met jusqu'au
+rafraîchissement suivant (60 s par défaut) à peser sur la détection. La fenêtre
+est bornée et l'âge de l'instantané est journalisé — c'est le compromis honnête.
+Un plafond (`IOC_MAX_ENTRIES`, un million par défaut) borne la mémoire du chemin
+d'ingestion ; un flux plus gros est matché partiellement **et le dit**.
+
+**Trois décisions dans la notation.**
+
+- Une correspondance **relève le score à un plancher** plutôt que de s'y
+  ajouter : additionner laisserait deux correspondances faibles peser plus
+  qu'une certaine, et rendrait le seuil qu'une règle doit comparer dépendant du
+  nombre de champs qui ont matché. Plancher : CRITICAL 9, HIGH 8, MEDIUM 6,
+  LOW 4.
+- **L'attribution du flux bat la devinette par mot-clé.** Un événement
+  `file_transfer` était étiqueté T1041 par heuristique ; s'il a touché une
+  adresse que le flux attribue à T1071.001, c'est celle du flux qui est portée.
+- Le champ `ioc_matched` est **vide, jamais nul** : un consommateur ne doit pas
+  avoir à distinguer « aucune correspondance » de « champ non renseigné ».
+
+**Une seule extraction de candidats.** Il y en avait deux, et elles étaient en
+désaccord — l'une lisait `user_name`, l'autre aurait lu `user_email` — donc
+quels indicateurs pouvaient matcher dépendait du composant interrogé. De même,
+la normalisation (`Normalize`) est désormais partagée entre l'index et le dépôt
+TI : une recherche normalisée autrement que la valeur stockée manque à chaque
+fois, et manque **silencieusement**.
+
+**Le champ est devenu interrogeable.** `ioc_matched` est ajouté à `getField` du
+moteur de règles : une règle dit `exists` pour « le flux connaît quelque chose
+ici », ou `contains "ip:"` pour nommer un genre. Le jeu de démonstration porte
+les deux.
+
+**Mesuré sur la plateforme installée** : 39 événements injectés, index de 11
+indicateurs, **14 alertes** contre 5 auparavant — dont 5 levées par les deux
+nouvelles règles sur 4 entités distinctes. Dans ClickHouse, les événements
+concernés portent `ioc_matched`, un `threat_score` à 9 (plancher CRITICAL) ou 8
+(HIGH), et la technique du flux.
+
+**Ce qui reste.** Le service TI continue de faire sa propre recherche pour
+enregistrer les hits, et c'est voulu : un hit enregistré doit reposer sur la
+réponse de la base, pas sur un champ posé en amont. Les deux ne partagent que
+l'extraction des candidats.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
@@ -1186,7 +1246,10 @@ Aucun déploiement production sans cette phase.
   passage supprime la perte de mise à jour entre réplicas.
 - **pgvector** + RAG Copilot — *fait*, voir §3.6. Reste : alimenter le corpus
   automatiquement depuis les incidents résolus, et découper les longs documents.
-- Enrichissement pipeline : GeoIP (MaxMind) + matching IOC contre le service TI.
+- **Matching IOC dans l'enrichissement** — *fait*, voir §3.11. GeoIP reste : la
+  résolution pays/ASN exige une base MaxMind sous licence, que ce dépôt ne peut
+  pas embarquer ; l'enrichisseur détecte les plages privées et laisse le reste
+  vide, ce qui est visible plutôt que faux.
 - **Multi-tenancy syslog** : mapping IP source / certificat client → tenant.
 
 ### Phase 3 — Complétude produit · 6 à 8 semaines

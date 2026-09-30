@@ -185,6 +185,16 @@ func getField(ev *event.NormalizedEvent, field string) string {
 		if ev.GeoCountry != nil {
 			return *ev.GeoCountry
 		}
+	case "ioc_matched":
+		// The indicators this event touched, as "type:value@field", joined.
+		// A rule uses `exists` to mean "matched anything", or `contains` to
+		// name a kind — "ip", say, or a specific address.
+		//
+		// The field was on the event all along and unreachable from a rule,
+		// which meant the estate's threat intelligence could not drive a
+		// detection: the most valuable signal the platform holds was the one
+		// thing a rule could not ask about.
+		return strings.Join(ev.IOCMatched, ",")
 	case "risk_score":
 		return fmt.Sprintf("%.2f", ev.RiskScore)
 	case "threat_score":

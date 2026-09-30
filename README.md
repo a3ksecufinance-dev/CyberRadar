@@ -246,6 +246,55 @@ enregistre tous.
 La rétention est de 30 jours — la plus large fenêtre utilisée. Le service PAM
 purge au démarrage puis toutes les 6 heures.
 
+### Le renseignement pilote la détection
+
+L'enrichisseur du pipeline renvoyait une liste d'IOC vide, avec un commentaire
+le disant. Le seul composant qui matchait des indicateurs était un second
+consommateur du **même topic** que le moteur de règles — à côté de lui, pas
+avant — donc aucune règle ne pouvait porter sur une correspondance. Onze
+indicateurs chargés, zéro détection possible.
+
+`internal/pkg/iocindex` répond maintenant « cette valeur est-elle un indicateur
+connu ? » assez vite pour la poser sur chaque événement, dans
+l'enrichissement, avant le moteur de règles.
+
+```
+{"field": "ioc_matched", "op": "exists"}                  le flux connaît quelque chose ici
+{"field": "ioc_matched", "op": "contains", "value": "ip:"} une adresse, précisément
+```
+
+**Un index en mémoire, pas un appel au service TI.** Un événement porte jusqu'à
+six valeurs candidates ; aux débits visés cela fait des centaines de milliers de
+recherches par seconde, qu'aucune base et aucun cache réseau ne servira. Le coût
+assumé : l'index est un instantané, rafraîchi toutes les 60 s
+(`IOC_REFRESH_SECONDS`), et son âge est journalisé. Un plafond
+(`IOC_MAX_ENTRIES`) borne la mémoire du chemin d'ingestion, et un flux plus gros
+est matché partiellement **en le disant** — se taire serait rapporter zéro
+menace et être cru.
+
+Trois décisions qui se lisent dans le code :
+
+- Une correspondance **relève le score à un plancher**, elle ne s'y ajoute pas
+  (CRITICAL 9, HIGH 8, MEDIUM 6, LOW 4). Additionner laisserait deux
+  correspondances faibles peser plus qu'une certaine, et rendrait le seuil d'une
+  règle dépendant du nombre de champs qui ont matché.
+- **L'attribution du flux bat la devinette par mot-clé** : un `file_transfer`
+  était étiqueté T1041 par heuristique ; s'il a touché une adresse que le flux
+  attribue à T1071.001, c'est celle-là qui est portée.
+- L'extraction des champs candidats et la normalisation sont **partagées** avec
+  le service TI. Il y avait deux extractions en désaccord (`user_name` d'un
+  côté, `user_email` de l'autre) : quels indicateurs pouvaient matcher dépendait
+  du composant interrogé. Et une recherche normalisée autrement que la valeur
+  stockée manque à chaque fois, **silencieusement** — « pas un indicateur connu »
+  se lit exactement comme un événement propre.
+
+Mesuré sur l'installation : 39 événements, 11 indicateurs, **14 alertes** contre
+5 avant, dont 5 dues aux deux règles de renseignement sur 4 entités distinctes.
+
+**GeoIP reste ouvert** : la résolution pays/ASN demande une base MaxMind sous
+licence que ce dépôt ne peut pas embarquer. L'enrichisseur reconnaît les plages
+privées et laisse le reste vide — visible, plutôt que faux.
+
 ### Copilot : modèle et outils
 
 Le service appelle l'API Messages en direct, sans SDK. Rien n'y est figé :
@@ -518,10 +567,10 @@ Ce qu'il faut regarder en premier, une fois connecté :
 
 | Page | Ce que le jeu de démonstration y met |
 |---|---|
-| Tableau de bord | 5 alertes ouvertes, 5 incidents, 11 indicateurs actifs, 21 chemins d'attaque |
+| Tableau de bord | 14 alertes ouvertes, 5 incidents, 11 indicateurs actifs, 21 chemins d'attaque |
 | Actifs | 14 actifs, score de risque de 3,5 à 7,5, 3 au-dessus du seuil |
 | Vulnérabilités | 10 CVE réelles, 15 constats, CVSS moyen 8,8 |
-| SIEM | 5 alertes **levées par le moteur** à partir de 39 événements injectés |
+| SIEM | 14 alertes **levées par le moteur** à partir de 39 événements injectés, dont 5 sur une correspondance d'indicateur |
 | Chemins d'attaque | 3 scénarios analysés, 21 chemins, 2 points de passage obligé |
 | Conformité | DORA, PCI DSS, SWIFT CSP, ISO 27001 et leurs écarts |
 
@@ -612,8 +661,9 @@ cd backend
 
 `internal/cmd/demoseed` écrit une banque de taille moyenne — quatorze actifs
 (canal en ligne, cœur bancaire, passerelle SWIFT, réseau monétique), dix CVE
-réelles et leurs constats, onze indicateurs rattachés à trois acteurs, cinq
-règles de détection, cinq incidents, un graphe d'attaque de seize nœuds avec
+réelles et leurs constats, onze indicateurs rattachés à trois acteurs, six
+règles de détection dont deux qui portent sur le renseignement lui-même, cinq
+incidents, un graphe d'attaque de seize nœuds avec
 trois scénarios analysés, quatre référentiels de conformité et leurs contrôles,
 un graphe de connaissance.
 
