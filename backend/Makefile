@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate seed demo smoke fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -177,6 +177,9 @@ seed: ## Give the realm's users an identity on the platform (nobody can sign in 
 smoke: ## Read every service's list endpoints against a running platform and fail on any 5xx
 	APICHECK_DSN=postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable \
 		go test ./internal/pkg/apicheck/ -run TestEveryReadRouteAnswers -v -count=1
+
+e2e: ## Drive the interface in a browser against a running, seeded platform
+	cd ../frontend && npx playwright test
 
 demo: ## Fill the tenant with a demonstration estate, through the platform's own API
 	go run ./internal/cmd/demoseed/

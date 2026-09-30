@@ -594,7 +594,7 @@ CRP_KEYCLOAK_HOME=/opt/keycloak-24.0.4 \
 
 `up` enchaîne infrastructure, migrations, identités, services et interface, puis
 affiche un état. Les étapes s'exécutent aussi séparément (`infra`, `migrate`,
-`seed`, `demo`, `smoke`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
+`seed`, `demo`, `smoke`, `e2e`, `services`, `frontend`), `status` dit ce qui répond, `logs <service>`
 suit un journal, `down` n'arrête que ce que le script a démarré. Un test
 (`internal/pkg/deploycheck`) compare sa liste de services à celle du
 `docker-compose` et à la table de ports du frontend : un service ajouté d'un
@@ -616,6 +616,45 @@ Trois choses qu'une installation révèle et qu'aucun test ne montrait :
   rendait inatteignable.
 - **Le Copilot exige une clé de modèle** et refuse de démarrer sans. Le script
   le saute en le disant, plutôt que de le laisser mort dans la liste.
+
+### Les tests end-to-end, dans un navigateur
+
+```bash
+cd backend
+./scripts/dev-local.sh up && ./scripts/dev-local.sh demo
+./scripts/dev-local.sh e2e        # ou : cd ../frontend && npm run e2e
+```
+
+Dix-sept parcours : la connexion via Keycloak, les huit pages que le jeu de
+démonstration alimente, les sept encore vides, et la déconnexion. Chaque page
+est jugée sur trois choses — **aucun appel d'API en 5xx, aucune requête que le
+navigateur n'a pas pu terminer** (c'est la trace qu'un préflight CORS bloqué
+laisse : rien, dans aucun journal de service, parce que la requête n'est jamais
+arrivée) **et aucune exception non rattrapée** — puis sur une donnée du jeu de
+démonstration réellement affichée.
+
+Les assertions portent sur les **données**, pas sur les libellés. Un libellé est
+traduit : l'affirmer teste le dictionnaire. Un nom d'actif à l'écran prouve
+toute la chaîne — PostgreSQL, le service, CORS, le jeton, le composant.
+
+Deux défauts trouvés par la première exécution, tous deux invisibles autrement :
+
+- **Le bouton « Log out » n'avait aucun gestionnaire.** Il se surlignait au
+  survol, il disait « Log out », et la session restait valide. Sur un poste
+  d'analyste partagé, c'est tout le défaut. La déconnexion passe maintenant par
+  `signOut`, qui termine aussi la session côté Keycloak — vider le cookie
+  pendant que le fournisseur garde sa session signifie que la reconnexion
+  suivante ne redemande pas de mot de passe.
+- **`output: 'standalone'` cassait le build servi.** Rien ne le consommait — il
+  n'y a pas de Dockerfile pour l'interface — et `next start`, ce que tout le
+  monde utilise, ne le supporte pas : Next le dit au démarrage, et le symptôme
+  est pire que l'avertissement. Le HTML servi réclamait des empreintes de chunks
+  différentes de celles présentes dans `.next/static`, donc chaque page chargeait
+  son cadre puis mourait sur `ChunkLoadError`, vide. Cliquer dans un build tiède
+  ne le montrait pas ; un navigateur piloté, si.
+
+La CI n'exécute pas ces tests : ils demandent une plateforme debout. Monter
+trente services dans un job reste à faire.
 
 ### Vérifier que toutes les lectures répondent
 

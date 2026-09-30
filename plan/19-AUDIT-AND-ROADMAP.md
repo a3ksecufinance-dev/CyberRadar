@@ -1140,6 +1140,39 @@ le jeu de démonstration remplit — d'où `dev-local.sh demo` puis
 demande pas de plateforme : faire tourner trente services dans un job reste à
 faire.
 
+### 3.13 Ce qu'un navigateur piloté a trouvé que rien d'autre ne voyait
+
+`frontend/e2e` couvre dix-sept parcours : la connexion via Keycloak, les huit
+pages alimentées par le jeu de démonstration, les sept encore vides, la
+déconnexion. Chaque page est jugée sur l'absence d'appel d'API en 5xx, l'absence
+de requête que le navigateur n'a pas pu terminer, l'absence d'exception non
+rattrapée — puis sur une donnée du jeu réellement affichée. Les assertions
+portent sur les données et non sur les libellés : un libellé est traduit, et
+l'affirmer teste le dictionnaire.
+
+Deux défauts à la première exécution :
+
+- **Le bouton de déconnexion n'avait aucun gestionnaire.** Sur un poste
+  d'analyste partagé, c'est tout le défaut. Corrigé via `signOut`, qui termine
+  aussi la session côté Keycloak.
+- **`output: 'standalone'` cassait le build servi** alors que rien ne le
+  consommait. `next start` ne le supporte pas ; le HTML réclamait des empreintes
+  de chunks absentes de `.next/static`, et chaque page mourait vide sur
+  `ChunkLoadError`.
+
+Et deux dans le lanceur local, trouvés en faisant tourner tout cela :
+
+- **Un pid seul n'est pas une identité.** Le fichier de pid de Redis contenait
+  482, qui après redémarrage appartenait à un worker noyau : le script a annoncé
+  Redis « déjà démarré » alors que rien n'écoutait. La même erreur dans l'autre
+  sens aurait tué ce worker. Le fichier porte désormais le pid **et l'heure de
+  démarrage** que le noyau enregistre — le couple est unique, et il survit à
+  `exec`, ce qu'un marqueur pris dans la ligne de commande ne fait pas.
+- **`stop` ne tuait que le pid enregistré.** `npm run start` lance le vrai
+  serveur en enfant ; l'enfant gardait le port et le démarrage suivant échouait
+  en `EADDRINUSE`. Les processus sont maintenant lancés dans leur propre groupe,
+  et c'est le groupe qui est arrêté.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
@@ -1308,7 +1341,9 @@ Reste :
 - Endpoint de réglages du tenant, pour que la page Réglages puisse écrire.
 - Visualisation du graphe d'attaque (Cytoscape.js ou react-force-graph).
 - Heatmap MITRE ATT&CK.
-- Tests end-to-end Playwright sur les parcours critiques.
+- **Tests end-to-end Playwright** — *fait*, voir §3.13. Dix-sept parcours ; deux
+  défauts trouvés à la première exécution, dont un bouton de déconnexion sans
+  gestionnaire.
 
 ### Phase 4 — Production readiness · 6 à 8 semaines
 

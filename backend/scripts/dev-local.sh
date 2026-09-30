@@ -11,6 +11,7 @@
 #   ./scripts/dev-local.sh up         everything, in order
 #   ./scripts/dev-local.sh demo       fill the tenant with a demonstration estate
 #   ./scripts/dev-local.sh smoke      read every service's lists, fail on any 5xx
+#   ./scripts/dev-local.sh e2e        drive the interface in a browser
 #   ./scripts/dev-local.sh status     what is listening and what is healthy
 #   ./scripts/dev-local.sh logs siem-service
 #   ./scripts/dev-local.sh down       stop everything this script started
@@ -65,28 +66,86 @@ fail() { printf '   \033[31m✗\033[0m %s\n' "$*" >&2; }
 
 # ─── Process bookkeeping ──────────────────────────────────────────────────────
 
-# start NAME COMMAND... — run in the background, record the pid, log to a file.
+# A pid on its own is not an identity.
+#
+# The pid file holds two lines: the pid, and the process start time the kernel
+# records for it. A pid is reused; a pid together with its start time is not.
+# After a reboot this script read a pid file holding 482, found that 482 existed
+# — it was a kernel worker by then — and reported Redis as already running while
+# nothing listened on its port. The same mistake in the other direction is
+# worse: stop would have killed that kernel worker.
+#
+# The start time survives exec, which matters: `npm run start` becomes a node
+# process, and a marker taken from the command line would stop matching.
+
+# proc_started PID prints the start time the kernel recorded for PID.
+#
+# Field 22 of /proc/<pid>/stat, counted after the executable name — which is
+# parenthesised and may itself contain spaces, so the fields before it cannot
+# simply be split on whitespace.
+proc_started() {
+	local stat="/proc/$1/stat"
+	[[ -r "$stat" ]] || return 1
+	local raw; raw="$(cat "$stat" 2>/dev/null)" || return 1
+	local after=")${raw#*)}"          # from the closing parenthesis onwards
+	# shellcheck disable=SC2086 # deliberate word splitting into positional args
+	set -- $after                     # $1 is ")", $2 is state, so field 22 is $21
+	printf '%s\n' "${21:-}"
+}
+
+# start NAME COMMAND... — run in the background in its own process group,
+# record the pid and its start time, log to a file.
 start() {
 	local name="$1"; shift
 	if running "$name"; then ok "$name already running"; return 0; fi
-	"$@" > "$LOG_DIR/$name.log" 2>&1 &
-	echo $! > "$PID_DIR/$name.pid"
+	# Its own session, so stop can signal the whole group. `npm run start`
+	# spawns the real server as a child; killing only the recorded pid left it
+	# holding the port, and the next start failed with EADDRINUSE.
+	setsid "$@" > "$LOG_DIR/$name.log" 2>&1 &
+	local pid=$!
+	printf '%s\n%s\n' "$pid" "$(proc_started "$pid")" > "$PID_DIR/$name.pid"
+}
+
+# pid_of NAME prints the pid only when the process is still the one recorded.
+pid_of() {
+	local pidfile="$PID_DIR/$1.pid"
+	[[ -f "$pidfile" ]] || return 1
+
+	local pid started
+	{ read -r pid; read -r started; } < "$pidfile"
+	[[ -n "$pid" ]] || return 1
+	kill -0 "$pid" 2>/dev/null || return 1
+
+	# An older pid file has no start time. Trusting it is what this exists to
+	# stop, so treat it as not ours and let the caller start afresh.
+	[[ -n "$started" ]] || return 1
+	[[ "$(proc_started "$pid")" == "$started" ]] || return 1
+
+	printf '%s\n' "$pid"
 }
 
 running() {
-	local pidfile="$PID_DIR/$1.pid"
-	[[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+	pid_of "$1" >/dev/null 2>&1
 }
 
 stop() {
 	local name="$1" pidfile="$PID_DIR/$1.pid"
 	[[ -f "$pidfile" ]] || return 0
-	local pid; pid="$(cat "$pidfile")"
-	if kill -0 "$pid" 2>/dev/null; then
-		kill "$pid" 2>/dev/null || true
-		for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
-		kill -9 "$pid" 2>/dev/null || true
+
+	local pid
+	if ! pid="$(pid_of "$name")"; then
+		# Either gone, or a pid that now belongs to something else. Removing
+		# the file is right; sending a signal would not be.
+		rm -f "$pidfile"
+		return 0
 	fi
+
+	# The negative pid is the process group, which start put this process at
+	# the head of. A wrapper that forwards no signal to its child would
+	# otherwise leave the child holding the port.
+	kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+	for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+	kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
 	rm -f "$pidfile"
 }
 
@@ -503,6 +562,20 @@ cmd_smoke() {
 		go test ./internal/pkg/apicheck/ -run TestEveryReadRouteAnswers -v -count=1)
 }
 
+# cmd_e2e drives the interface in a browser against this installation.
+#
+# Run it after `demo`: the tests assert that figures are on screen, and a page
+# reading zero is indistinguishable from a page that is broken.
+cmd_e2e() {
+	step "End-to-end, in a browser"
+	local chromium="${CRP_CHROMIUM_PATH:-}"
+	if [[ -z "$chromium" && -x /opt/pw-browsers/chromium ]]; then
+		chromium=/opt/pw-browsers/chromium
+	fi
+	(cd "$REPO_DIR/frontend" && [[ -d node_modules ]] || npm ci --silent)
+	(cd "$REPO_DIR/frontend" && CRP_CHROMIUM_PATH="$chromium" npx playwright test "$@")
+}
+
 # ─── Services ─────────────────────────────────────────────────────────────────
 
 cmd_build() {
@@ -655,6 +728,7 @@ case "${1:-up}" in
 	seed) cmd_seed ;;
 	demo) shift; cmd_demo "$@" ;;
 	smoke) cmd_smoke ;;
+	e2e) shift; cmd_e2e "$@" ;;
 	infra) cmd_infra ;;
 	migrate) cmd_migrate ;;
 	build) cmd_build ;;
@@ -663,5 +737,5 @@ case "${1:-up}" in
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|e2e|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
 esac
