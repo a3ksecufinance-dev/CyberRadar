@@ -1312,10 +1312,117 @@ documentation que personne n'utilise. Mesuré : 8 adoptées sur 15, 8 actives, 0
 règle propre, et **32 alertes** levées par le moteur sur les 39 événements
 injectés.
 
-**Ce qui reste.** L'écran : la page SIEM ne montre ni le catalogue, ni la
-couverture, ni l'écart au standard. Et une règle adoptée ne peut pas encore être
-« remise à niveau » vers la version courante en un geste — l'API dit qu'une mise
-à jour existe, elle ne l'applique pas.
+### 3.16 La remise à niveau : une fusion à trois, pas un écrasement
+
+Signaler qu'une version plus récente existe sans pouvoir la prendre, c'est une
+demi-réponse. La prendre en écrasant la règle aurait été la mauvaise autre
+moitié : la généalogie existait pour conserver les décisions du client, et une
+remise à niveau qui les jette détruit exactement ce qu'elle protégeait.
+
+La plateforme compare donc **à trois** — la version adoptée, celle qui est
+publiée, la règle telle qu'elle est — avec cinq issues par champ :
+
+| issue | situation | résultat |
+|---|---|---|
+| `unchanged` | personne ne l'a déplacé | — |
+| `take_incoming` | nous l'avons déplacé, pas eux | l'amélioration arrive |
+| `keep_tenant` | ils l'ont déplacé, pas nous | leur décision survit |
+| `converged` | les deux, à la même valeur | rien à décider |
+| `conflict` | les deux, différemment | **eux seuls peuvent trancher** |
+
+Un conflit non tranché **refuse** la remise à niveau et nomme les champs.
+Désigner un côté en silence, ce serait un éditeur qui fixe le seuil de détection
+d'une banque à sa place.
+
+Deux routes, parce qu'un plan doit être lisible sans être pris :
+`GET .../{code}/upgrade` calcule, `POST` applique. Le `POST` porte la version
+contre laquelle le plan a été calculé, et l'`UPDATE` vérifie cette version dans
+son `WHERE` : une décision prise sur un écart ne peut pas atterrir sur un autre
+après que le catalogue a bougé, et deux appels simultanés ne peuvent pas tous
+deux croire avoir fusionné.
+
+Vérifié sur la plateforme en marche. Une v2 de la détection d'exfiltration a été
+publiée — élargissant la fenêtre de déduplication, abaissant la sévérité que le
+tenant avait déjà relevée :
+
+```
+severity        conflict       adoptée HIGH   nous MEDIUM   eux CRITICAL
+dedup_window_s  take_incoming  adoptée 900    nous 1020     eux 900
+```
+
+Un `POST` vide a été refusé en nommant le champ. Trancher en faveur du tenant a
+laissé la règle en CRITICAL, pris la fenêtre élargie, déplacé la généalogie en
+v2 et enregistré le motif — l'écart d'après est donc **un seul champ, toujours
+le leur**.
+
+Migration 000041 : `content_upgraded_at`, tenu à part de `updated_at` (une règle
+dont on a corrigé le nom hier n'a pas été portée sur une détection plus récente,
+et une seule colonne ne peut pas dire les deux), et `lineage_notes`, parce
+qu'une décision ne survit à la personne qui l'a prise que si elle est écrite à
+côté de ce qu'elle décide.
+
+Six tests, deux mutations pour prouver qu'ils mordent : forcer la fusion à
+toujours prendre la valeur entrante, et laisser passer un conflit non tranché,
+échouent l'un comme l'autre.
+
+### 3.17 Les écrans : ce que la plateforme savait et que le client ne pouvait pas faire
+
+Le catalogue, l'écart au standard, la couverture ATT&CK et les pondérations du
+score de risque n'existaient que comme routes d'API. La plateforme savait ; le
+client n'y pouvait rien.
+
+**La page SIEM** répond maintenant à trois questions plutôt qu'à une. L'onglet
+*Bibliothèque* : les quinze détections, avec pour chacune si ce tenant la fait
+tourner, combien d'écarts sa copie porte, si une version plus récente existe, et
+combien d'alertes elle a levées ; en déplier une montre le raisonnement que le
+catalogue porte et qu'une liste de règles ne porte jamais. L'onglet *Couverture* :
+par technique, lacunes d'abord et en ambre, chacune nommant les entrées qui la
+combleraient. Les règles écrites par le tenant sont comptées **à part** : elles
+détectent peut-être exactement ce qu'il faut, mais ce n'est pas une couverture
+dont le catalogue peut répondre.
+
+**La page Réglages** ouvre sur l'appétit au risque : ce qui est en vigueur, sa
+version et sa date d'effet — et, quand le tenant n'a pas choisi, le fait qu'il
+est noté avec *nos* valeurs et non avec une décision qu'il a prise. Puis les
+quatre profils standards, les dix-sept facteurs groupés comme le score se
+construit, la valeur standard à côté de la sienne, le motif, et chaque version
+avec la fenêtre pendant laquelle elle était en vigueur.
+
+Mesuré ensuite sur le parc : sous l'appétit que ce tenant a enregistré, **quatre
+actifs sont à risque élevé ; sous le seuil standard, deux**. Le paramétrage
+atteint le reporting.
+
+**Trois défauts trouvés en pilotant les écrans, pas en les relisant.**
+
+Cinq en-têtes de colonne affichaient leur propre clé de traduction —
+`siem.severity`, `dspm.riskScore`, `mobile.lastSeen`. next-intl rend la clé
+qu'il ne sait pas résoudre : la page a l'air construite plutôt que cassée et
+rien n'échoue. `frontend/scripts/check-messages.mjs` prouve désormais que toute
+clé littérale résout dans chaque locale et que les deux dictionnaires portent
+les mêmes clés ; la CI l'exécute.
+
+Choisir un autre profil standard gardait les chiffres déjà à l'écran et ne
+changeait que ce à quoi ils étaient comparés — adopter PCI DSS aurait enregistré
+onze valeurs du profil précédent comme des surcharges délibérées d'un standard
+que personne n'avait choisi pour elles. Et l'enregistrement vidait le formulaire
+en attendant la relecture pour le ré-amorcer : l'effet passait d'abord, depuis le
+profil encore en cache, si bien qu'une version enregistrée contre PCI DSS était
+aussitôt affichée contre SWIFT CSCF — cinq écarts montrés là où le client en
+avait fait un. La base avait raison les deux fois, ce qui est précisément ce qui
+rend ce genre de défaut livrable.
+
+**`dev-local.sh restart [nom…]`.** `services` ne démarre que ce qui ne tourne
+pas, donc il laisse silencieusement un service sur le binaire avec lequel il a
+été lancé. Une route ajoutée et compilée répondait 404 depuis un processus
+démarré dix minutes plus tôt, et le frontend servait un HTML nommant des
+fragments que le nouveau build avait remplacés — toutes les pages vides, aucune
+erreur nulle part.
+
+**Ce qui reste sur ce sujet.** Le catalogue arrive par migration : à terme il
+doit se livrer indépendamment du code, avec sa propre cadence, sinon améliorer
+une détection impose un déploiement. Et la même configurabilité est due aux
+seuils UEBA, aux délais de remédiation et aux pondérations des chemins
+d'attaque, qui restent des constantes de la plateforme.
 
 ## 4. Points forts à préserver
 

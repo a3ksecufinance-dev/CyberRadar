@@ -304,9 +304,45 @@ déclaré résout réellement.
 Le jeu de démonstration **adopte** huit entrées au lieu d'écrire ses règles, dont
 deux ajustées, pour que la généalogie ait quelque chose à montrer.
 
-**Reste** : la page SIEM ne montre ni le catalogue, ni la couverture, ni l'écart
-au standard ; et une règle adoptée ne peut pas encore être remise à niveau vers
-la version courante en un geste.
+**La remise à niveau est une décision, pas une migration.** Quand le catalogue
+avance, un tenant peut reprendre la nouvelle version sans perdre ses propres
+réglages : la plateforme compare à trois — la version adoptée, celle qui est
+publiée, la règle telle qu'elle est — et en tire cinq issues par champ.
+
+```
+GET  /api/v1/siem/rule-library/{code}/upgrade   ce que ça ferait
+POST /api/v1/siem/rule-library/{code}/upgrade   le faire, conflits tranchés
+
+unchanged      personne ne l'a touché
+take_incoming  nous l'avons changé, pas eux      → l'amélioration arrive
+keep_tenant    ils l'ont changé, pas nous        → leur décision survit
+converged      les deux, au même endroit
+conflict       les deux, différemment            → eux seuls peuvent trancher
+```
+
+Un conflit est **refusé** tant que personne n'a tranché : désigner un côté en
+silence, ce serait un éditeur qui fixe le seuil de détection d'une banque à sa
+place, et le client l'apprendrait par une alerte qui ne part plus. La requête
+porte la version sur laquelle le plan a été calculé, et l'`UPDATE` vérifie la
+version dans son `WHERE` — une décision prise sur un écart ne peut pas atterrir
+sur un autre.
+
+**L'écran.** La page SIEM répond désormais à trois questions plutôt qu'à une :
+ce qui a déclenché, ce qu'on fait tourner et en quoi cela diffère du standard,
+et ce qu'on ne voit pas. L'onglet *Bibliothèque* liste les quinze détections
+avec leur adoption, leurs écarts, les versions disponibles et le nombre
+d'alertes levées ; en déplier une montre le raisonnement du catalogue. L'onglet
+*Couverture* classe par technique, lacunes d'abord, chacune nommant les entrées
+qui la combleraient.
+
+**Adopter n'envoie aucune surcharge**, volontairement : un écran qui
+pré-remplirait un formulaire avec les valeurs standards produirait un tenant qui
+a l'air d'avoir tout modifié dès le premier jour, et l'écart ne voudrait plus
+rien dire.
+
+**Reste** : le catalogue arrive par migration. À terme il doit se livrer
+indépendamment du code, avec sa propre cadence — sinon améliorer une détection
+impose un déploiement.
 
 ### Le renseignement pilote la détection
 
@@ -805,9 +841,20 @@ SWIFT à 2,5 et le seuil à 6 : `swift-gw-01` passe de 5,40 à 7,15, `hsm-pay-01
 de 6,00 à 7,75, le compteur « risque élevé » de 3 à 7, et
 `GET /assets/{id}/risk` nomme le profil et sa version.
 
-**Reste** : la page Réglages ne sait pas encore écrire ce profil, et le même
-patron reste à appliquer aux autres jugements en dur — seuils UEBA, délais SLA,
-pondérations des chemins d'attaque, seuils des règles SIEM.
+**La page Réglages ouvre maintenant dessus.** Ce qui est en vigueur, sa version
+et sa date d'effet — et, quand le tenant n'a pas tranché, le fait qu'il est noté
+avec *nos* valeurs plutôt qu'avec une décision qu'il a prise : présenter un
+défaut comme un choix du client, c'est finir par défendre l'appétence de
+quelqu'un d'autre devant un auditeur. Puis les quatre profils standards, les
+dix-sept facteurs groupés comme le score se construit, la valeur standard à côté
+de la sienne, le motif — qu'un auditeur lit avant les pondérations — et chaque
+version avec la fenêtre pendant laquelle elle s'appliquait.
+
+Mesuré sur le parc après enregistrement : sous l'appétence que ce tenant a
+retenue, **quatre actifs sont à risque élevé ; sous le seuil standard, deux**.
+
+**Reste** : le même patron est dû aux autres jugements en dur — seuils UEBA,
+délais SLA, pondérations des chemins d'attaque.
 
 ### Le score de risque d'un actif
 
