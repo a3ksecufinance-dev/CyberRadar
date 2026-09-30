@@ -74,6 +74,7 @@ jobs:
       KG_TEST_NEO4J: bolt://localhost:7687
       RBAC_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       ASSET_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      SIEM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: crp_password_dev
     steps:

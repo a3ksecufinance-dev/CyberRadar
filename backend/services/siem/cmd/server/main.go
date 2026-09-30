@@ -102,6 +102,14 @@ func main() {
 	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
+	// The detection content the platform ships, and the lineage from a tenant's
+	// rules back to it. A detection engine with an empty rule table detects
+	// nothing, and every customer writing the same fifteen rules from memory is
+	// how nobody can say what the platform covers.
+	libraryRepo := repository.NewLibraryRepository(pool)
+	librarySvc := service.NewLibraryService(libraryRepo, ruleRepo, logger)
+	libraryHandler := handler.NewLibraryHandler(librarySvc)
+
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────
 	ruleConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
 		Brokers:     brokers,
@@ -160,6 +168,7 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
 		siemHandler.RegisterRoutes(r)
+		libraryHandler.RegisterRoutes(r)
 	})
 
 	srv := &http.Server{

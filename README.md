@@ -246,6 +246,68 @@ enregistre tous.
 La rétention est de 30 jours — la plus large fenêtre utilisée. Le service PAM
 purge au démarrage puis toutes les 6 heures.
 
+### La bibliothèque de détection, et sa généalogie
+
+Un moteur de détection avec une table de règles vide ne détecte rien. Chaque
+client réécrit alors les mêmes quinze règles que tous les autres, de mémoire, et
+personne ne peut dire ce que la plateforme couvre.
+
+```bash
+GET  /api/v1/siem/rule-library              # le catalogue, vu par ce tenant
+GET  /api/v1/siem/rule-library/coverage     # la couverture ATT&CK, lacunes d'abord
+GET  /api/v1/siem/rule-library/{code}       # une détection, avec son raisonnement
+POST /api/v1/siem/rule-library/{code}/adopt # l'adopter  (rules:write)
+```
+
+Quinze détections livrées, du bourrage d'identifiants au déplacement latéral. Le
+tenant adopte ce qui lui convient — corps vide pour la prendre telle qu'elle est
+— l'ajuste, et écrit les siennes dans la même grammaire.
+
+**La généalogie est le cœur.** Une règle de tenant enregistre de quelle entrée
+elle vient **et à quelle version** :
+
+```json
+"adopted": { "at_version": 1, "update_available": false,
+             "changes": [ {"field":"severity","standard":"HIGH","tenant":"CRITICAL"} ] }
+```
+
+Trois questions deviennent répondables : *qu'avons-nous changé au standard* —
+l'écart est **calculé à la lecture**, donc il ne peut pas se périmer et une
+modification faite directement sur la règle y apparaît ; *la plateforme a-t-elle
+amélioré ce que nous faisons tourner* ; *que couvrons-nous, et contre quel
+référentiel* — le catalogue porte la cartographie ATT&CK et les références de
+contrôle.
+
+La comparaison se fait **contre la version adoptée, jamais celle du jour** :
+comparer un tenant resté en v1 à la v2 rapporterait les améliorations de
+l'éditeur comme des modifications du client.
+
+Deux choses qu'une simple liste de règles ne ferait pas :
+
+- **Le catalogue déclare ses prérequis.** Une détection appuyée sur un champ que
+  rien ne remplit charge, ne matche rien, et se présente comme une couverture —
+  pire que pas de règle. Ces entrées sont livrées **désactivées**, avec la raison
+  (ici : une base MaxMind sous licence, et la notion de plage horaire attendue
+  par compte).
+- **Il porte le raisonnement** : pourquoi la détection existe, ce qui la
+  déclenche légitimement, quoi faire quand elle part. C'est la troisième qu'un
+  analyste lit à trois heures du matin, et une règle sans elle est un bipeur qui
+  ne dit rien.
+
+**Un défaut trouvé en écrivant le catalogue** : `cbs_impact` et `swift_impact`
+sont dans le vocabulaire du moteur de règles et **rien ne les renseigne** — ils
+valent toujours zéro. Une règle livrée sur l'un des deux n'aurait jamais pu
+déclencher. Le vocabulaire est désormais déclaré (`KnownFields`) et deux tests
+ferment la boucle : aucune entrée ne nomme un champ inconnu, et chaque champ
+déclaré résout réellement.
+
+Le jeu de démonstration **adopte** huit entrées au lieu d'écrire ses règles, dont
+deux ajustées, pour que la généalogie ait quelque chose à montrer.
+
+**Reste** : la page SIEM ne montre ni le catalogue, ni la couverture, ni l'écart
+au standard ; et une règle adoptée ne peut pas encore être remise à niveau vers
+la version courante en un geste.
+
 ### Le renseignement pilote la détection
 
 L'enrichisseur du pipeline renvoyait une liste d'IOC vide, avec un commentaire
@@ -288,8 +350,9 @@ Trois décisions qui se lisent dans le code :
   stockée manque à chaque fois, **silencieusement** — « pas un indicateur connu »
   se lit exactement comme un événement propre.
 
-Mesuré sur l'installation : 39 événements, 11 indicateurs, **14 alertes** contre
-5 avant, dont 5 dues aux deux règles de renseignement sur 4 entités distinctes.
+Mesuré sur l'installation : 39 événements, 11 indicateurs, et des alertes levées
+par les trois règles de renseignement de la bibliothèque là où aucune règle ne
+pouvait porter sur une correspondance auparavant.
 
 **GeoIP reste ouvert** : la résolution pays/ASN demande une base MaxMind sous
 licence que ce dépôt ne peut pas embarquer. L'enrichisseur reconnaît les plages
@@ -567,10 +630,10 @@ Ce qu'il faut regarder en premier, une fois connecté :
 
 | Page | Ce que le jeu de démonstration y met |
 |---|---|
-| Tableau de bord | 14 alertes ouvertes, 5 incidents, 11 indicateurs actifs, 21 chemins d'attaque |
+| Tableau de bord | 32 alertes ouvertes, 5 incidents, 11 indicateurs actifs, 21 chemins d'attaque |
 | Actifs | 14 actifs, score de risque de 3,5 à 7,5, 3 au-dessus du seuil |
 | Vulnérabilités | 10 CVE réelles, 15 constats, CVSS moyen 8,8 |
-| SIEM | 14 alertes **levées par le moteur** à partir de 39 événements injectés, dont 5 sur une correspondance d'indicateur |
+| SIEM | 32 alertes **levées par le moteur** à partir de 39 événements injectés, par 8 règles adoptées depuis la bibliothèque |
 | Chemins d'attaque | 3 scénarios analysés, 21 chemins, 2 points de passage obligé |
 | Conformité | DORA, PCI DSS, SWIFT CSP, ISO 27001 et leurs écarts |
 
@@ -790,9 +853,8 @@ cd backend
 
 `internal/cmd/demoseed` écrit une banque de taille moyenne — quatorze actifs
 (canal en ligne, cœur bancaire, passerelle SWIFT, réseau monétique), dix CVE
-réelles et leurs constats, onze indicateurs rattachés à trois acteurs, six
-règles de détection dont deux qui portent sur le renseignement lui-même, cinq
-incidents, un graphe d'attaque de seize nœuds avec
+réelles et leurs constats, onze indicateurs rattachés à trois acteurs, huit
+règles adoptées depuis la bibliothèque de détection, cinq incidents, un graphe d'attaque de seize nœuds avec
 trois scénarios analysés, quatre référentiels de conformité et leurs contrôles,
 un graphe de connaissance.
 

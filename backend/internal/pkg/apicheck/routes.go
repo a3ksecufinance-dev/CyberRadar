@@ -113,6 +113,8 @@ func routesObject(src string) (string, error) {
 // below is what stops the list going stale.
 var BackendRoutes = []Probe{
 	{"tenant", "/api/v1/tenants", "apicheck"},
+	{"siem", "/api/v1/siem/rule-library", "apicheck"},
+	{"siem", "/api/v1/siem/rule-library/coverage", "apicheck"},
 	{"tenant", "/api/v1/risk-profiles/presets", "apicheck"},
 	{"tenant", "/api/v1/risk-profiles/active", "apicheck"},
 	{"tenant", "/api/v1/risk-profiles/history", "apicheck"},

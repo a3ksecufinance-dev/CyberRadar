@@ -56,6 +56,7 @@ func (r *RuleRepository) GetByID(ctx context.Context, tenantID, ruleID uuid.UUID
 		SELECT id, tenant_id, name, description, category, severity, conditions,
 		       mitre_tactic, mitre_technique, actions, dedup_window_s,
 		       enabled, is_system, false_positive_rate, alerts_total, last_fired_at,
+		       COALESCE(content_code, ''), content_version,
 		       created_by, created_at, updated_at
 		FROM detection_rules WHERE id = $1 AND tenant_id = $2`
 	row := r.db.QueryRow(ctx, q, ruleID, tenantID)
@@ -68,6 +69,7 @@ func (r *RuleRepository) ListEnabled(ctx context.Context, tenantID uuid.UUID) ([
 		SELECT id, tenant_id, name, description, category, severity, conditions,
 		       mitre_tactic, mitre_technique, actions, dedup_window_s,
 		       enabled, is_system, false_positive_rate, alerts_total, last_fired_at,
+		       COALESCE(content_code, ''), content_version,
 		       created_by, created_at, updated_at
 		FROM detection_rules
 		WHERE tenant_id = $1 AND enabled = true
@@ -94,6 +96,7 @@ func (r *RuleRepository) List(ctx context.Context, tenantID uuid.UUID, enabledOn
 		SELECT id, tenant_id, name, description, category, severity, conditions,
 		       mitre_tactic, mitre_technique, actions, dedup_window_s,
 		       enabled, is_system, false_positive_rate, alerts_total, last_fired_at,
+		       COALESCE(content_code, ''), content_version,
 		       created_by, created_at, updated_at
 		FROM detection_rules WHERE tenant_id = $1`
 	if enabledOnly {
@@ -209,6 +212,7 @@ func scanRule(row scannable) (*model.DetectionRule, error) {
 		&rule.ID, &rule.TenantID, &rule.Name, &desc, &cat, &rule.Severity,
 		&condRaw, &tactic, &technique, &actRaw, &rule.DedupWindowS,
 		&rule.Enabled, &rule.IsSystem, &rule.FalsePositiveRate, &rule.AlertsTotal, &rule.LastFiredAt,
+		&rule.ContentCode, &rule.ContentVersion,
 		&rule.CreatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {

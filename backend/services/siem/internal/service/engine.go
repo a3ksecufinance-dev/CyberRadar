@@ -144,6 +144,31 @@ func matchField(fm model.FieldMatch, ev *event.NormalizedEvent) bool {
 	}
 }
 
+// KnownFields are the event fields a rule may name.
+//
+// It is declared rather than implied by the switch below so the detection
+// library can be checked against it: a shipped rule naming an unknown field
+// loads, matches nothing, and presents itself as working coverage — which is
+// worse than no rule. library_test.go asserts both that every catalogue entry
+// names only these, and that every one of these actually resolves.
+var KnownFields = []string{
+	"category", "severity", "outcome", "action", "source_type",
+	"mitre_tactic", "mitre_technique",
+	"user_id", "user_name", "ip_source", "ip_destination", "geo_country",
+	"risk_score", "threat_score", "cbs_impact", "swift_impact",
+	"ioc_matched", "geo_anomaly", "anomalous_hours",
+}
+
+// KnownField reports whether a rule may name this field.
+func KnownField(name string) bool {
+	for _, f := range KnownFields {
+		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
 // getField extracts a named field from a NormalizedEvent.
 func getField(ev *event.NormalizedEvent, field string) string {
 	switch field {

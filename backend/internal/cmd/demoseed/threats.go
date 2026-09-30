@@ -134,147 +134,122 @@ func (s *seeder) seedThreatIntel(ctx context.Context) error {
 	return nil
 }
 
-// ─── Detection rules ──────────────────────────────────────────────────────────
+// ─── Detection rules ─────────────────────────────────────────────────────────
 
-// The rules are written against the fields the engine actually reads
-// (services/siem/internal/service/engine.go, getField). A rule naming a field
-// the engine does not know would load, match nothing, and look like a working
-// detection — which is worse than no rule at all.
+// demoAdoptions are the library entries this estate runs, and what it changed
+// about them.
 //
-// The MITRE fields carry identifiers, not names: detection_rules.mitre_tactic
-// is varchar(10), which fits "TA0006" and not "credential-access".
+// The rules are adopted rather than written, because that is what a customer
+// does: the platform ships detection content, the tenant takes what fits and
+// tunes it, and the difference from the standard is what it defends to an
+// auditor. A demonstration that hand-writes its rules would demonstrate the
+// wrong workflow — and would leave the library looking like documentation
+// nobody uses.
 //
-// They compare threat_score rather than risk_score because the pipeline
-// enricher derives both from the event's severity and overwrites whatever the
-// connector sent. A rule keyed on the connector's own risk_score would
-// therefore never fire, however plausible it reads.
-var demoRules = []map[string]any{
+// Two of them are deliberately adjusted, so the lineage has something to show.
+var demoAdoptions = []struct {
+	Code string
+	// Override is sent as the adoption body; nil adopts the detection exactly
+	// as it ships, which is the common and better case.
+	Override map[string]any
+	Why      string
+}{
+	{Code: "CRP-IAM-0001"},
 	{
-		"name":        "Bourrage d'identifiants sur la banque en ligne",
-		"description": "Cinq échecs d'authentification ou plus depuis une même adresse en cinq minutes.",
-		"category":    "IAM", "severity": "HIGH",
-		"mitre_tactic": "TA0006", "mitre_technique": "T1110.004",
-		"dedup_window_s": 300,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "category", "op": "eq", "value": "IAM"},
-				{"field": "outcome", "op": "eq", "value": "failure"},
-			},
-			"threshold": map[string]any{"count": 5, "window_seconds": 300, "group_by": []string{"ip_source"}},
-		},
-		"actions": []map[string]any{{"type": "notify"}},
+		Code: "CRP-IAM-0003",
+		// A bank with a small administration team can afford to hear about
+		// every privileged session; the standard window batches them.
+		Override: map[string]any{"dedup_window_s": 120},
+		Why:      "fenêtre de déduplication resserrée",
 	},
+	{Code: "CRP-EXE-0001"},
+	{Code: "CRP-C2-0001"},
+	{Code: "CRP-C2-0002"},
 	{
-		"name":        "Authentification administrateur réussie depuis Internet",
-		"description": "Une session privilégiée ouverte depuis une adresse hors du plan d'adressage interne.",
-		"category":    "IAM", "severity": "CRITICAL",
-		"mitre_tactic": "TA0001", "mitre_technique": "T1078",
-		"dedup_window_s": 600,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "action", "op": "contains", "value": "admin_login"},
-				{"field": "outcome", "op": "eq", "value": "success"},
-			},
-		},
-		"actions": []map[string]any{{"type": "notify"}, {"type": "create_case"}},
+		Code: "CRP-EXF-0001",
+		// This estate's backup service account transfers at night, so the
+		// severity is raised rather than the condition widened: the intent is
+		// to page, not to match more.
+		Override: map[string]any{"severity": "CRITICAL"},
+		Why:      "sévérité relevée",
 	},
-	{
-		"name":        "Exécution suspecte sur la passerelle SWIFT",
-		"description": "Tout lancement d'interpréteur sur un actif du périmètre SWIFT.",
-		"category":    "Security", "severity": "CRITICAL",
-		"mitre_tactic": "TA0002", "mitre_technique": "T1059",
-		"dedup_window_s": 300,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "action", "op": "contains", "value": "process_exec"},
-				{"field": "threat_score", "op": "gte", "value": "8"},
-			},
-		},
-		"actions": []map[string]any{{"type": "notify"}, {"type": "create_case"}},
-	},
-	{
-		// The one rule that reads the tenant's own threat intelligence. It
-		// asks whether enrichment matched an indicator at all, which is what
-		// ioc_matched now carries — and what no rule could ask before, because
-		// nothing populated the field.
-		"name":        "Contact avec un indicateur de compromission connu",
-		"description": "Un flux dont une valeur figure au renseignement du tenant, quel que soit le champ.",
-		"category":    "Network", "severity": "CRITICAL",
-		"mitre_tactic": "TA0011", "mitre_technique": "T1071.001",
-		"dedup_window_s": 300,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "ioc_matched", "op": "exists", "value": ""},
-			},
-		},
-		"actions": []map[string]any{{"type": "notify"}, {"type": "block_ip"}},
-	},
-	{
-		// Narrower, and the pair is the point: one rule says "anything the
-		// feed knows", this one says "a command-and-control address". Both are
-		// impossible to express without the field.
-		"name":        "Balise vers une adresse de commande et de contrôle",
-		"description": "Une adresse IP de l'événement figure au renseignement comme serveur de commande.",
-		"category":    "Network", "severity": "CRITICAL",
-		"mitre_tactic": "TA0011", "mitre_technique": "T1071.001",
-		"dedup_window_s": 600,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "ioc_matched", "op": "contains", "value": "ip:"},
-				{"field": "category", "op": "eq", "value": "Network"},
-			},
-		},
-		"actions": []map[string]any{{"type": "notify"}, {"type": "block_ip"}},
-	},
-	{
-		"name":        "Volume de transfert anormal depuis le socle de sauvegarde",
-		"description": "Une session dont le score de risque dépasse le seuil d'exfiltration.",
-		"category":    "Security", "severity": "HIGH",
-		"mitre_tactic": "TA0010", "mitre_technique": "T1567",
-		"dedup_window_s": 900,
-		"conditions": map[string]any{
-			"field_matches": []map[string]any{
-				{"field": "action", "op": "contains", "value": "file_transfer"},
-				{"field": "threat_score", "op": "gte", "value": "6"},
-			},
-		},
-		"actions": []map[string]any{{"type": "notify"}},
-	},
+	{Code: "CRP-LAT-0001"},
+	{Code: "CRP-DIS-0001"},
 }
 
 func (s *seeder) seedRules(ctx context.Context) error {
-	step("Detection rules")
-	idx, err := s.index(ctx, "siem", "/api/v1/siem/rules")
-	if err != nil {
-		return err
+	step("Detection rules, adopted from the library")
+
+	// The library as this tenant sees it: every entry, and whether it is
+	// already adopted. Re-running then changes nothing, and the count below is
+	// the real coverage rather than what this file hoped for.
+	var library []struct {
+		Content struct {
+			Code             string   `json:"code"`
+			Title            string   `json:"title"`
+			Requires         []string `json:"requires"`
+			EnabledByDefault bool     `json:"enabled_by_default"`
+		} `json:"content"`
+		Adopted *struct {
+			RuleID uuid.UUID `json:"rule_id"`
+		} `json:"adopted"`
 	}
-	updated := 0
-	for _, r := range demoRules {
-		name := r["name"].(string)
-		existing, found := idx[name]
-		id, err := s.ensure(ctx, idx, name, "siem", "/api/v1/siem/rules", r)
-		if err != nil {
-			return err
+	if err := s.c.get(ctx, "siem", "/api/v1/siem/rule-library", nil, &library); err != nil {
+		return fmt.Errorf("read the rule library: %w", err)
+	}
+	adopted := map[string]bool{}
+	available := map[string]bool{}
+	for _, entry := range library {
+		available[entry.Content.Code] = true
+		if entry.Adopted != nil {
+			adopted[entry.Content.Code] = true
 		}
-		if !found {
+	}
+
+	taken, reused := 0, 0
+	for _, want := range demoAdoptions {
+		if !available[want.Code] {
+			return fmt.Errorf("the library has no %s: has migration 000040 been applied?", want.Code)
+		}
+		if adopted[want.Code] {
+			reused++
+			s.note("· %s", want.Code)
 			continue
 		}
-		// A rule that is already there gets the current definition rather than
-		// being left alone. These rules are the demonstration's own, and what
-		// they detect changes as the platform gains fields to detect on — a
-		// second run that left a stale condition in place would show a rule
-		// that no longer matches what its name says.
-		if err := s.c.put(ctx, "siem", fmt.Sprintf("/api/v1/siem/rules/%s", existing), r, nil); err != nil {
-			return fmt.Errorf("update rule %q: %w", name, err)
+		body := want.Override
+		if body == nil {
+			body = map[string]any{}
 		}
-		_ = id
-		updated++
+		if err := s.c.post(ctx, "siem",
+			fmt.Sprintf("/api/v1/siem/rule-library/%s/adopt", want.Code), body, nil); err != nil {
+			return fmt.Errorf("adopt %s: %w", want.Code, err)
+		}
+		taken++
+		s.written++
+		if want.Why != "" {
+			s.note("+ %s (%s)", want.Code, want.Why)
+		} else {
+			s.note("+ %s", want.Code)
+		}
 	}
-	if updated > 0 {
-		fmt.Printf("   %d rules in the engine (%d refreshed)\n", len(idx), updated)
-	} else {
-		fmt.Printf("   %d rules loaded in the engine\n", len(idx))
+	s.reused += reused
+
+	var coverage struct {
+		CatalogueSize int `json:"catalogue_size"`
+		AdoptedTotal  int `json:"adopted_total"`
+		EnabledTotal  int `json:"enabled_total"`
+		OwnRules      int `json:"own_rules"`
 	}
+	if err := s.c.get(ctx, "siem", "/api/v1/siem/rule-library/coverage", nil, &coverage); err != nil {
+		return fmt.Errorf("read coverage: %w", err)
+	}
+
+	fmt.Printf("   %d adopted (%d already there) of %d in the library, %d enabled",
+		taken+reused, reused, coverage.CatalogueSize, coverage.EnabledTotal)
+	if coverage.OwnRules > 0 {
+		fmt.Printf(", plus %d written by this tenant", coverage.OwnRules)
+	}
+	fmt.Println()
 	return nil
 }
 

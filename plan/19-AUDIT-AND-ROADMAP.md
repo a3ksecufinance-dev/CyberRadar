@@ -1246,7 +1246,76 @@ répartition nomme le profil et sa version.
 **Ce qui reste.** La page Réglages ne sait pas encore écrire ce profil ; l'API
 est là, l'écran non. Et le même patron reste à appliquer aux autres jugements en
 dur : les seuils de détection UEBA, les délais SLA de correction, les
-pondérations du score de chemin d'attaque, les seuils de score des règles SIEM.
+pondérations du score de chemin d'attaque.
+
+### 3.15 La bibliothèque de détection, et sa généalogie
+
+Un moteur de détection avec une table de règles vide ne détecte rien. Chaque
+client réécrit alors les mêmes quinze règles que tous les autres, de mémoire, et
+personne ne peut dire ce que la plateforme couvre.
+
+`detection_content` porte les quinze détections que la plateforme livre —
+bourrage d'identifiants, force brute sur un compte, session administrateur,
+élévation de privilèges, interpréteur sur actif critique, trois règles de
+renseignement, deux d'exfiltration, balayage réseau, déplacement latéral,
+transaction à risque, et deux entrées géographiques et comportementales. Le
+tenant adopte ce qui lui convient, l'ajuste, et écrit les siennes dans la même
+grammaire.
+
+**La généalogie est le cœur.** Une règle de tenant enregistre de quelle entrée
+elle vient **et à quelle version**, ce qui rend trois questions répondables :
+
+- *Que faisons-nous tourner qui vient de CyberRadar, et qu'avons-nous changé ?*
+  L'écart est **calculé à la lecture**, champ par champ, donc il ne peut pas se
+  périmer — et une modification faite directement sur la règle y apparaît au
+  lieu d'être invisible.
+- *La plateforme a-t-elle amélioré une règle que nous avons adoptée ?* La version
+  courante de l'entrée est supérieure à celle adoptée.
+- *Que couvrons-nous, et contre quel référentiel ?* Le catalogue porte la
+  cartographie ATT&CK et les références de contrôle, donc la couverture est une
+  requête, pas un tableur.
+
+**La comparaison se fait contre la version adoptée, jamais contre celle du jour.**
+Comparer un tenant resté en v1 à la v2 rapporterait les améliorations de
+l'éditeur comme des modifications du client — exactement la mauvaise réponse à
+« qu'avez-vous changé ». Un test le vérifie en publiant une v2 et en exigeant
+zéro écart.
+
+**Deux choses qu'une simple liste de règles ne ferait pas.**
+
+Le catalogue **déclare ses prérequis**. Une détection qui s'appuie sur un champ
+que rien ne remplit charge, ne matche rien, et se présente comme une couverture
+— ce qui est pire que pas de règle. Ces entrées sont livrées **désactivées**,
+avec la raison, et le service refuse de les activer par défaut même si une future
+entrée oubliait de le faire. Deux le sont : la règle géographique (il faut une
+base MaxMind sous licence) et la règle horaire (il faut la notion de plage
+attendue par compte).
+
+Et il porte **le raisonnement** : pourquoi la détection existe, ce qui la
+déclenche légitimement, quoi faire quand elle part. C'est la troisième qu'un
+analyste lit à trois heures du matin, et une règle sans elle est un bipeur qui ne
+dit rien. Un test refuse une entrée sans justification.
+
+**Un défaut trouvé en écrivant le catalogue.** `cbs_impact` et `swift_impact`
+sont dans le schéma d'événement et dans le vocabulaire du moteur de règles, et
+**rien dans la plateforme ne les renseigne** : ils valent toujours zéro. Une
+règle livrée sur l'un des deux aurait été une détection incapable de déclencher.
+Le vocabulaire du moteur est désormais déclaré (`KnownFields`), et deux tests
+ferment la boucle : aucune entrée du catalogue ne nomme un champ inconnu, et
+chaque champ déclaré résout réellement sur un événement complet.
+
+**Le jeu de démonstration adopte au lieu d'écrire.** Huit entrées, dont deux
+ajustées — une fenêtre de déduplication resserrée, une sévérité relevée — pour
+que la généalogie ait quelque chose à montrer. Il écrivait ses règles à la main ;
+il démontrait le mauvais geste, et laissait la bibliothèque ressembler à de la
+documentation que personne n'utilise. Mesuré : 8 adoptées sur 15, 8 actives, 0
+règle propre, et **32 alertes** levées par le moteur sur les 39 événements
+injectés.
+
+**Ce qui reste.** L'écran : la page SIEM ne montre ni le catalogue, ni la
+couverture, ni l'écart au standard. Et une règle adoptée ne peut pas encore être
+« remise à niveau » vers la version courante en un geste — l'API dit qu'une mise
+à jour existe, elle ne l'applique pas.
 
 ## 4. Points forts à préserver
 

@@ -75,9 +75,16 @@ type DetectionRule struct {
 	FalsePositiveRate float64        `json:"false_positive_rate"`
 	AlertsTotal       int            `json:"alerts_total"`
 	LastFiredAt       *time.Time     `json:"last_fired_at,omitempty"`
-	CreatedBy         *uuid.UUID     `json:"created_by,omitempty"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
+
+	// Lineage. ContentCode names the library entry this rule was adopted from
+	// and ContentVersion the version taken; both are empty for a rule the
+	// tenant wrote itself, which is a first-class case — the library is a
+	// starting point, not a cage.
+	ContentCode    string     `json:"content_code,omitempty"`
+	ContentVersion *int       `json:"content_version,omitempty"`
+	CreatedBy      *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // CreateRuleRequest creates a new detection rule.
