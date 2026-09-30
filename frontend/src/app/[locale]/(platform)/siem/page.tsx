@@ -1,6 +1,8 @@
 'use client'
 import { useTranslations } from 'next-intl'
 import { useState } from 'react'
+import { Coverage } from '@/components/siem/Coverage'
+import { RuleLibrary } from '@/components/siem/RuleLibrary'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { SeverityBadge } from '@/components/shared/SeverityBadge'
@@ -12,7 +14,54 @@ import { countOf, formatDateShort } from '@/lib/utils'
 
 const SEVERITY_FILTERS = ['All', 'Critical', 'High', 'Medium', 'Low'] as const
 
+// The three questions this page answers, in the order they are asked: what fired,
+// what are we running and how does it differ from the standard, and what are we
+// blind to. The catalogue and the coverage used to be reachable only through the
+// API — the platform knew, and the customer could not act on it.
+const TABS = ['alerts', 'library', 'coverage'] as const
+type Tab = (typeof TABS)[number]
+
 export default function SiemPage() {
+  const [tab, setTab] = useState<Tab>('alerts')
+  const t = useTranslations('siem')
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-slate-100">{t('title')}</h1>
+          <p className="text-sm text-slate-400">{t('subtitle')}</p>
+        </div>
+        {tab === 'alerts' && (
+          <div className="flex items-center gap-1.5 rounded-md border border-red-800/60 bg-red-950/50 px-2.5 py-1">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+            <span className="text-xs font-semibold text-red-400">{t('live')}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-1 border-b border-slate-700">
+        {TABS.map((id) => (
+          <button key={id}
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm transition-colors ${
+              tab === id
+                ? 'border-cyan-500 text-cyan-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}>
+            {t(`tabs.${id}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'alerts' && <Alerts />}
+      {tab === 'library' && <RuleLibrary />}
+      {tab === 'coverage' && <Coverage />}
+    </div>
+  )
+}
+
+function Alerts() {
   const t = useTranslations('siem')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('All')
@@ -37,17 +86,6 @@ export default function SiemPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-100">{t('title')}</h1>
-          <p className="text-sm text-slate-400">{t('subtitle')}</p>
-        </div>
-        <div className="flex items-center gap-1.5 rounded-md bg-red-950/50 border border-red-800/60 px-2.5 py-1">
-          <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-xs font-semibold text-red-400">{t('live')}</span>
-        </div>
-      </div>
-
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-4 gap-4">

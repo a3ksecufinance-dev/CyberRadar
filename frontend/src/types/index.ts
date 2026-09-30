@@ -84,6 +84,132 @@ export interface SIEMStats {
   fired_last_7d: number
 }
 
+// ─── Detection library — services/siem/internal/model/library.go ─────────────
+//
+// Severity here is upper case, not the lower-cased `Severity` above: the SIEM
+// stores it as an Enum8('LOW',…) and these payloads carry the column's value.
+export type RuleSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+
+/** One detection the platform ships. Carries its reasoning, not just its logic:
+ *  a rule without it is a pager that says nothing at three in the morning. */
+export interface ContentEntry {
+  id: string
+  code: string
+  version: number
+  title: string
+  description: string
+  category: string
+  severity: RuleSeverity
+  mitre_tactic?: string
+  mitre_technique?: string
+  conditions: unknown
+  actions: unknown[] | null
+  dedup_window_s: number
+  rationale: string
+  false_positives?: string
+  response?: string
+  frameworks: string[] | null
+  controls: string[] | null
+  /** What has to be in place for it to fire. Non-empty means it ships off. */
+  requires: string[] | null
+  enabled_by_default: boolean
+  tags: string[] | null
+  created_at: string
+}
+
+/** How a tenant's copy differs from the version they adopted. */
+export interface FieldChange {
+  field: string
+  standard: string
+  tenant: string
+}
+
+/** The lineage of a tenant rule that came from the catalogue. */
+export interface AdoptedRule {
+  rule_id: string
+  name: string
+  enabled: boolean
+  adopted_at: string
+  at_version: number
+  alerts_total: number
+  update_available: boolean
+  changes?: FieldChange[] | null
+  upgraded_at?: string
+  notes?: string
+}
+
+export interface LibraryEntry {
+  content: ContentEntry
+  /** Absent when this tenant has not taken this detection. */
+  adopted?: AdoptedRule
+}
+
+export interface CoverageEntry {
+  mitre_tactic: string
+  mitre_technique: string
+  available: number
+  adopted: number
+  enabled: number
+  codes: string[] | null
+}
+
+export interface Coverage {
+  techniques: CoverageEntry[] | null
+  /** Rules the tenant wrote rather than adopted — counted apart, because they
+   *  are not coverage the vendor can vouch for. */
+  own_rules: number
+  catalogue_size: number
+  adopted_total: number
+  enabled_total: number
+}
+
+/** One field of the three-way merge an upgrade performs. */
+export interface UpgradeField {
+  field: string
+  /** The value in the version this tenant took. */
+  adopted: string
+  /** What the catalogue ships now. */
+  incoming: string
+  /** What their rule holds today. */
+  tenant: string
+  action: 'unchanged' | 'take_incoming' | 'keep_tenant' | 'converged' | 'conflict'
+  /** Absent on a conflict until it is resolved. */
+  result?: string
+}
+
+export interface UpgradePlan {
+  code: string
+  rule_id: string
+  from_version: number
+  to_version: number
+  up_to_date: boolean
+  fields: UpgradeField[]
+  /** Fields that need a decision. Non-empty means the upgrade will refuse. */
+  conflicts: string[]
+  warnings?: string[]
+}
+
+export interface DetectionRule {
+  id: string
+  tenant_id: string
+  name: string
+  description?: string
+  category?: string
+  severity: RuleSeverity
+  conditions: unknown
+  actions?: unknown[] | null
+  dedup_window_s: number
+  enabled: boolean
+  alerts_total: number
+  content_code?: string
+  content_version?: number
+}
+
+export interface UpgradeResult {
+  plan: UpgradePlan
+  rule: DetectionRule
+}
+
 // ─── Assets — services/asset/internal/model ──────────────────
 export interface Asset {
   id: string

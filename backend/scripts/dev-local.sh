@@ -584,6 +584,58 @@ cmd_build() {
 	ok "$(ls "$BACKEND_DIR/bin" | wc -l) binaries in backend/bin"
 }
 
+# resolve_unit NAME — accept "siem" for "siem-service".
+#
+# The suffix is the deployment's, not the reader's: nobody debugging the SIEM
+# thinks of it as siem-service, and a restart that answers "no such unit" over a
+# missing suffix is friction with no purpose.
+resolve_unit() {
+	local name="$1"
+	if [[ -f "$PID_DIR/$name.pid" || -x "$BACKEND_DIR/bin/$name" ]]; then
+		printf '%s\n' "$name"; return 0
+	fi
+	if [[ -f "$PID_DIR/$name-service.pid" || -x "$BACKEND_DIR/bin/$name-service" ]]; then
+		printf '%s\n' "$name-service"; return 0
+	fi
+	printf '%s\n' "$name"
+}
+
+# cmd_restart [NAME…] — stop, then start again.
+#
+# `services` starts only what is not already running, so it leaves a service on
+# the binary it was launched with. That is how a freshly built fix ends up not
+# being the thing that answers: health passes, the logs look right, and the route
+# you just added is a 404 from a process started ten minutes ago. Restarting by
+# hand has the same trap one level down — the frontend keeps serving HTML that
+# names chunk hashes the new build has replaced, and every page renders empty
+# with no error anywhere.
+#
+# With no name, everything. With names, only those.
+cmd_restart() {
+	local names=()
+	if [[ $# -eq 0 ]]; then
+		names=(frontend pipeline-worker)
+		local entry name
+		for entry in "${SERVICES[@]}"; do IFS=: read -r name _ <<< "$entry"; names+=("$name"); done
+	else
+		local arg
+		for arg in "$@"; do names+=("$(resolve_unit "$arg")"); done
+	fi
+
+	step "Restarting"
+	local want_services=0 want_frontend=0 name
+	for name in "${names[@]}"; do
+		stop "$name"
+		ok "$name stopped"
+		if [[ "$name" == frontend ]]; then want_frontend=1; else want_services=1; fi
+	done
+
+	# Started through the ordinary paths, so a restarted unit gets exactly the
+	# environment a fresh one would rather than a second, drifting copy of it.
+	if [[ $want_services -eq 1 ]]; then cmd_services; fi
+	if [[ $want_frontend -eq 1 ]]; then cmd_frontend; fi
+}
+
 cmd_services() {
 	cmd_build
 	step "Services"
@@ -734,8 +786,9 @@ case "${1:-up}" in
 	build) cmd_build ;;
 	services) cmd_services ;;
 	frontend) cmd_frontend ;;
+	restart) shift; cmd_restart "$@" ;;
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|e2e|build|services|frontend|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|e2e|build|services|frontend|restart [name…]|status|logs [name]|down}" >&2; exit 2 ;;
 esac

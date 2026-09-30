@@ -1,4 +1,10 @@
-import type { ApiResponse, PageMeta } from '@/types'
+import type {
+  ApiResponse,
+  DetectionRule,
+  PageMeta,
+  UpgradePlan,
+  UpgradeResult,
+} from '@/types'
 
 // ─── Port map — one entry per backend service ─────────────────
 // Each value is the SERVICE_PORT the service's deployment sets. A wrong entry
@@ -26,6 +32,8 @@ export const ROUTES = {
     alertStats: '/api/v1/siem/alerts/stats',
     cases: '/api/v1/siem/cases',
     rules: '/api/v1/siem/rules',
+    ruleLibrary: '/api/v1/siem/rule-library',
+    ruleCoverage: '/api/v1/siem/rule-library/coverage',
   },
   asset: {
     list: '/api/v1/assets',
@@ -309,6 +317,17 @@ export const api = {
   attackpath: {
     runScenario: (scenarioID: string, t?: string) =>
       post('attackpath', `${ROUTES.attackpath.scenarios}/${scenarioID}/run`, {}, t),
+  },
+  siem: {
+    // Adopting with an empty body takes the detection exactly as it ships,
+    // which is what makes the difference afterwards mean something.
+    adopt: (code: string, body: unknown, t?: string) =>
+      post<DetectionRule>('siem', `${ROUTES.siem.ruleLibrary}/${code}/adopt`, body ?? {}, t),
+    // A read: what an upgrade would do must be visible before it is taken.
+    upgradePlan: (code: string, t?: string) =>
+      get<UpgradePlan>('siem', `${ROUTES.siem.ruleLibrary}/${code}/upgrade`, t),
+    upgrade: (code: string, body: unknown, t?: string) =>
+      post<UpgradeResult>('siem', `${ROUTES.siem.ruleLibrary}/${code}/upgrade`, body ?? {}, t),
   },
   ir: {
     createIncident: (body: unknown, t?: string) => post('ir', ROUTES.ir.incidents, body, t),

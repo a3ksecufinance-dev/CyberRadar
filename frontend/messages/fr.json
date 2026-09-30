@@ -118,7 +118,94 @@
     "rawLog": "Log brut",
     "detectedAt": "Détecté le",
     "noEvents": "Aucun événement correspondant aux filtres",
-    "live": "EN DIRECT"
+    "live": "EN DIRECT",
+    "tabs": {
+      "alerts": "Alertes",
+      "library": "Bibliothèque",
+      "coverage": "Couverture"
+    },
+    "library": {
+      "search": "Code, titre, technique, étiquette…",
+      "filterAll": "Tout",
+      "filterAdopted": "Adoptées",
+      "filterAvailable": "Non adoptées",
+      "filterDrifted": "Ajustées",
+      "filterUpgradable": "À remettre à niveau",
+      "noMatch": "Aucune détection ne correspond",
+      "colCode": "Code",
+      "colDetection": "Détection",
+      "colSeverity": "Sévérité",
+      "colAttack": "ATT&CK",
+      "colYours": "Chez vous",
+      "colAction": "Action",
+      "notAdopted": "non adoptée",
+      "inactive": "inactive",
+      "drift": "{count, plural, one {# écart} other {# écarts}}",
+      "updateAvailable": "v{version} disponible",
+      "alertsRaised": "{count, plural, one {# alerte} other {# alertes}}",
+      "adopt": "Adopter",
+      "upgrade": "Remettre à niveau",
+      "upToDate": "à jour",
+      "expand": "Déplier",
+      "collapse": "Replier",
+      "missingPrerequisite": "prérequis manquant",
+      "why": "Pourquoi elle existe",
+      "falsePositives": "Ce qui la déclenche légitimement",
+      "response": "Quoi faire",
+      "requires": "Demande {what}, que ce déploiement ne produit pas. Elle est livrée inactive : une détection qui charge et ne matche rien se présenterait comme une couverture.",
+      "frameworks": "Référentiels",
+      "controls": "Contrôles",
+      "dedupWindow": "Fenêtre de déduplication",
+      "driftTitle": "Vos écarts par rapport à la v{version}",
+      "colField": "Champ",
+      "colStandard": "Standard",
+      "colTenant": "Chez vous",
+      "adoptedOn": "Adoptée le {date}",
+      "upgradedOn": "remise à niveau le {date}"
+    },
+    "coverage": {
+      "catalogueSize": "Au catalogue",
+      "adopted": "Adoptées",
+      "enabled": "Actives",
+      "gaps": "Techniques sans détection active",
+      "ownRules": "Règles propres au tenant",
+      "ownRulesNote": "{count, plural, one {# règle écrite} other {# règles écrites}} par ce tenant {count, plural, one {n'apparaît} other {n'apparaissent}} pas ci-dessous : {count, plural, one {elle détecte} other {elles détectent}} peut-être exactement ce qu'il faut, mais la couverture affichée est celle du catalogue.",
+      "title": "Couverture MITRE ATT&CK",
+      "empty": "Le catalogue ne référence aucune technique",
+      "colTactic": "Tactique",
+      "colTechnique": "Technique",
+      "colAvailable": "Au catalogue",
+      "colAdopted": "Adoptées",
+      "colEnabled": "Actives",
+      "colDetections": "Détections",
+      "gap": "lacune",
+      "noReport": "Aucun rapport de couverture"
+    },
+    "upgrade": {
+      "close": "Fermer",
+      "unchanged": "inchangé",
+      "takeIncoming": "amélioration reprise",
+      "keepTenant": "votre choix conservé",
+      "converged": "déjà au même endroit",
+      "conflict": "à trancher",
+      "alreadyCurrent": "Cette détection tourne déjà en v{version}, la version courante du catalogue. Il n'y a rien à reprendre.",
+      "colField": "Champ",
+      "colAdopted": "v{version} (adoptée)",
+      "colIncoming": "v{version} (catalogue)",
+      "colTenant": "Chez vous",
+      "colResult": "Résultat",
+      "keepYours": "Garder le vôtre",
+      "takeOurs": "Prendre le nôtre",
+      "notes": "Motif de la décision",
+      "notesHint": "(recommandé : un conflit tranché sans raison écrite est une question qui reviendra)",
+      "notesPlaceholder": "ex. : notre appétit reste CRITICAL, cette règle couvre le périmètre SWIFT",
+      "toDecide": "À trancher : {fields}",
+      "nothingPending": "Rien en suspens.",
+      "cancel": "Annuler",
+      "apply": "Passer en v{version}",
+      "applying": "Application…"
+    },
+    "severity": "Sévérité"
   },
   "incidents": {
     "title": "Réponse aux incidents",
@@ -136,7 +223,9 @@
     "mttd": "MTTD",
     "mttr": "MTTR",
     "minutes": "min",
-    "noIncidents": "Aucun incident trouvé"
+    "noIncidents": "Aucun incident trouvé",
+    "severity": "Sévérité",
+    "status": "Statut"
   },
   "assets": {
     "title": "Intelligence Asset",
@@ -150,7 +239,8 @@
     "riskScore": "Score de risque",
     "lastSeen": "Dernière activité",
     "vulnerabilities": "Vulnérabilités",
-    "noAssets": "Aucun asset trouvé"
+    "noAssets": "Aucun asset trouvé",
+    "name": "Nom"
   },
   "threats": {
     "title": "Renseignement sur les menaces",
@@ -191,7 +281,9 @@
     "rooted": "Rooté",
     "encrypted": "Chiffré",
     "compliant": "Conforme",
-    "noDevices": "Aucun appareil enrôlé"
+    "noDevices": "Aucun appareil enrôlé",
+    "riskScore": "Score de risque",
+    "lastSeen": "Vu pour la dernière fois"
   },
   "ot": {
     "title": "Sécurité OT / ICS",
@@ -222,7 +314,10 @@
     "findingType": "Type de découverte",
     "recordCount": "Enregistrements affectés",
     "noStores": "Aucun entrepôt de données trouvé",
-    "noFindings": "Aucune découverte"
+    "noFindings": "Aucune découverte",
+    "name": "Nom",
+    "riskScore": "Score de risque",
+    "severity": "Sévérité"
   },
   "compliance": {
     "title": "Conformité",

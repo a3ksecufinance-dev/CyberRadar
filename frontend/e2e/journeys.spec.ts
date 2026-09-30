@@ -96,6 +96,51 @@ test.describe('the pages an analyst opens', () => {
     ).toMatch(/CRITICAL|HIGH/)
   })
 
+  // The catalogue and the coverage were reachable only through the API: the
+  // platform knew what it shipped, what the tenant ran and how the two differed,
+  // and the customer could act on none of it.
+  //
+  // Clicking a tab has to name it, so this is the one place a label is used — but
+  // every assertion is on data: a catalogue code, a difference the tenant made,
+  // an ATT&CK technique. A translated heading would prove only that Next served
+  // a file.
+  test('the detection library shows what we ship and how the tenant differs', async ({ page }) => {
+    const watched = await openAndAudit(page, '/en/siem')
+    expectSound(watched, '/en/siem')
+
+    await page.getByRole('button', { name: 'Library' }).click()
+    await page.waitForLoadState('networkidle')
+
+    // A catalogue code only exists if the library endpoint answered.
+    await expect(page.getByText(/CRP-[A-Z]+-\d{4}/).first()).toBeVisible()
+
+    // The demonstration tenant adopts eight of the fifteen entries and tunes two
+    // of them. Filtering to the tuned ones and finding nothing means the lineage
+    // is not being computed — which is the whole feature.
+    await page.getByRole('button', { name: 'Tuned' }).click()
+    const tuned = await page.locator('tbody tr').count()
+    expect(tuned, 'no adopted detection reports a difference from the version it was adopted at').toBeGreaterThan(0)
+
+    expectSound(watched, '/en/siem (library)')
+  })
+
+  test('the coverage report names the techniques with no active detection', async ({ page }) => {
+    const watched = await openAndAudit(page, '/en/siem')
+    await page.getByRole('button', { name: 'Coverage' }).click()
+    await page.waitForLoadState('networkidle')
+
+    // A technique identifier proves the coverage endpoint answered; "gap" proves
+    // it is reporting what is missing rather than only what is there.
+    const body = await page.locator('body').innerText()
+    expect(body, 'the coverage report names no ATT&CK technique').toMatch(/T\d{4}/)
+    expect(
+      body,
+      'the coverage report shows no gap, yet the demonstration tenant adopts eight of fifteen entries',
+    ).toMatch(/gap/i)
+
+    expectSound(watched, '/en/siem (coverage)')
+  })
+
   test('the attack path page shows what the analysis enumerated', async ({ page }) => {
     const watched = await openAndAudit(page, '/en/attackpath')
     expectSound(watched, '/en/attackpath')

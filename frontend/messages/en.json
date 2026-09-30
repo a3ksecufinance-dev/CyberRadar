@@ -118,7 +118,94 @@
     "rawLog": "Raw Log",
     "detectedAt": "Detected",
     "noEvents": "No events matching filters",
-    "live": "LIVE"
+    "live": "LIVE",
+    "tabs": {
+      "alerts": "Alerts",
+      "library": "Library",
+      "coverage": "Coverage"
+    },
+    "library": {
+      "search": "Code, title, technique, tag…",
+      "filterAll": "All",
+      "filterAdopted": "Adopted",
+      "filterAvailable": "Not adopted",
+      "filterDrifted": "Tuned",
+      "filterUpgradable": "Upgrade available",
+      "noMatch": "No detection matches",
+      "colCode": "Code",
+      "colDetection": "Detection",
+      "colSeverity": "Severity",
+      "colAttack": "ATT&CK",
+      "colYours": "In your estate",
+      "colAction": "Action",
+      "notAdopted": "not adopted",
+      "inactive": "inactive",
+      "drift": "{count, plural, one {# difference} other {# differences}}",
+      "updateAvailable": "v{version} available",
+      "alertsRaised": "{count, plural, one {# alert} other {# alerts}}",
+      "adopt": "Adopt",
+      "upgrade": "Upgrade",
+      "upToDate": "up to date",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "missingPrerequisite": "missing prerequisite",
+      "why": "Why it exists",
+      "falsePositives": "What trips it legitimately",
+      "response": "What to do",
+      "requires": "Needs {what}, which this deployment does not produce. It ships disabled: a detection that loads and matches nothing would present itself as coverage.",
+      "frameworks": "Frameworks",
+      "controls": "Controls",
+      "dedupWindow": "Deduplication window",
+      "driftTitle": "Your differences from v{version}",
+      "colField": "Field",
+      "colStandard": "Standard",
+      "colTenant": "Yours",
+      "adoptedOn": "Adopted on {date}",
+      "upgradedOn": "upgraded on {date}"
+    },
+    "coverage": {
+      "catalogueSize": "In the catalogue",
+      "adopted": "Adopted",
+      "enabled": "Active",
+      "gaps": "Techniques with no active detection",
+      "ownRules": "Rules written by this tenant",
+      "ownRulesNote": "{count, plural, one {# rule} other {# rules}} written by this tenant {count, plural, one {does} other {do}} not appear below. {count, plural, one {It may} other {They may}} detect exactly the right thing, but the coverage shown here is the catalogue's.",
+      "title": "MITRE ATT&CK coverage",
+      "empty": "The catalogue references no technique",
+      "colTactic": "Tactic",
+      "colTechnique": "Technique",
+      "colAvailable": "In the catalogue",
+      "colAdopted": "Adopted",
+      "colEnabled": "Active",
+      "colDetections": "Detections",
+      "gap": "gap",
+      "noReport": "No coverage report"
+    },
+    "upgrade": {
+      "close": "Close",
+      "unchanged": "unchanged",
+      "takeIncoming": "improvement taken",
+      "keepTenant": "your choice kept",
+      "converged": "already the same",
+      "conflict": "to decide",
+      "alreadyCurrent": "This detection already runs v{version}, the catalogue's current version. There is nothing to take.",
+      "colField": "Field",
+      "colAdopted": "v{version} (adopted)",
+      "colIncoming": "v{version} (catalogue)",
+      "colTenant": "Yours",
+      "colResult": "Result",
+      "keepYours": "Keep yours",
+      "takeOurs": "Take ours",
+      "notes": "Reason for the decision",
+      "notesHint": "(recommended: a conflict settled without a written reason is a question that comes back)",
+      "notesPlaceholder": "e.g. our appetite stays CRITICAL, this rule covers the SWIFT perimeter",
+      "toDecide": "To decide: {fields}",
+      "nothingPending": "Nothing pending.",
+      "cancel": "Cancel",
+      "apply": "Move to v{version}",
+      "applying": "Applying…"
+    },
+    "severity": "Severity"
   },
   "incidents": {
     "title": "Incident Response",
@@ -136,7 +223,9 @@
     "mttd": "MTTD",
     "mttr": "MTTR",
     "minutes": "min",
-    "noIncidents": "No incidents found"
+    "noIncidents": "No incidents found",
+    "severity": "Severity",
+    "status": "Status"
   },
   "assets": {
     "title": "Asset Intelligence",
@@ -150,7 +239,8 @@
     "riskScore": "Risk Score",
     "lastSeen": "Last Seen",
     "vulnerabilities": "Vulnerabilities",
-    "noAssets": "No assets found"
+    "noAssets": "No assets found",
+    "name": "Name"
   },
   "threats": {
     "title": "Threat Intelligence",
@@ -191,7 +281,9 @@
     "rooted": "Rooted",
     "encrypted": "Encrypted",
     "compliant": "Compliant",
-    "noDevices": "No devices enrolled"
+    "noDevices": "No devices enrolled",
+    "riskScore": "Risk score",
+    "lastSeen": "Last seen"
   },
   "ot": {
     "title": "OT / ICS Security",
@@ -222,7 +314,10 @@
     "findingType": "Finding Type",
     "recordCount": "Records Affected",
     "noStores": "No data stores found",
-    "noFindings": "No findings"
+    "noFindings": "No findings",
+    "name": "Name",
+    "riskScore": "Risk score",
+    "severity": "Severity"
   },
   "compliance": {
     "title": "Compliance",

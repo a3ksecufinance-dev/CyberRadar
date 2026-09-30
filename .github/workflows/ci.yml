@@ -187,6 +187,13 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      # next-intl renders the key itself when it cannot resolve one, so a page
+      # with a missing translation looks built rather than broken. Five shipped
+      # that way before this step existed.
+      - name: Translations
+        working-directory: frontend
+        run: npm run check:messages
+
       - name: Build
         working-directory: frontend
         # next build needs these present; they are not secrets at build time.

@@ -9,7 +9,8 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "e2e": "playwright test",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "check:messages": "node scripts/check-messages.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",
