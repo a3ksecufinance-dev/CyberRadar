@@ -1,11 +1,12 @@
 'use client'
-import { Shield, Users, Key, Info } from 'lucide-react'
+import { Shield, Users, Key, Info, Scale } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { RiskProfile } from '@/components/settings/RiskProfile'
 import { useUsers } from '@/hooks'
 import { formatDateOpt } from '@/lib/utils'
 
@@ -16,6 +17,7 @@ import { formatDateOpt } from '@/lib/utils'
 // toggles wrote nowhere — a console reporting controls that are not enforced is
 // worse than one that says it cannot report them.
 const sections = [
+  { icon: Scale, label: 'Risk appetite', id: 'risk' },
   { icon: Users, label: 'Users & Roles', id: 'users' },
   { icon: Key, label: 'API Keys', id: 'api' },
   { icon: Shield, label: 'Platform configuration', id: 'config' },
@@ -50,6 +52,11 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-6 lg:col-span-3">
+          {/* The first thing on this page that a customer can actually change.
+              The scoring formula was the platform's, presented as a fact; it is
+              a judgement, and it is theirs. */}
+          <div id="risk"><RiskProfile /></div>
+
           {/* Users & Roles — the identity service's own records */}
           <Card id="users">
             <CardHeader>
@@ -147,7 +154,10 @@ export default function SettingsPage() {
                 <li>• <span className="text-slate-300">Retention and limits</span> — the tenant record&apos;s <code className="text-slate-400">limits</code> field</li>
               </ul>
               <p className="text-xs text-slate-600">
-                A tenant-settings endpoint is needed before this page can offer to change any of them.
+                These are read at startup and are not tenant configuration. What <em>is</em> the
+                tenant&apos;s judgement — the risk appetite above — is editable here and versioned.
+                The same is owed to the UEBA thresholds, the remediation deadlines and the attack-path
+                weights, which are still the platform&apos;s constants.
               </p>
             </CardContent>
           </Card>

@@ -158,6 +158,24 @@ test.describe('the pages an analyst opens', () => {
     await expect(page.getByText(DEMO.indicator, { exact: false }).first()).toBeVisible()
   })
 
+  // The scoring formula was the platform's, presented as a fact. It is a
+  // judgement, and it is the institution's — so it has to be visible, adjustable
+  // and dated, from a screen rather than from a migration.
+  test('the settings page shows the risk appetite in force, and its history', async ({ page }) => {
+    const watched = await openAndAudit(page, '/en/settings')
+    expectSound(watched, '/en/settings')
+
+    // A profile code is stored, not translated, so finding one proves the tenant
+    // service answered rather than that the dictionary has an entry.
+    const body = await page.locator('body').innerText()
+    expect(body, 'no risk profile code on the page').toMatch(/balanced|pci_dss|swift_cscf|vulnerability_led/)
+
+    // Seventeen factors, each editable. A read-only rendering of the standard
+    // values is what this page looked like before.
+    const inputs = await page.getByRole('spinbutton').count()
+    expect(inputs, 'the risk factors are not editable').toBeGreaterThanOrEqual(17)
+  })
+
   test('the incident page loads', async ({ page }) => {
     const watched = await openAndAudit(page, '/en/ir')
     expectSound(watched, '/en/ir')

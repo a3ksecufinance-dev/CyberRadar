@@ -347,5 +347,117 @@
     "suggestion3": "Génère le rapport de conformité DORA",
     "suggestion4": "Quels assets sont exposés aux IOCs actifs ?",
     "thinking": "Analyse de votre contexte de sécurité..."
+  },
+  "settings": {
+    "risk": {
+      "title": "Appétit au risque",
+      "subtitle": "Ce que vaut chaque facteur du score de risque d'un actif, et où cet établissement place la limite qu'il appelle risque élevé.",
+      "inForce": "En vigueur",
+      "version": "version {version}, effective depuis le {date}",
+      "notChosenTitle": "Vous n'avez pas encore tranché",
+      "notChosen": "Vos actifs sont notés avec les valeurs standards de la plateforme. C'est un point de départ raisonnable et ce n'est pas votre décision — un auditeur qui demande pourquoi un serveur est à 8,4 interroge votre appétit, pas le nôtre.",
+      "chosen": "Fondé sur le profil {preset}. Chaque version est conservée avec ses dates : ce qu'était la formule tel jour reste une question à laquelle on peut répondre.",
+      "presets": "Profils standards",
+      "presetsHelp": "Choisissez celui dont le reporting correspond à l'établissement, puis déplacez les deux ou trois facteurs avec lesquels il n'est pas d'accord. Les champs sont fixes, les pondérations ne le sont pas : c'est ce qui garde un score explicable.",
+      "selected": "sélectionné",
+      "factors": "Facteurs",
+      "colFactor": "Facteur",
+      "colStandard": "Standard",
+      "colYours": "Chez vous",
+      "groupCriticality": "Criticité déclarée",
+      "groupVulnerabilities": "Vulnérabilités ouvertes",
+      "groupExposure": "Exposition réglementée",
+      "groupHygiene": "Hygiène",
+      "groupContext": "Contexte",
+      "groupOverall": "Ensemble",
+      "notes": "Pourquoi c'est ce que vous avez choisi",
+      "notesHelp": "Un auditeur lit ceci avant de lire les pondérations.",
+      "notesPlaceholder": "ex. : le périmètre SWIFT porte notre attestation, il pèse donc plus que le périmètre carte cette année",
+      "save": "Enregistrer cette version",
+      "saving": "Enregistrement…",
+      "reset": "Annuler les modifications",
+      "changedCount": "{count, plural, =0 {Aucun facteur ne s'écarte du standard} one {# facteur s'écarte du standard} other {# facteurs s'écartent du standard}}",
+      "saved": "Enregistré. Les scores des actifs sont désormais produits avec cette version ; la précédente conserve ses dates.",
+      "history": "Historique",
+      "historyHelp": "Chaque version, avec la fenêtre pendant laquelle elle était en vigueur. C'est la réponse à « quelle était la formule ce jour-là ».",
+      "current": "en vigueur",
+      "noHistory": "Ce tenant n'a encore enregistré aucune version.",
+      "colVersion": "Version",
+      "colFrom": "Du",
+      "colTo": "Au",
+      "colBasedOn": "Fondé sur",
+      "colNotes": "Motif",
+      "readOnly": "Vous pouvez consulter cet appétit mais pas le modifier. Définir un appétit au risque demande la permission risk:write, qui appartient à la fonction risque plutôt qu'à l'administrateur du tenant.",
+      "factor": {
+        "criticality_step": {
+          "label": "Par niveau de criticité",
+          "help": "Ajouté pour chaque niveau au-dessus du plus bas. Un parc dont la criticité déclarée est fiable monte cette valeur."
+        },
+        "criticality_cap": {
+          "label": "Plafond de criticité",
+          "help": "Ce que la criticité déclarée peut apporter au maximum, à elle seule."
+        },
+        "vuln_critical": {
+          "label": "Par vulnérabilité critique",
+          "help": "Ajouté pour chaque constat critique ouvert sur l'actif."
+        },
+        "vuln_high": {
+          "label": "Par vulnérabilité élevée",
+          "help": "Ajouté pour chaque constat élevé ouvert."
+        },
+        "vuln_medium": {
+          "label": "Par vulnérabilité moyenne",
+          "help": "Ajouté pour chaque constat moyen ouvert."
+        },
+        "vuln_low": {
+          "label": "Par vulnérabilité faible",
+          "help": "Ajouté pour chaque constat faible ouvert."
+        },
+        "vuln_cap": {
+          "label": "Plafond des vulnérabilités",
+          "help": "Ce que les constats ouverts peuvent apporter au maximum, quel qu'en soit le nombre."
+        },
+        "cbs_connected": {
+          "label": "Relié au système bancaire central",
+          "help": "Ajouté quand l'actif atteint le core banking."
+        },
+        "swift_connected": {
+          "label": "Relié à SWIFT",
+          "help": "Ajouté quand l'actif est dans la zone de paiement ou l'atteint."
+        },
+        "pci_scope": {
+          "label": "Dans le périmètre PCI",
+          "help": "Ajouté quand l'actif est dans le périmètre carte."
+        },
+        "exposure_cap": {
+          "label": "Plafond d'exposition",
+          "help": "Ce que l'exposition réglementée peut apporter au maximum, au total."
+        },
+        "never_seen": {
+          "label": "Jamais scanné",
+          "help": "Ajouté quand l'actif n'a jamais été scanné. Une inconnue n'est pas un zéro."
+        },
+        "critical_production": {
+          "label": "Critique en production",
+          "help": "Ajouté quand un actif critique est en environnement de production."
+        },
+        "banking_type": {
+          "label": "Type d'actif bancaire",
+          "help": "Ajouté pour un type d'actif propre à la banque."
+        },
+        "context_cap": {
+          "label": "Plafond de contexte",
+          "help": "Ce que le contexte peut apporter au maximum."
+        },
+        "total_cap": {
+          "label": "Score maximal",
+          "help": "Aucun actif ne dépasse cette valeur."
+        },
+        "high_risk_threshold": {
+          "label": "Risque élevé à partir de",
+          "help": "Le score à partir duquel cet établissement qualifie un actif de risque élevé. C'est sur lui que sont tirés les décomptes et les rapports."
+        }
+      }
+    }
   }
 }

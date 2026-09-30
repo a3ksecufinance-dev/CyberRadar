@@ -84,6 +84,76 @@ export interface SIEMStats {
   fired_last_7d: number
 }
 
+// ─── Risk appetite — services/tenant/internal/model/risk_profile.go ──────────
+//
+// The fields are fixed and the weights are not. That is the trade the backend
+// makes deliberately: full control over the judgement, none over the vocabulary.
+// A customer who could write arbitrary expressions would get a number with no
+// breakdown, nothing to compare between tenants, and nothing to show an auditor.
+export interface RiskWeights {
+  criticality_step: number
+  criticality_cap: number
+  vuln_critical: number
+  vuln_high: number
+  vuln_medium: number
+  vuln_low: number
+  vuln_cap: number
+  cbs_connected: number
+  swift_connected: number
+  pci_scope: number
+  exposure_cap: number
+  never_seen: number
+  critical_production: number
+  banking_type: number
+  context_cap: number
+  total_cap: number
+  high_risk_threshold: number
+}
+
+/** The factor names, in the order the screen groups them. Derived from the
+ *  interface, so a factor added to the Go struct and to RiskWeights cannot be
+ *  silently left off the form. */
+export type RiskFactor = keyof RiskWeights
+
+export interface RiskProfile {
+  id: string
+  /** Absent on a standard profile: those belong to the platform, not a tenant. */
+  tenant_id?: string
+  code: string
+  name: string
+  description?: string
+  /** The standard profile this one started from — what a difference is measured
+   *  against, and what a tenant shows an auditor. */
+  based_on?: string
+  version: number
+  effective_from: string
+  /** Absent on the version in force. */
+  effective_to?: string
+  weights: RiskWeights
+  notes?: string
+  created_by?: string
+  created_at: string
+}
+
+export interface ActiveRiskProfile {
+  profile: RiskProfile
+  /** False when the tenant has made no decision and is being scored under the
+   *  platform's standard values. Presenting a default as a choice the customer
+   *  made is how a vendor ends up defending someone else's risk appetite. */
+  chosen: boolean
+}
+
+/** Every factor optional: adjusting one number must not restate the other
+ *  sixteen, and an omitted factor must not be read as zero. */
+export type PartialRiskWeights = Partial<RiskWeights>
+
+export interface SetRiskProfileRequest {
+  based_on?: string
+  name?: string
+  notes?: string
+  weights?: PartialRiskWeights
+}
+
 // ─── Detection library — services/siem/internal/model/library.go ─────────────
 //
 // Severity here is upper case, not the lower-cased `Severity` above: the SIEM

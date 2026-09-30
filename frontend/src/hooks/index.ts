@@ -12,5 +12,6 @@ export { useFrameworks, useControls, useComplianceRisks, useComplianceStats } fr
 export { useRiskScenarios, useRiskAssets, useKRIs, useRiskStats } from './useRisk'
 export { useVendors, useComponents, useSCSAlerts, useSCSStats } from './useSCS'
 export { useUsers, usePrivilegedIdentities } from './useIdentity'
+export { useRiskPresets, useActiveRiskProfile, useRiskProfileHistory } from './useTenant'
 export { useDashboardOverview, useKPITimeseries } from './useDashboard'
 export { useAPIKeys, useWebhooks, useWebhookDeliveries, useAPIFWStats } from './useAPIGateway'

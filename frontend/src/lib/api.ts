@@ -2,6 +2,7 @@ import type {
   ApiResponse,
   DetectionRule,
   PageMeta,
+  RiskProfile,
   UpgradePlan,
   UpgradeResult,
 } from '@/types'
@@ -105,6 +106,13 @@ export const ROUTES = {
     sboms: '/api/v1/scs/sboms',
     alerts: '/api/v1/scs/alerts',
     stats: '/api/v1/scs/stats',
+  },
+  // Risk appetite lives on the tenant service: it is tenant configuration, not
+  // a domain object of any one analysis.
+  tenant: {
+    riskPresets: '/api/v1/risk-profiles/presets',
+    riskActive: '/api/v1/risk-profiles/active',
+    riskHistory: '/api/v1/risk-profiles/history',
   },
   identity: {
     users: '/api/v1/users',
@@ -263,6 +271,12 @@ async function patch<T>(service: string, path: string, body: unknown, token?: st
   ).payload as T
 }
 
+async function put<T>(service: string, path: string, body: unknown, token?: string): Promise<T> {
+  return payloadOf(
+    await requestRaw(service, path, { method: 'PUT', body: JSON.stringify(body) }, token),
+  ).payload as T
+}
+
 async function del<T>(service: string, path: string, token?: string): Promise<T> {
   return payloadOf(await requestRaw(service, path, { method: 'DELETE' }, token)).payload as T
 }
@@ -317,6 +331,12 @@ export const api = {
   attackpath: {
     runScenario: (scenarioID: string, t?: string) =>
       post('attackpath', `${ROUTES.attackpath.scenarios}/${scenarioID}/run`, {}, t),
+  },
+  tenant: {
+    // A new version of the risk appetite. The previous one is closed rather
+    // than replaced: an auditor asks what the formula was on a given day.
+    setRiskProfile: (body: unknown, t?: string) =>
+      put<RiskProfile>('tenant', ROUTES.tenant.riskActive, body, t),
   },
   siem: {
     // Adopting with an empty body takes the detection exactly as it ships,

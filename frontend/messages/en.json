@@ -347,5 +347,117 @@
     "suggestion3": "Generate the DORA compliance report",
     "suggestion4": "Which assets are exposed to active IOCs?",
     "thinking": "Analyzing your security context..."
+  },
+  "settings": {
+    "risk": {
+      "title": "Risk appetite",
+      "subtitle": "What each factor of an asset's risk score is worth, and where this institution draws the line it calls high risk.",
+      "inForce": "In force",
+      "version": "version {version}, effective since {date}",
+      "notChosenTitle": "You have not chosen yet",
+      "notChosen": "Your assets are scored under the platform's standard values. They are a reasonable starting point and they are not your decision — an auditor asking why a server scores 8.4 is asking about your appetite, not ours.",
+      "chosen": "Based on the {preset} profile. Every version is kept with its dates, so what the formula was on a given day stays answerable.",
+      "presets": "Standard profiles",
+      "presetsHelp": "Pick the one whose reporting fits the institution, then move the two or three factors it argues with. The fields are fixed and the weights are not: that is what keeps a score explainable.",
+      "selected": "selected",
+      "factors": "Factors",
+      "colFactor": "Factor",
+      "colStandard": "Standard",
+      "colYours": "Yours",
+      "groupCriticality": "Declared criticality",
+      "groupVulnerabilities": "Open vulnerabilities",
+      "groupExposure": "Regulated exposure",
+      "groupHygiene": "Hygiene",
+      "groupContext": "Context",
+      "groupOverall": "Overall",
+      "notes": "Why this is what you chose",
+      "notesHelp": "An auditor reads this before they read the weights.",
+      "notesPlaceholder": "e.g. the SWIFT perimeter carries our attestation, so it weighs above card scope this year",
+      "save": "Record this version",
+      "saving": "Recording…",
+      "reset": "Discard changes",
+      "changedCount": "{count, plural, =0 {No factor moved from the standard} one {# factor moved from the standard} other {# factors moved from the standard}}",
+      "saved": "Recorded. Asset scores are produced under this version from now on; the previous one keeps its dates.",
+      "history": "History",
+      "historyHelp": "Each version, with the window it was in force. This is the answer to what the formula was on a given day.",
+      "current": "in force",
+      "noHistory": "This tenant has recorded no version yet.",
+      "colVersion": "Version",
+      "colFrom": "From",
+      "colTo": "To",
+      "colBasedOn": "Based on",
+      "colNotes": "Reason",
+      "readOnly": "You can read this appetite but not change it. Setting a risk appetite needs the risk:write permission, which the risk function holds rather than the tenant administrator.",
+      "factor": {
+        "criticality_step": {
+          "label": "Per criticality level",
+          "help": "Added for each level above the lowest. An estate whose declared criticality is trusted raises this."
+        },
+        "criticality_cap": {
+          "label": "Criticality ceiling",
+          "help": "The most the declared criticality alone can contribute."
+        },
+        "vuln_critical": {
+          "label": "Per critical vulnerability",
+          "help": "Added for each open critical finding on the asset."
+        },
+        "vuln_high": {
+          "label": "Per high vulnerability",
+          "help": "Added for each open high finding."
+        },
+        "vuln_medium": {
+          "label": "Per medium vulnerability",
+          "help": "Added for each open medium finding."
+        },
+        "vuln_low": {
+          "label": "Per low vulnerability",
+          "help": "Added for each open low finding."
+        },
+        "vuln_cap": {
+          "label": "Vulnerability ceiling",
+          "help": "The most open findings can contribute, however many there are."
+        },
+        "cbs_connected": {
+          "label": "Connected to the core banking system",
+          "help": "Added when the asset reaches the core banking system."
+        },
+        "swift_connected": {
+          "label": "Connected to SWIFT",
+          "help": "Added when the asset sits in or reaches the payment zone."
+        },
+        "pci_scope": {
+          "label": "In PCI scope",
+          "help": "Added when the asset is in card scope."
+        },
+        "exposure_cap": {
+          "label": "Exposure ceiling",
+          "help": "The most regulated exposure can contribute in total."
+        },
+        "never_seen": {
+          "label": "Never scanned",
+          "help": "Added when the asset has never been scanned. An unknown is not a zero."
+        },
+        "critical_production": {
+          "label": "Critical in production",
+          "help": "Added when a critical asset is in the production environment."
+        },
+        "banking_type": {
+          "label": "Banking asset type",
+          "help": "Added for an asset type specific to banking."
+        },
+        "context_cap": {
+          "label": "Context ceiling",
+          "help": "The most context can contribute."
+        },
+        "total_cap": {
+          "label": "Maximum score",
+          "help": "No asset scores above this."
+        },
+        "high_risk_threshold": {
+          "label": "High risk from",
+          "help": "The score at and above which this institution calls an asset high risk. It is what the counts and the reports are drawn on."
+        }
+      }
+    }
   }
 }
