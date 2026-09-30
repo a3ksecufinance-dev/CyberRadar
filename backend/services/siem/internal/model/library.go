@@ -68,6 +68,15 @@ type AdoptedRule struct {
 	AtVersion   int       `json:"at_version"`
 	AlertsTotal int       `json:"alerts_total"`
 
+	// UpgradedAt is when this copy was last brought to a newer catalogue
+	// version. Nil means it still runs the version it was adopted at, which is
+	// the honest answer to "is this still the detection you signed off".
+	UpgradedAt *time.Time `json:"upgraded_at,omitempty"`
+
+	// Notes is why the last upgrade was taken, or why a conflict was resolved
+	// the way it was.
+	Notes string `json:"notes,omitempty"`
+
 	// UpdateAvailable is true when the catalogue has moved on since this copy
 	// was taken. What changed is in the entry's own content.
 	UpdateAvailable bool `json:"update_available"`
@@ -130,4 +139,94 @@ type Coverage struct {
 	CatalogueSize int `json:"catalogue_size"`
 	AdoptedTotal  int `json:"adopted_total"`
 	EnabledTotal  int `json:"enabled_total"`
+}
+
+// ─── Bringing an adopted detection up to the current version ─────────────────
+
+// Upgrade actions. They are the four outcomes of a three-way comparison
+// between the version a tenant adopted, the version the catalogue ships now,
+// and the rule as it stands today — plus the one case that needs a person.
+const (
+	// UpgradeUnchanged — no one moved this field.
+	UpgradeUnchanged = "unchanged"
+	// UpgradeTakeIncoming — the catalogue moved it and the tenant never did, so
+	// the new value applies. This is what an upgrade is for.
+	UpgradeTakeIncoming = "take_incoming"
+	// UpgradeKeepTenant — the tenant moved it and the catalogue did not, so
+	// their decision survives the upgrade. This is the whole point of recording
+	// lineage rather than overwriting.
+	UpgradeKeepTenant = "keep_tenant"
+	// UpgradeConverged — both moved it, to the same value. Nothing to decide.
+	UpgradeConverged = "converged"
+	// UpgradeConflict — both moved it, differently. Only the customer can say
+	// which of the two is their intent.
+	UpgradeConflict = "conflict"
+)
+
+// UpgradeField is one field of that comparison, rendered the way a reviewer
+// reads it.
+type UpgradeField struct {
+	Field string `json:"field"`
+
+	// Adopted is the value in the version this tenant took; Incoming what the
+	// catalogue ships now; Tenant what their rule holds today.
+	Adopted  string `json:"adopted"`
+	Incoming string `json:"incoming"`
+	Tenant   string `json:"tenant"`
+
+	// Action is one of the constants above. Result is the value the upgrade
+	// would write, empty for a conflict until it is resolved.
+	Action string `json:"action"`
+	Result string `json:"result,omitempty"`
+}
+
+// UpgradePlan is what moving an adopted rule to the current content version
+// would do, before anything is written.
+//
+// It exists because an upgrade is a decision, not a migration. A platform that
+// silently replaced a customer's tuned detection with its own newer one would
+// be overwriting the judgement the lineage was built to preserve.
+type UpgradePlan struct {
+	Code   string    `json:"code"`
+	RuleID uuid.UUID `json:"rule_id"`
+
+	FromVersion int `json:"from_version"`
+	ToVersion   int `json:"to_version"`
+
+	// UpToDate is true when the tenant already runs the current version. The
+	// field list is then empty and applying the plan changes nothing.
+	UpToDate bool `json:"up_to_date"`
+
+	Fields []UpgradeField `json:"fields"`
+
+	// Conflicts names the fields that need a decision. While it is non-empty
+	// the upgrade refuses.
+	Conflicts []string `json:"conflicts"`
+
+	// Warnings are things the customer should know that are not conflicts —
+	// chiefly a new version that needs data the platform does not produce, on a
+	// detection they currently have switched on.
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// UpgradeRequest applies an upgrade plan.
+type UpgradeRequest struct {
+	// ToVersion, when set, must be the version the plan was computed against.
+	// It is what stops a decision taken on one diff being applied to another
+	// after the catalogue moved underneath it.
+	ToVersion int `json:"to_version" validate:"omitempty,min=1"`
+
+	// Resolve answers each conflicting field with "incoming" or "tenant".
+	// A conflict left out of this map is not assumed either way.
+	Resolve map[string]string `json:"resolve"`
+
+	// Notes is why this upgrade was taken, or why a conflict was resolved the
+	// way it was. Recorded on the rule so the answer outlives the person.
+	Notes string `json:"notes" validate:"omitempty,max=2000"`
+}
+
+// UpgradeResult is the plan that was applied and the rule it produced.
+type UpgradeResult struct {
+	Plan *UpgradePlan   `json:"plan"`
+	Rule *DetectionRule `json:"rule"`
 }

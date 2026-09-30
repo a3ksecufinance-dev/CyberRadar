@@ -138,8 +138,9 @@ type Adoption struct {
 func (r *LibraryRepository) Adoptions(ctx context.Context, tenantID uuid.UUID) (map[string]*Adoption, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT content_code, content_version, COALESCE(adopted_at, created_at),
+		       content_upgraded_at, COALESCE(lineage_notes, ''),
 		       id, name, enabled, alerts_total,
-		       severity, conditions, actions, dedup_window_s
+		       severity, description, conditions, actions, dedup_window_s
 		FROM detection_rules
 		WHERE tenant_id = $1 AND content_code IS NOT NULL`, tenantID)
 	if err != nil {
@@ -157,8 +158,10 @@ func (r *LibraryRepository) Adoptions(ctx context.Context, tenantID uuid.UUID) (
 			actJSON  []byte
 		)
 		if err := rows.Scan(&code, &lineage.AtVersion, &lineage.AdoptedAt,
+			&lineage.UpgradedAt, &lineage.Notes,
 			&lineage.RuleID, &lineage.Name, &lineage.Enabled, &lineage.AlertsTotal,
-			&current.Severity, &condJSON, &actJSON, &current.DedupWindowS); err != nil {
+			&current.Severity, &current.Description, &condJSON, &actJSON,
+			&current.DedupWindowS); err != nil {
 			return nil, fmt.Errorf("scan adoption: %w", err)
 		}
 		if err := json.Unmarshal(condJSON, &current.Conditions); err != nil {
@@ -228,3 +231,53 @@ func (r *LibraryRepository) OwnRuleCount(ctx context.Context, tenantID uuid.UUID
 	}
 	return n, nil
 }
+
+// Upgrade writes a tenant's rule at a newer catalogue version.
+//
+// The version is part of the WHERE clause, not just the SET list: two callers
+// upgrading the same rule at once would otherwise both succeed, and the second
+// would record a version whose merge it never computed. A zero row count means
+// the rule moved underneath the plan.
+func (r *LibraryRepository) Upgrade(
+	ctx context.Context,
+	tenantID, ruleID uuid.UUID,
+	fromVersion, toVersion int,
+	rule *model.DetectionRule,
+	entry *model.ContentEntry,
+	notes string,
+) error {
+	condJSON, err := json.Marshal(rule.Conditions)
+	if err != nil {
+		return fmt.Errorf("marshal conditions: %w", err)
+	}
+	actJSON, err := json.Marshal(rule.Actions)
+	if err != nil {
+		return fmt.Errorf("marshal actions: %w", err)
+	}
+
+	tag, err := r.db.Exec(ctx, `
+		UPDATE detection_rules SET
+			name = $1, description = $2, category = $3, severity = $4,
+			conditions = $5, actions = $6, dedup_window_s = $7,
+			mitre_tactic = $8, mitre_technique = $9,
+			content_version = $10, content_upgraded_at = NOW(),
+			lineage_notes = NULLIF($11, '')
+		WHERE tenant_id = $12 AND id = $13 AND content_version = $14`,
+		rule.Name, rule.Description, entry.Category, rule.Severity,
+		condJSON, actJSON, rule.DedupWindowS,
+		nvl(entry.MitreTactic), nvl(entry.MitreTechnique),
+		toVersion, notes,
+		tenantID, ruleID, fromVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("upgrade rule %s: %w", ruleID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUpgradeRaced
+	}
+	return nil
+}
+
+// ErrUpgradeRaced is returned when the rule is no longer at the version the
+// plan was computed against.
+var ErrUpgradeRaced = errors.New("the rule moved since the plan was computed")

@@ -38,6 +38,8 @@ func (h *LibraryHandler) RegisterRoutes(r chi.Router) {
 		r.With(authmw.RequirePermission("rules:read")).Get("/coverage", h.Coverage)
 		r.With(authmw.RequirePermission("rules:read")).Get("/{code}", h.Entry)
 		r.With(authmw.RequirePermission("rules:write")).Post("/{code}/adopt", h.Adopt)
+		r.With(authmw.RequirePermission("rules:read")).Get("/{code}/upgrade", h.UpgradePlan)
+		r.With(authmw.RequirePermission("rules:write")).Post("/{code}/upgrade", h.Upgrade)
 	})
 }
 
@@ -109,4 +111,50 @@ func (h *LibraryHandler) Adopt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.Created(w, rule)
+}
+
+// UpgradePlan handles GET /siem/rule-library/{code}/upgrade.
+//
+// A read, deliberately: what an upgrade would do has to be visible before it is
+// taken, and asking that question must not change anything.
+func (h *LibraryHandler) UpgradePlan(w http.ResponseWriter, r *http.Request) {
+	tenantID := mustTenantID(r)
+	plan, err := h.svc.UpgradePlan(r.Context(), tenantID, chi.URLParam(r, "code"))
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.OK(w, plan)
+}
+
+// Upgrade handles POST /siem/rule-library/{code}/upgrade.
+func (h *LibraryHandler) Upgrade(w http.ResponseWriter, r *http.Request) {
+	tenantID := mustTenantID(r)
+
+	// An empty body upgrades a rule with nothing in dispute. Where both sides
+	// changed the same field the service refuses, and says which — so the empty
+	// case is safe rather than convenient.
+	var req model.UpgradeRequest
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		response.BadRequest(w, "INVALID_BODY", "Could not read the request body")
+		return
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			response.BadRequest(w, "INVALID_JSON", "Invalid request body")
+			return
+		}
+		if err := h.validate.Struct(&req); err != nil {
+			response.UnprocessableEntity(w, err.Error())
+			return
+		}
+	}
+
+	result, err := h.svc.Upgrade(r.Context(), tenantID, chi.URLParam(r, "code"), &req)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.OK(w, result)
 }
