@@ -12,21 +12,32 @@ import (
 
 // maxPathsPerScenario caps how many paths one scenario records. Reaching it is
 // reported rather than silently returning a partial answer.
+//
+// It stays a constant while the weightings became configurable, because it is
+// not the same kind of number: it bounds the work a run may do, the way a page
+// size does. Nothing about an institution's view of risk is expressed by it.
 const maxPathsPerScenario = 200
 
-// hopDecay is how much each extra hop reduces a path's threat score. An attack
-// that needs more steps is more work and more chance of being caught.
-const hopDecay = 0.85
+// PolicySource is where the weightings in force come from.
+//
+// Read once per run rather than cached: a scenario run enumerates a graph and
+// writes hundreds of rows, so one more query is noise — and reading it fresh
+// means a stance changed in the console applies to the very next run instead of
+// whenever a refresh happens to land.
+type PolicySource interface {
+	AttackPolicy(ctx context.Context, tenantID uuid.UUID) (*model.AttackPolicy, error)
+}
 
 // Analyzer finds attack paths through a tenant's graph.
 type Analyzer struct {
-	store  GraphStore
-	logger zerolog.Logger
+	store    GraphStore
+	policies PolicySource
+	logger   zerolog.Logger
 }
 
 // NewAnalyzer creates an Analyzer.
-func NewAnalyzer(store GraphStore, logger zerolog.Logger) *Analyzer {
-	return &Analyzer{store: store, logger: logger}
+func NewAnalyzer(store GraphStore, policies PolicySource, logger zerolog.Logger) *Analyzer {
+	return &Analyzer{store: store, policies: policies, logger: logger}
 }
 
 // RunScenario walks the graph from each entry node to each target and records
@@ -36,6 +47,23 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 
 	if err := a.store.SetScenarioStatus(ctx, scenario.ID, model.ScenarioStatusRunning); err != nil {
 		return err
+	}
+
+	// The stance this run is scored under. Resolved once, so every path in one
+	// run is ranked against the same weightings even if someone saves a new
+	// version while it is walking.
+	policy := model.DefaultAttackPolicy()
+	if a.policies != nil {
+		if p, err := a.policies.AttackPolicy(ctx, scenario.TenantID); err == nil && p != nil {
+			policy = p
+		} else if err != nil {
+			// Scoring on the standard stance beats refusing to score: a run
+			// that failed because a configuration row was unreachable would be
+			// a worse outage than one ranked under our weightings.
+			a.logger.Error().Err(err).
+				Str("tenant_id", scenario.TenantID.String()).
+				Msg("attack_policy_unreadable_using_standard")
+		}
 	}
 
 	// No graph is loaded. Every run used to pull the tenant's whole graph into
@@ -56,20 +84,20 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 			return err
 		}
 		for _, dp := range found {
-			allPaths = append(allPaths, a.buildPath(scenario, dp))
+			allPaths = append(allPaths, a.buildPath(scenario, dp, policy))
 		}
 		truncated = truncated || cut
 	}
 
 	computeChokePoints(allPaths)
 
-	if err := a.store.SavePaths(ctx, allPaths); err != nil {
+	if err := a.store.SavePaths(ctx, scenario.ID, allPaths); err != nil {
 		a.logger.Error().Err(err).Str("scenario_id", scenario.ID.String()).Msg("save_paths_error")
 	}
 
 	durationMS := int(time.Since(start).Milliseconds())
 	summary := summarise(allPaths)
-	riskScore := scenarioRisk(allPaths)
+	riskScore := scenarioRisk(allPaths, policy)
 
 	if err := a.store.UpdateScenarioResult(ctx, scenario.ID, model.ScenarioOutcome{
 		PathCount:        len(allPaths),
@@ -78,6 +106,8 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 		CheapestPathCost: summary.CheapestCost,
 		RiskScore:        riskScore,
 		DurationMS:       durationMS,
+		PolicyCode:       policy.Code,
+		PolicyVersion:    policy.Version,
 	}); err != nil {
 		return err
 	}
@@ -93,6 +123,8 @@ func (a *Analyzer) RunScenario(ctx context.Context, scenario *model.AttackScenar
 		Str("tenant_id", scenario.TenantID.String()).
 		Int("paths_found", len(allPaths)).
 		Float64("risk_score", riskScore).
+		Str("policy", policy.Code).
+		Int("policy_version", policy.Version).
 		Int("duration_ms", durationMS).
 		Msg("scenario_analysis_completed")
 
@@ -204,9 +236,14 @@ func typeIncluded(scenario *model.AttackScenario, node *model.AttackNode) bool {
 // It works from the path's own nodes and edges. It used to need the whole
 // graph, to look up whether an intermediate node was privileged — which is one
 // of the reasons the graph had to be in memory at all.
-func (a *Analyzer) buildPath(scenario *model.AttackScenario, found model.DiscoveredPath) *model.AttackPath {
+func (a *Analyzer) buildPath(
+	scenario *model.AttackScenario,
+	found model.DiscoveredPath,
+	policy *model.AttackPolicy,
+) *model.AttackPath {
 	entry, target := found.Entry(), found.Target()
 	hopCount := len(found.Edges)
+	totalCost := policy.PathCost(found.Edges)
 
 	nodeSeq := make([]uuid.UUID, 0, len(found.Nodes))
 	for _, n := range found.Nodes {
@@ -226,10 +263,10 @@ func (a *Analyzer) buildPath(scenario *model.AttackScenario, found model.Discove
 		NodeSequence:     nodeSeq,
 		EdgeSequence:     edgeSeq,
 		HopCount:         hopCount,
-		TotalCost:        found.Cost(),
-		PathScore:        pathScore(found.Cost(), hopCount),
-		Likelihood:       math.Pow(hopDecay, float64(hopCount)),
-		Impact:           impactOf(target),
+		TotalCost:        totalCost,
+		PathScore:        policy.PathScore(totalCost, hopCount),
+		Likelihood:       math.Pow(policy.HopDecay, float64(hopCount)),
+		Impact:           policy.Impact(target),
 		HasInternetEntry: entry.IsInternetFacing,
 		MitreTactics:     []string{},
 		DiscoveredAt:     time.Now().UTC(),
@@ -253,48 +290,6 @@ func (a *Analyzer) buildPath(scenario *model.AttackScenario, found model.Discove
 
 	path.PathType = pathTypeOf(target, path)
 	return path
-}
-
-// pathScore is how threatening a path is: higher means easier for an attacker.
-//
-// Both extra hops and heavier edges make an attack harder, so both lower it.
-// The previous formula multiplied by hop count, so a five-hop path scored
-// above a one-hop path of the same cost — it ranked the hardest attacks as the
-// most dangerous, which is the wrong way round for a list an analyst works
-// from the top of.
-func pathScore(totalCost float64, hopCount int) float64 {
-	if hopCount < 1 {
-		hopCount = 1
-	}
-	avgCost := totalCost / float64(hopCount)
-	score := 10.0 / (1.0 + avgCost) * math.Pow(hopDecay, float64(hopCount-1))
-	return math.Min(10.0, math.Max(0, score))
-}
-
-// impactOf is what reaching this target would cost, from the target itself.
-//
-// Every path used to record a flat 7.0 regardless of what it reached, so
-// impact carried no information and any ranking that used it was arbitrary.
-func impactOf(target *model.AttackNode) float64 {
-	// Criticality is 1–4 in the asset model. It maps onto 0–9 rather than
-	// 0–10 so that is_critical_system still has somewhere to go: mapping it
-	// straight onto 0–10 saturates at criticality 4 and the flag stops
-	// distinguishing the targets it exists to distinguish.
-	const ceiling = 9.0
-
-	impact := 0.0
-	switch {
-	case target.Criticality > 0:
-		impact = math.Min(ceiling, float64(target.Criticality)/4.0*ceiling)
-	case target.RiskScore > 0:
-		impact = math.Min(ceiling, target.RiskScore)
-	default:
-		impact = 4.5 // nothing recorded about the target; assume the middle
-	}
-	if target.IsCriticalSystem {
-		impact += 1.0
-	}
-	return math.Min(10.0, impact)
 }
 
 // pathTypeOf classifies a path by what it achieved, rather than labelling
@@ -377,17 +372,10 @@ func summarise(paths []*model.AttackPath) scenarioResult {
 	return scenarioResult{Shortest: &minHops, Critical: &criticalHops, CheapestCost: &cheapest}
 }
 
-func scenarioRisk(paths []*model.AttackPath) float64 {
-	if len(paths) == 0 {
-		return 0
-	}
-	maxScore := 0.0
+func scenarioRisk(paths []*model.AttackPath, policy *model.AttackPolicy) float64 {
+	scores := make([]float64, 0, len(paths))
 	for _, p := range paths {
-		if p.PathScore > maxScore {
-			maxScore = p.PathScore
-		}
+		scores = append(scores, p.PathScore)
 	}
-	// More ways in is more risk, with diminishing return.
-	boost := math.Log1p(float64(len(paths))) * 0.3
-	return math.Min(10.0, maxScore+boost)
+	return policy.ScenarioRisk(scores)
 }

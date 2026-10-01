@@ -54,7 +54,13 @@ func scenario(b *builder, maxHops int, entry string, targets ...string) *model.A
 	return s
 }
 
-func analyzer() *Analyzer { return NewAnalyzer(nil, zerolog.Nop()) }
+func analyzer() *Analyzer { return NewAnalyzer(nil, nil, zerolog.Nop()) }
+
+// standard is the stance the analyzer applied before any of it was
+// configurable. These tests were written against those numbers, so they are
+// what proves the default reproduces them: if making the weightings
+// configurable had moved one, the suite below would say so.
+func standard() *model.AttackPolicy { return model.DefaultAttackPolicy() }
 
 // run enumerates and scores, which is what the analyzer does with what a store
 // hands it. GraphPathFinder is the reference implementation the two stores are
@@ -69,7 +75,7 @@ func run(t *testing.T, b *builder, s *model.AttackScenario) ([]*model.AttackPath
 	a := analyzer()
 	paths := make([]*model.AttackPath, 0, len(found))
 	for _, dp := range found {
-		paths = append(paths, a.buildPath(s, dp))
+		paths = append(paths, a.buildPath(s, dp, standard()))
 	}
 	return paths, truncated
 }
@@ -221,8 +227,8 @@ func TestAShorterPathIsMoreThreatening(t *testing.T) {
 	// The previous formula multiplied by hop count, so a five-hop path scored
 	// above a one-hop path of the same cost — it ranked the hardest attacks as
 	// the most dangerous.
-	short := pathScore(1.0, 1)
-	long := pathScore(5.0, 5) // same cost per hop, five times as many hops
+	short := standard().PathScore(1.0, 1)
+	long := standard().PathScore(5.0, 5) // same cost per hop, five times as many hops
 
 	if !(short > long) {
 		t.Errorf("one hop scores %.2f, five hops %.2f — a longer path must not score higher", short, long)
@@ -230,7 +236,7 @@ func TestAShorterPathIsMoreThreatening(t *testing.T) {
 }
 
 func TestACheaperPathIsMoreThreatening(t *testing.T) {
-	if cheap, dear := pathScore(1.0, 2), pathScore(9.0, 2); !(cheap > dear) {
+	if cheap, dear := standard().PathScore(1.0, 2), standard().PathScore(9.0, 2); !(cheap > dear) {
 		t.Errorf("cost 1 scores %.2f, cost 9 scores %.2f — a costlier path must not score higher", cheap, dear)
 	}
 }
@@ -242,8 +248,8 @@ func TestPathScoreStaysInRange(t *testing.T) {
 	}{
 		{0, 1}, {0, 0}, {1000, 1}, {0.001, 30}, {-1, 3},
 	} {
-		if got := pathScore(tc.cost, tc.hops); got < 0 || got > 10 {
-			t.Errorf("pathScore(%v, %d) = %v, want within 0..10", tc.cost, tc.hops, got)
+		if got := standard().PathScore(tc.cost, tc.hops); got < 0 || got > 10 {
+			t.Errorf("PathScore(%v, %d) = %v, want within 0..10", tc.cost, tc.hops, got)
 		}
 	}
 }
@@ -251,16 +257,16 @@ func TestPathScoreStaysInRange(t *testing.T) {
 func TestImpactComesFromTheTarget(t *testing.T) {
 	// Every path used to record a flat 7.0 whatever it reached, so impact
 	// carried no information at all.
-	low := impactOf(&model.AttackNode{Criticality: 1})
-	high := impactOf(&model.AttackNode{Criticality: 4})
+	low := standard().Impact(&model.AttackNode{Criticality: 1})
+	high := standard().Impact(&model.AttackNode{Criticality: 4})
 
 	if !(high > low) {
 		t.Errorf("criticality 4 scores %.1f, criticality 1 scores %.1f", high, low)
 	}
-	if crit := impactOf(&model.AttackNode{Criticality: 4, IsCriticalSystem: true}); crit <= high {
+	if crit := standard().Impact(&model.AttackNode{Criticality: 4, IsCriticalSystem: true}); crit <= high {
 		t.Errorf("a critical system scores %.1f, no more than a plain criticality-4 node at %.1f", crit, high)
 	}
-	if got := impactOf(&model.AttackNode{}); got <= 0 || got > 10 {
+	if got := standard().Impact(&model.AttackNode{}); got <= 0 || got > 10 {
 		t.Errorf("a target with nothing recorded scores %.1f, want a usable middle value", got)
 	}
 }
@@ -354,10 +360,12 @@ func TestChokePointIsTheSharedNode(t *testing.T) {
 // ─── The store seam ───────────────────────────────────────────────────────────
 
 type fakeStore struct {
-	graph    *model.Graph
-	statuses []string
-	saved    []*model.AttackPath
-	result   struct {
+	graph     *model.Graph
+	statuses  []string
+	saved     []*model.AttackPath
+	savedFor  []uuid.UUID
+	saveCalls int
+	result    struct {
 		pathCount int
 		risk      float64
 		outcome   model.ScenarioOutcome
@@ -372,8 +380,10 @@ func (s *fakeStore) SetScenarioStatus(_ context.Context, _ uuid.UUID, status str
 	s.statuses = append(s.statuses, status)
 	return nil
 }
-func (s *fakeStore) SavePaths(_ context.Context, paths []*model.AttackPath) error {
+func (s *fakeStore) SavePaths(_ context.Context, scenarioID uuid.UUID, paths []*model.AttackPath) error {
 	s.saved = paths
+	s.savedFor = append(s.savedFor, scenarioID)
+	s.saveCalls++
 	return nil
 }
 func (s *fakeStore) UpdateScenarioResult(_ context.Context, _ uuid.UUID, outcome model.ScenarioOutcome) error {
@@ -394,7 +404,7 @@ func TestRunScenarioRecordsWhatItFound(t *testing.T) {
 	store := &fakeStore{graph: b.graph()}
 	s := scenario(b, 5, "web", "db")
 
-	if err := NewAnalyzer(store, zerolog.Nop()).RunScenario(context.Background(), s); err != nil {
+	if err := NewAnalyzer(store, nil, zerolog.Nop()).RunScenario(context.Background(), s); err != nil {
 		t.Fatalf("RunScenario: %v", err)
 	}
 
@@ -472,5 +482,65 @@ func TestTheCheapestRouteIsNotAlwaysTheShortest(t *testing.T) {
 		if p.HopCount == 3 && p.TotalCost != 3 {
 			t.Errorf("the three-hop route recorded cost %v, want 3", p.TotalCost)
 		}
+	}
+}
+
+// A run must replace what the last one found, not add to it.
+//
+// SavePaths used to insert and never delete, and to return early on an empty
+// result. A scenario reporting two paths held thirty-eight rows from nineteen
+// runs, each scored under whatever weightings were in force that day, and a
+// scenario whose only route had been closed went on showing the route.
+func TestARunReplacesWhatTheLastOneFound(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	b.edge("web", "db")
+
+	store := &fakeStore{graph: b.graph()}
+	sc := scenario(b, 5, "web", "db")
+
+	a := NewAnalyzer(store, nil, zerolog.Nop())
+	for i := 0; i < 3; i++ {
+		if err := a.RunScenario(context.Background(), sc); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+
+	// Three runs, three saves, each naming the scenario so the store can clear
+	// the previous answer — including when a run finds nothing.
+	if store.saveCalls != 3 {
+		t.Errorf("three runs produced %d saves", store.saveCalls)
+	}
+	for _, id := range store.savedFor {
+		if id != sc.ID {
+			t.Errorf("a save named scenario %s, not %s", id, sc.ID)
+		}
+	}
+	// And what the last run handed over is one run's worth, not three.
+	if len(store.saved) != 1 {
+		t.Errorf("the last run saved %d paths; the graph has one route", len(store.saved))
+	}
+}
+
+// A run that finds nothing still has to say so. Returning early on an empty
+// slice is how a scenario whose route was closed kept showing the route.
+func TestARunThatFindsNothingStillClearsTheLastAnswer(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	// No edge: there is no route at all.
+
+	store := &fakeStore{graph: b.graph()}
+	sc := scenario(b, 5, "web", "db")
+
+	if err := NewAnalyzer(store, nil, zerolog.Nop()).RunScenario(context.Background(), sc); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if store.saveCalls != 1 {
+		t.Errorf("a run that found nothing called SavePaths %d times; it has to clear the last answer", store.saveCalls)
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("a run with no route saved %d paths", len(store.saved))
 	}
 }

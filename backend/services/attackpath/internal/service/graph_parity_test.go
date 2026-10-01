@@ -106,7 +106,7 @@ func runAndCollect(t *testing.T, pg *repository.GraphRepository, store GraphStor
 	if err != nil {
 		t.Fatalf("CreateScenario: %v", err)
 	}
-	if err := NewAnalyzer(store, zerolog.Nop()).RunScenario(ctx, sc); err != nil {
+	if err := NewAnalyzer(store, nil, zerolog.Nop()).RunScenario(ctx, sc); err != nil {
 		t.Fatalf("RunScenario: %v", err)
 	}
 

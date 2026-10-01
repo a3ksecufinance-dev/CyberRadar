@@ -192,7 +192,7 @@ func describePaths(found []model.DiscoveredPath) []string {
 		for _, n := range p.Nodes {
 			labels = append(labels, n.Label)
 		}
-		out = append(out, fmt.Sprintf("%v cost=%.2f", labels, p.Cost()))
+		out = append(out, fmt.Sprintf("%v cost=%.2f", labels, p.StandardCost()))
 	}
 	sort.Strings(out)
 	return out

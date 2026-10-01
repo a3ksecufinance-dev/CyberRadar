@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -360,10 +361,12 @@ func (r *GraphRepository) UpdateScenarioResult(ctx context.Context, scenarioID u
 		UPDATE attack_scenarios SET
 			status='completed', path_count=$1, shortest_path=$2, critical_path=$3,
 			cheapest_path_cost=$4, risk_score=$5, last_run_at=$6, last_run_ms=$7,
+			policy_code=NULLIF($8, ''), policy_version=NULLIF($9, 0),
 			updated_at=NOW()
-		WHERE id=$8`,
+		WHERE id=$10`,
 		outcome.PathCount, outcome.ShortestPath, outcome.CriticalPath,
-		outcome.CheapestPathCost, outcome.RiskScore, now, outcome.DurationMS, scenarioID)
+		outcome.CheapestPathCost, outcome.RiskScore, now, outcome.DurationMS,
+		outcome.PolicyCode, outcome.PolicyVersion, scenarioID)
 	return err
 }
 
@@ -375,15 +378,32 @@ func (r *GraphRepository) SetScenarioStatus(ctx context.Context, scenarioID uuid
 
 // ─── Attack Paths ─────────────────────────────────────────────────────────────
 
-func (r *GraphRepository) SavePaths(ctx context.Context, paths []*model.AttackPath) error {
-	if len(paths) == 0 {
-		return nil
-	}
+// SavePaths replaces a scenario's paths with the ones this run found.
+//
+// It used to insert and never delete, so every run a scenario had ever had was
+// still in the table: one reporting two paths held thirty-eight rows from
+// nineteen runs, each scored under whatever weightings were in force that day,
+// with nothing to tell them apart. The ON CONFLICT DO NOTHING could not
+// deduplicate them — every row carried a fresh uuid, so nothing ever conflicted.
+//
+// The scenario id is a parameter rather than taken from the first path because
+// a run that now finds nothing still has to clear what the last one found.
+// Returning early on an empty slice was the same bug in another guise: a
+// scenario whose route was closed kept showing the route.
+func (r *GraphRepository) SavePaths(ctx context.Context, scenarioID uuid.UUID, paths []*model.AttackPath) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+
+	// In the same transaction as the insert: a reader never sees a scenario
+	// with no paths at all, and a failed run leaves the previous answer intact
+	// rather than an empty one.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM attack_paths WHERE scenario_id = $1`, scenarioID); err != nil {
+		return fmt.Errorf("clear the previous run: %w", err)
+	}
 
 	for _, p := range paths {
 		if _, err := tx.Exec(ctx, `
@@ -684,4 +704,35 @@ func nvlS(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ─── The weightings in force ─────────────────────────────────────────────────
+
+// AttackPolicy is the stance this tenant's paths are scored under.
+//
+// Read through tenant_attack_policy, a published shape rather than the table:
+// this service applies the weightings, it never decides them. A tenant with no
+// policy of their own comes back on the standard one with Chosen false, so a
+// screen can say "these are ours, not yours".
+func (r *GraphRepository) AttackPolicy(ctx context.Context, tenantID uuid.UUID) (*model.AttackPolicy, error) {
+	var p model.AttackPolicy
+	err := r.db.QueryRow(ctx, `
+		SELECT code, version, chosen,
+		       base_cost, complexity_medium, complexity_high, privilege_low, privilege_high,
+		       hop_decay, impact_ceiling, unknown_target_impact, critical_system_bonus,
+		       many_paths_boost
+		FROM tenant_attack_policy WHERE tenant_id = $1`, tenantID).
+		Scan(&p.Code, &p.Version, &p.Chosen,
+			&p.BaseCost, &p.ComplexityMedium, &p.ComplexityHigh, &p.PrivilegeLow, &p.PrivilegeHigh,
+			&p.HopDecay, &p.ImpactCeiling, &p.UnknownTargetImpact, &p.CriticalSystemBonus,
+			&p.ManyPathsBoost)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No row means no such tenant, which a caller holding a tenant token
+		// cannot reach. Falling back keeps a scenario scorable either way.
+		return model.DefaultAttackPolicy(), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("attack policy: %w", err)
+	}
+	return &p, nil
 }

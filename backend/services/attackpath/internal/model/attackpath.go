@@ -246,4 +246,10 @@ type ScenarioOutcome struct {
 	CheapestPathCost *float64
 	RiskScore        float64
 	DurationMS       int
+
+	// Which weightings scored this run. Without them the risk score is a number
+	// with no provenance: re-run the scenario after the stance moves and the
+	// figure in last quarter's report is irreproducible, with nothing saying why.
+	PolicyCode    string
+	PolicyVersion int
 }

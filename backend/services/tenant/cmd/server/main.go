@@ -90,6 +90,10 @@ func main() {
 	behaviourSvc := service.NewBehaviourPolicyService(behaviourRepo, logger)
 	behaviourHandler := handler.NewBehaviourPolicyHandler(behaviourSvc)
 
+	attackRepo := repository.NewAttackPolicyRepository(dbPool)
+	attackSvc := service.NewAttackPolicyService(attackRepo, logger)
+	attackHandler := handler.NewAttackPolicyHandler(attackSvc)
+
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
 	// Before everything else: a browser sends a preflight without
@@ -137,6 +141,7 @@ func main() {
 		riskProfileHandler.RegisterRoutes(r)
 		remediationHandler.RegisterRoutes(r)
 		behaviourHandler.RegisterRoutes(r)
+		attackHandler.RegisterRoutes(r)
 	})
 
 	// ─── Server ──────────────────────────────────────────────

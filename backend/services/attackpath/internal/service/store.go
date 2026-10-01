@@ -20,6 +20,9 @@ type GraphStore interface {
 	PathFinder
 
 	SetScenarioStatus(ctx context.Context, scenarioID uuid.UUID, status string) error
-	SavePaths(ctx context.Context, paths []*model.AttackPath) error
+	// SavePaths replaces this scenario's paths with the ones the run found.
+	// The scenario id is separate from the paths because a run that finds
+	// nothing still has to clear what the last one found.
+	SavePaths(ctx context.Context, scenarioID uuid.UUID, paths []*model.AttackPath) error
 	UpdateScenarioResult(ctx context.Context, scenarioID uuid.UUID, outcome model.ScenarioOutcome) error
 }

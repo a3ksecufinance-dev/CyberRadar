@@ -79,7 +79,9 @@ func NewAttackPathService(repo *repository.GraphRepository, logger zerolog.Logge
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.analyzer = NewAnalyzer(s.store, logger)
+	// The repository is the policy source too: the weightings live in the same
+	// database as the graph, and a run reads them once.
+	s.analyzer = NewAnalyzer(s.store, repo, logger)
 	return s
 }
 
