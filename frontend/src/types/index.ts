@@ -270,6 +270,58 @@ export interface SetBehaviourPolicyRequest {
   signals?: Partial<Record<SignalName, Partial<Signal>>>
 }
 
+// ─── Attack-path weightings — services/tenant/internal/model/attack_policy.go
+//
+// Cost is friction: higher means the attacker is less likely to take that step,
+// so the path ranks lower. Getting that direction backwards is the easiest
+// mistake to make here.
+export interface AttackWeights {
+  base_cost: number
+  complexity_medium: number
+  complexity_high: number
+  privilege_low: number
+  privilege_high: number
+  /** How much each extra hop multiplies a path's threat by. 1.0 is the
+   *  assume-breach stance: once inside, distance is not a control. */
+  hop_decay: number
+  impact_ceiling: number
+  /** What to assume about a target the inventory records nothing about. */
+  unknown_target_impact: number
+  critical_system_bonus: number
+  /** Added as boost × ln(1 + paths). Zero means the number of ways in does not
+   *  move the scenario's risk at all. */
+  many_paths_boost: number
+}
+export type AttackWeightField = keyof AttackWeights
+
+export interface AttackPolicy {
+  id: string
+  tenant_id?: string
+  code: string
+  name: string
+  description?: string
+  based_on?: string
+  version: number
+  effective_from: string
+  effective_to?: string
+  weights: AttackWeights
+  notes?: string
+  created_by?: string
+  created_at: string
+}
+
+export interface ActiveAttackPolicy {
+  policy: AttackPolicy
+  chosen: boolean
+}
+
+export interface SetAttackPolicyRequest {
+  based_on?: string
+  name?: string
+  notes?: string
+  weights?: Partial<AttackWeights>
+}
+
 // ─── Detection library — services/siem/internal/model/library.go ─────────────
 //
 // Severity here is upper case, not the lower-cased `Severity` above: the SIEM

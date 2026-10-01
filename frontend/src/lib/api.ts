@@ -1,7 +1,8 @@
 import type {
   ApiResponse,
-  DetectionRule,
+  AttackPolicy,
   BehaviourPolicy,
+  DetectionRule,
   PageMeta,
   RemediationPolicy,
   RiskProfile,
@@ -121,6 +122,9 @@ export const ROUTES = {
     behaviourPresets: '/api/v1/behaviour-policies/presets',
     behaviourActive: '/api/v1/behaviour-policies/active',
     behaviourHistory: '/api/v1/behaviour-policies/history',
+    attackPresets: '/api/v1/attack-policies/presets',
+    attackActive: '/api/v1/attack-policies/active',
+    attackHistory: '/api/v1/attack-policies/history',
   },
   identity: {
     users: '/api/v1/users',
@@ -349,6 +353,8 @@ export const api = {
       put<RemediationPolicy>('tenant', ROUTES.tenant.remediationActive, body, t),
     setBehaviourPolicy: (body: unknown, t?: string) =>
       put<BehaviourPolicy>('tenant', ROUTES.tenant.behaviourActive, body, t),
+    setAttackPolicy: (body: unknown, t?: string) =>
+      put<AttackPolicy>('tenant', ROUTES.tenant.attackActive, body, t),
   },
   siem: {
     // Adopting with an empty body takes the detection exactly as it ships,

@@ -16,6 +16,7 @@ export {
   useRiskPresets, useActiveRiskProfile, useRiskProfileHistory,
   useRemediationPresets, useActiveRemediationPolicy, useRemediationHistory,
   useBehaviourPresets, useActiveBehaviourPolicy, useBehaviourHistory,
+  useAttackPresets, useActiveAttackPolicy, useAttackHistory,
 } from './useTenant'
 export { useDashboardOverview, useKPITimeseries } from './useDashboard'
 export { useAPIKeys, useWebhooks, useWebhookDeliveries, useAPIFWStats } from './useAPIGateway'

@@ -2,9 +2,11 @@
 import { useApiGet, useApiList } from './useApi'
 import { ROUTES } from '@/lib/api'
 import type {
+  ActiveAttackPolicy,
   ActiveBehaviourPolicy,
   ActiveRemediationPolicy,
   ActiveRiskProfile,
+  AttackPolicy,
   BehaviourPolicy,
   RemediationPolicy,
   RiskProfile,
@@ -48,4 +50,15 @@ export function useActiveBehaviourPolicy() {
 }
 export function useBehaviourHistory() {
   return useApiList<BehaviourPolicy>('tenant', ROUTES.tenant.behaviourHistory)
+}
+
+// ─── Attack-path weightings ──────────────────────────────────────────────────
+export function useAttackPresets() {
+  return useApiList<AttackPolicy>('tenant', ROUTES.tenant.attackPresets)
+}
+export function useActiveAttackPolicy() {
+  return useApiGet<ActiveAttackPolicy>('tenant', ROUTES.tenant.attackActive)
+}
+export function useAttackHistory() {
+  return useApiList<AttackPolicy>('tenant', ROUTES.tenant.attackHistory)
 }

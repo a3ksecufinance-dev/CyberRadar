@@ -182,6 +182,7 @@ test.describe('the pages an analyst opens', () => {
       ['#risk', /balanced|pci_dss|swift_cscf|vulnerability_led/],
       ['#remediation', /banking_default|exploit_aware|pci_dss|swift_cscf|dora_critical/],
       ['#behaviour', /balanced|round_the_clock|privileged_watch|low_noise/],
+      ['#attack', /balanced|assume_breach|exploitability_led|crown_jewels/],
     ] as const) {
       const text = await page.locator(section).innerText()
       expect(text, `${section} names no policy code`).toMatch(codes)
@@ -192,6 +193,16 @@ test.describe('the pages an analyst opens', () => {
     const toggles = await page.locator('#behaviour').getByRole('button')
       .filter({ hasText: /^(on|off)$/ }).count()
     expect(toggles, 'the behavioural signals cannot be switched off').toBe(8)
+
+    // Ten weightings, each editable. A hop decay that cannot be set to 1 is an
+    // assume-breach stance the institution cannot state.
+    const decay = page.locator('#attack').locator('tr')
+      .filter({ hasText: /Each extra hop/ }).first().getByRole('spinbutton')
+    await expect(decay, 'the hop decay is not editable').toBeEditable()
+    expect(
+      await page.locator('#attack').getByRole('spinbutton').count(),
+      'the attack-path weightings are not all editable',
+    ).toBe(10)
   })
 
   test('the incident page loads', async ({ page }) => {

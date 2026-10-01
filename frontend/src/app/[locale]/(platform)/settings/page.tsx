@@ -1,11 +1,12 @@
 'use client'
-import { Shield, Users, Key, Info, Scale, Clock, Activity } from 'lucide-react'
+import { Shield, Users, Key, Info, Scale, Clock, Activity, GitBranch } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { AttackPolicy } from '@/components/settings/AttackPolicy'
 import { BehaviourPolicy } from '@/components/settings/BehaviourPolicy'
 import { RemediationPolicy } from '@/components/settings/RemediationPolicy'
 import { RiskProfile } from '@/components/settings/RiskProfile'
@@ -22,6 +23,7 @@ const sections = [
   { icon: Scale, label: 'Risk appetite', id: 'risk' },
   { icon: Clock, label: 'Remediation deadlines', id: 'remediation' },
   { icon: Activity, label: 'Behavioural thresholds', id: 'behaviour' },
+  { icon: GitBranch, label: 'Attack-path weightings', id: 'attack' },
   { icon: Users, label: 'Users & Roles', id: 'users' },
   { icon: Key, label: 'API Keys', id: 'api' },
   { icon: Shield, label: 'Platform configuration', id: 'config' },
@@ -66,6 +68,7 @@ export default function SettingsPage() {
               force, what standard it started from, and what it was on any day. */}
           <div id="remediation"><RemediationPolicy /></div>
           <div id="behaviour"><BehaviourPolicy /></div>
+          <div id="attack"><AttackPolicy /></div>
 
           {/* Users & Roles — the identity service's own records */}
           <Card id="users">
@@ -165,9 +168,9 @@ export default function SettingsPage() {
               </ul>
               <p className="text-xs text-slate-600">
                 These are read at startup and are not tenant configuration. What <em>is</em> the
-                tenant&apos;s judgement — the risk appetite, the remediation deadlines and the
-                behavioural thresholds above — is editable here and versioned. The attack-path
-                weights are the last of those still held as platform constants.
+                tenant&apos;s judgement — the risk appetite, the remediation deadlines, the
+                behavioural thresholds and the attack-path weightings above — is editable here,
+                versioned, and recorded against the analyses it produced.
               </p>
             </CardContent>
           </Card>
