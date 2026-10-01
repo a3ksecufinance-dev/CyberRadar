@@ -120,7 +120,17 @@ func main() {
 	}, logger)
 	defer anomalyPublisher.Close()
 
-	engine := service.NewBehaviorEngine(profileRepo, behaviorRepo, engineConsumer, anomalyPublisher, velocity, failures, logger)
+	// The thresholds this engine detects against, per tenant. The first load is
+	// fatal on purpose: an engine quietly detecting on the platform's defaults,
+	// while a customer's console shows the thresholds they chose, is a
+	// divergence nobody finds for months.
+	policies := repository.NewPolicyCache(pool, logger)
+	if err := policies.Start(ctx); err != nil {
+		logger.Fatal().Err(err).Msg("behaviour policies")
+	}
+
+	engine := service.NewBehaviorEngine(profileRepo, behaviorRepo, engineConsumer, anomalyPublisher,
+		velocity, failures, policies, logger)
 	go func() {
 		if err := engine.Run(ctx); err != nil {
 			logger.Error().Err(err).Msg("ueba_engine_error")
