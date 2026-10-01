@@ -340,9 +340,64 @@ pré-remplirait un formulaire avec les valeurs standards produirait un tenant qu
 a l'air d'avoir tout modifié dès le premier jour, et l'écart ne voudrait plus
 rien dire.
 
-**Reste** : le catalogue arrive par migration. À terme il doit se livrer
-indépendamment du code, avec sa propre cadence — sinon améliorer une détection
-impose un déploiement.
+### Le catalogue se livre sans le code
+
+Les quinze détections étaient des `INSERT` dans la migration 000040. Améliorer
+l'une d'elles était donc un changement de schéma : une migration, une
+recompilation, une fenêtre de déploiement — pour une phrase de raisonnement ou
+un seuil que quelqu'un voulait resserrer. Un contenu qui ne peut se livrer
+qu'avec le code se livre à la cadence du code, et ce n'est pas la bonne cadence
+pour du contenu de détection.
+
+Ce sont maintenant des fichiers sous `backend/content/detections`, un par
+détection, avec un `pack.yaml` qui porte l'identité de la livraison.
+
+```
+contentctl           ce qu'un chargement ferait, sans rien écrire
+contentctl -check    valider le paquet, sans toucher à une base
+contentctl -apply    le faire
+```
+
+**Il n'y a pas de numéro de version dans un fichier de détection.** Il est
+dérivé d'une empreinte de tout ce qui est substantiel, parce qu'un numéro dans
+un fichier est un numéro que quelqu'un oublie de changer — et un oubli dit à un
+tenant resté en v1 qu'il est à jour alors qu'il fait tourner autre chose.
+Réordonner une liste de référentiels ou réindenter un fichier n'est pas une
+nouvelle version ; resserrer un seuil l'est, et l'exécution à blanc dit quel
+champ a bougé.
+
+```
+^ CRP-IAM-0001   v1 -> v2     [conditions]
+- CRP-FRD-0001   v1 retired   no longer in the pack
+would apply: 1 published, 1 retired, 13 unchanged   (re-run with -apply)
+```
+
+Trois cas avaient chacun une mauvaise réponse évidente :
+
+- **Une ligne antérieure aux empreintes** est reconstruite et hachée comme un
+  fichier, donc un contenu identique converge en silence. Traiter une empreinte
+  absente comme « différente » aurait republié tout le catalogue au premier
+  chargement et annoncé quinze mises à jour à chaque tenant. Vérifié : la
+  première exécution à blanc contre le catalogue existant a répondu *nothing to
+  do*.
+- **Un code que le paquet ne porte plus est retiré, jamais supprimé.** Des
+  tenants l'ont adopté, et l'écart avec la version qu'ils ont prise se calcule
+  en relisant cette version : la supprimer transformerait leur généalogie en
+  « la version que vous avez adoptée n'est plus au registre ».
+- **Un répertoire vide est refusé** plutôt que pris pour un catalogue de rien,
+  ce que quelqu'un peut vouloir dire et personne par accident.
+
+**La validation s'exécute là où le contenu est écrit, sans base de données.**
+C'est le point : le contenu se livre sans le code, donc la vérification que le
+contenu tient debout doit tourner sans la plateforme. Une détection nommant un
+champ que le moteur ne lit pas est refusée — elle chargerait, ne matcherait rien
+et se présenterait comme une couverture. De même pour une entrée à prérequis
+livrée active, une détection sans raisonnement, et une clé mal orthographiée,
+qui laisserait sinon un champ à sa valeur nulle en silence.
+
+Prouvé sur une base vierge : les migrations donnent un catalogue vide, le
+chargeur publie quinze entrées en v1 estampillées 2026.10.1, dont deux inactives
+pour leurs prérequis, et une seconde exécution ne change rien.
 
 ### Le renseignement pilote la détection
 

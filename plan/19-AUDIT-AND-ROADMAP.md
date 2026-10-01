@@ -1554,6 +1554,42 @@ UEBA qui n'avait jamais traité un événement, et les chemins qui s'accumulaien
 sur dix-neuf exécutions. Aucun n'était visible en lisant le code ; tous l'étaient
 en l'exécutant et en regardant les nombres.
 
+### 3.23 Le catalogue se livre sans le code
+
+Les quinze détections étaient des `INSERT` dans la migration 000040 : améliorer
+l'une d'elles était un changement de schéma. Elles sont maintenant des fichiers,
+réconciliés par `contentctl`.
+
+**Pas de numéro de version dans les fichiers.** Il est dérivé d'une empreinte du
+contenu. Un numéro qu'on oublie de changer dit à un tenant qu'il est à jour alors
+qu'il fait tourner autre chose ; une empreinte ne s'oublie pas. Réordonner une
+liste n'est pas une version ; changer un seuil l'est, et l'exécution à blanc
+nomme le champ.
+
+**La convergence est la partie délicate.** Une ligne seedée avant les empreintes
+n'en a pas. La traiter comme « différente » aurait republié les quinze entrées au
+premier chargement et annoncé quinze mises à jour à chaque tenant. Elle est donc
+reconstruite en `Entry` et hachée comme un fichier : la première exécution à
+blanc a répondu *nothing to do*, ce qui était la seule réponse acceptable.
+
+**Le retrait n'est pas une suppression.** Des règles de tenant pointent sur le
+code, et l'écart se calcule en relisant la version adoptée.
+
+**La validation ne demande pas de base.** C'est le point : le contenu se livre
+sans le code, donc le contrôle du contenu doit tourner sans la plateforme. Le
+test qui vérifiait depuis la base que chaque condition nomme un champ connu a
+donc déménagé dans le paquet `content`, où il lit les fichiers.
+
+**Un défaut de mon fait, attrapé avant le commit.** Le paquet a été généré depuis
+le catalogue vivant, qui portait trois lignes v2 expérimentales de mes essais
+précédents — une fenêtre de déduplication élargie et une sévérité abaissée qui
+n'ont jamais été des décisions de contenu. Régénérées depuis la v1.
+
+**Reste sur ce sujet** : le paquet est dans le dépôt du code. L'étape suivante
+serait un artefact signé, publié séparément, qu'un déploiement récupère par
+version — `contentctl` prend déjà un répertoire, donc rien dans le mécanisme ne
+s'y oppose.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
