@@ -263,45 +263,12 @@ func TestAnEntryWithPrerequisitesArrivesDisabled(t *testing.T) {
 	}
 }
 
-// Every condition the platform ships must name a field the engine reads.
+// What the catalogue ships is now checked where it is authored, in
+// services/siem/internal/content: the detections are files, and that check runs
+// without a database because content ships without the code.
 //
-// This is the check that stops a shipped detection that can never fire. A rule
-// naming an unknown field loads, matches nothing, and looks like coverage — and
-// the analyst finds out when an incident is not detected.
-func TestEveryShippedConditionNamesAKnownField(t *testing.T) {
-	pool := libraryTestDB(t)
-	repo := repository.NewLibraryRepository(pool)
-
-	entries, err := repo.Catalogue(context.Background())
-	if err != nil {
-		t.Fatalf("catalogue: %v", err)
-	}
-	if len(entries) < 10 {
-		t.Fatalf("%d entries in the library; migration 000040 seeds fifteen", len(entries))
-	}
-
-	for _, entry := range entries {
-		for _, fm := range entry.Conditions.FieldMatches {
-			if !KnownField(fm.Field) {
-				t.Errorf("%s matches on %q, which the engine does not read: the rule would never fire",
-					entry.Code, fm.Field)
-			}
-		}
-		if threshold := entry.Conditions.Threshold; threshold != nil {
-			for _, field := range threshold.GroupBy {
-				if !KnownField(field) {
-					t.Errorf("%s groups by %q, which the engine does not read", entry.Code, field)
-				}
-			}
-		}
-		if len(entry.Conditions.FieldMatches) == 0 && entry.Conditions.Threshold == nil {
-			t.Errorf("%s has no condition at all", entry.Code)
-		}
-		if entry.Rationale == "" {
-			t.Errorf("%s ships without a rationale; a detection nobody can explain is a pager that says nothing", entry.Code)
-		}
-	}
-}
+// What is left here is the other half of the contract, and it belongs here
+// because it is about the engine rather than about the content.
 
 // And the other half of that contract: every field the engine advertises has to
 // resolve to something. A name in KnownFields that getField does not handle

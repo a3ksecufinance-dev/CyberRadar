@@ -510,6 +510,39 @@ cmd_migrate() {
 	fi
 }
 
+# ─── Detection content ────────────────────────────────────────────────────────
+
+# cmd_content reconciles the detection catalogue with the content pack.
+#
+# The detections are no longer in a migration: they are files, and this is what
+# puts them in the database. Separate from migrate because that is the whole
+# point — content ships on its own cadence, so loading it has to be a step you
+# can run on its own, as often as the content changes and never because the
+# schema did.
+#
+# Idempotent by construction: a pack whose fingerprints match what is already
+# published reports "nothing to change" and leaves every version number alone.
+cmd_content() {
+	step "Detection content"
+
+	local ctl="$BACKEND_DIR/bin/contentctl"
+	if [[ ! -x "$ctl" ]]; then
+		(cd "$BACKEND_DIR" && go build -o bin/contentctl ./services/siem/cmd/contentctl) \
+			|| { fail "could not build contentctl"; return 1; }
+	fi
+
+	local out
+	if ! out="$("$ctl" -dir "$BACKEND_DIR/content/detections" -db "$DATABASE_URL" -apply -quiet 2>&1)"; then
+		fail "detection content"
+		printf '%s\n' "$out" | sed 's/^/      /'
+		return 1
+	fi
+	if [[ -n "$out" ]]; then
+		printf '%s\n' "$out" | sed 's/^/      /'
+	fi
+	ok "catalogue reconciled with the content pack"
+}
+
 # ─── Seed ─────────────────────────────────────────────────────────────────────
 
 # cmd_seed gives the realm's users an identity on the platform.
@@ -764,6 +797,7 @@ cmd_down() {
 cmd_up() {
 	cmd_infra
 	cmd_migrate
+	cmd_content
 	cmd_seed
 	cmd_services
 	cmd_frontend
@@ -783,6 +817,7 @@ case "${1:-up}" in
 	e2e) shift; cmd_e2e "$@" ;;
 	infra) cmd_infra ;;
 	migrate) cmd_migrate ;;
+	content) cmd_content ;;
 	build) cmd_build ;;
 	services) cmd_services ;;
 	frontend) cmd_frontend ;;
@@ -790,5 +825,5 @@ case "${1:-up}" in
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|seed|demo|smoke|e2e|build|services|frontend|restart [name…]|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|content|seed|demo|smoke|e2e|build|services|frontend|restart [name…]|status|logs [name]|down}" >&2; exit 2 ;;
 esac

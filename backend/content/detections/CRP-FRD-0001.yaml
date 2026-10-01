@@ -1,0 +1,48 @@
+# CRP-FRD-0001 — Transaction à risque élevé
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-FRD-0001
+title: Transaction à risque élevé
+description: Un événement de transaction dont le score de risque atteint 7.
+category: Transaction
+severity: HIGH
+mitre:
+  tactic: TA0040
+  technique: T1657
+conditions:
+  field_matches:
+  - op: eq
+    field: category
+    value: Transaction
+  - op: gte
+    field: threat_score
+    value: '7'
+actions:
+- type: notify
+- type: create_case
+dedup_window_s: 300
+rationale: >-
+  Le vol financier est la finalité de la plupart des attaques contre une banque. Une transaction
+  que l'enrichissement note haut mérite un œil humain avant règlement, pas après.
+false_positives: >-
+  Les transactions atypiques légitimes — un virement exceptionnel, une opération de trésorerie.
+  C'est le cas d'usage où la revue humaine est la réponse, pas l'affinage.
+response: >-
+  Suspendre le règlement si le circuit le permet, et rappeler le donneur d'ordre par un canal
+  indépendant.
+frameworks:
+- DORA
+- PCIDSS
+controls:
+- DORA-10.3
+- PCI-10.4.1
+requires: []
+enabled_by_default: true
+tags:
+- fraude
+- standard

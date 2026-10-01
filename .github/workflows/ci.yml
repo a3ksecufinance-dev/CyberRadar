@@ -121,6 +121,19 @@ jobs:
         working-directory: backend
         run: make vet
 
+      # The detection catalogue is no longer carried by a migration, so a fresh
+      # database has none until this runs — and the SIEM library tests read it.
+      # It is also the step that would fail if a detection named a field the
+      # engine does not read: content ships without the code, so the check that
+      # content is sound has to run on its own.
+      - name: Load the detection content
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go run ./services/siem/cmd/contentctl -check
+          go run ./services/siem/cmd/contentctl -apply \
+            -db "postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable"
+
       - name: Test
         working-directory: backend
         run: make test

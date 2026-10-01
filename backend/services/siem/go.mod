@@ -12,6 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/rs/zerolog v1.33.0
 	github.com/segmentio/kafka-go v0.4.47
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 replace github.com/cyberradar/platform/internal => ../../internal
