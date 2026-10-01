@@ -853,8 +853,94 @@ version avec la fenêtre pendant laquelle elle s'appliquait.
 Mesuré sur le parc après enregistrement : sous l'appétence que ce tenant a
 retenue, **quatre actifs sont à risque élevé ; sous le seuil standard, deux**.
 
-**Reste** : le même patron est dû aux autres jugements en dur — seuils UEBA,
-délais SLA, pondérations des chemins d'attaque.
+### Les délais de remédiation
+
+Quatre nombres dans une map Go — 3, 7, 30, 90 jours par sévérité — sous un
+commentaire les qualifiant de « banking-grade ». Ce n'est pas un fait sur une
+vulnérabilité : c'est un engagement, devant un régulateur, un schéma de carte ou
+son propre conseil, et il diffère entre une banque de détail et un processeur de
+paiement.
+
+La base reste la sévérité. Par-dessus viennent des **plafonds** — exploitée,
+DMZ, core banking, SWIFT, périmètre carte — qui ne peuvent que **resserrer** une
+échéance, jamais la repousser : un établissement qui s'accorderait plus de temps
+sur les actifs dont il répond le plus est le seul résultat que la forme doit
+interdire.
+
+Il n'y a volontairement **pas de plafond « exposé sur Internet »** : l'inventaire
+n'a pas cette colonne, et une condition appuyée sur un champ que rien ne
+renseigne ferait lire la politique plus stricte que la plateforme ne se comporte.
+
+`banking_default` ne porte aucun plafond : l'adopter ne déplace pas une seule
+échéance. Ce que nous conseillerions est une politique **à part**, que le client
+choisit — le catalogue informe, il n'impose pas.
+
+**Deux défauts trouvés en l'exécutant.** `computeExposure` prenait un argument
+`isExploited` et l'unique appelant passait le littéral `false` : le bonus KEV, le
+signal le plus fort de la priorisation, n'avait jamais joué, alors que l'appelant
+tenait la vulnérabilité depuis le début. Puis le même drapeau atteignait le score
+d'exposition et pas l'échéance, parce que les propriétés de l'actif et
+l'exploitabilité ne viennent pas du même endroit — la première version demandait
+aux appelants de poser le drapeau à deux endroits, et celui qui alimentait
+l'échéance était celui qu'ils oubliaient.
+
+Mesuré sur le parc, constats ouverts au-delà de leur échéance :
+
+```
+banking_default   0 / 15      exploit_aware   12 / 15
+pci_dss          12 / 15      swift_cscf      12 / 15
+dora_critical    12 / 15
+```
+
+Douze retards que les anciens délais masquaient, parce qu'ils traitaient un
+Log4Shell armé exactement comme une criticité théorique.
+
+### Les seuils comportementaux — et un moteur qui n'avait jamais tourné
+
+Quatre-vingts événements par minute, cinq échecs en cinq, trois heures distinctes
+avant de se fier à une ligne de base. Aucun n'est un fait sur le comportement
+humain. Un seuil fixe n'est pas seulement parfois faux, il est faux
+**invisiblement** : une détection qui part toutes les nuits chez le même client
+cesse d'être une détection et devient une règle de filtrage écrite dans une
+messagerie. Pouvoir la désactiver ici est ce qui garde cette décision visible.
+
+Huit types d'anomalie, chacun avec son activation, sa sévérité et son score.
+Quatre politiques standards ; `balanced` reproduit les constantes à l'identique.
+Le moteur les lit depuis un instantané par tenant rafraîchi sur minuterie — même
+réponse que l'index d'indicateurs, et pour la même raison : un seul consommateur
+traite les événements de tous les tenants.
+
+**En le vérifiant, il s'est avéré que le moteur n'avait jamais tourné.**
+`ueba_profiles` et `ueba_anomalies` étaient vides sur une plateforme qui avait
+ingéré des milliers d'événements. `entityFrom` ne résolvait une entité que depuis
+`user_id` et `asset_id`, et une ligne de log porte un nom d'utilisateur — les
+parseurs remplissent `user_name` et laissent `user_id` vide. Chaque événement
+était écarté une étape après son arrivée. Aucune ligne de base n'avait jamais été
+construite, et des seuils paramétrables auraient été un bouton relié à rien.
+
+L'identifiant est désormais **dérivé du nom** quand la source n'en donne pas :
+même nom, même tenant, même UUID, sur toutes les répliques et après chaque
+redémarrage, sans aucune lecture sur le chemin chaud. Scopé par tenant — l'« admin »
+d'un client n'est jamais celui d'un autre — et en minuscules, parce qu'une source
+qui écrit M.Durand le lundi et m.durand le mardi décrit une personne.
+
+```
+avant              0 profil,   0 anomalie
+après             12 profils,  4 anomalies   (balanced, 5 échecs)
+privileged_watch  12 profils,  8 anomalies   (3 échecs)
+```
+
+Désactiver **tous** les signaux est refusé avec la raison : c'est légitime une
+après-midi et alarmant à demeure, donc cela doit être une décision qu'on défend,
+pas une qu'on atteint en décochant huit cases.
+
+**Les trois écrans.** Réglages porte maintenant l'appétit au risque, les délais
+et les seuils, dans une seule forme : ce qui est en vigueur, si le client l'a
+choisi, le standard d'origine, ce qu'il a déplacé, pourquoi, et ce que c'était
+tel jour.
+
+**Reste** : les pondérations des chemins d'attaque sont le dernier de ces
+jugements encore tenu en constante.
 
 ### Le score de risque d'un actif
 

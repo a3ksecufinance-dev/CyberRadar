@@ -1424,6 +1424,82 @@ une détection impose un déploiement. Et la même configurabilité est due aux
 seuils UEBA, aux délais de remédiation et aux pondérations des chemins
 d'attaque, qui restent des constantes de la plateforme.
 
+### 3.18 Les délais de remédiation : un engagement, pas une constante
+
+Quatre nombres dans une map Go sous un commentaire les qualifiant de
+« banking-grade ». Ce n'est pas un fait sur une vulnérabilité.
+
+Migration 000042 leur donne la forme du profil de risque : colonnes nommées,
+versionnées, effectives-datées — « ce constat a dépassé son SLA » est une
+affirmation sur la politique en vigueur **quand il a été levé**, pas sur celle
+d'aujourd'hui.
+
+La base est la sévérité ; les plafonds ne peuvent que resserrer. Pas de plafond
+« exposé sur Internet » : l'inventaire n'a pas la colonne, et une condition sur
+un champ que rien ne renseigne ferait lire la politique plus stricte que la
+plateforme ne se comporte. `banking_default` ne porte aucun plafond, donc
+l'adopter ne déplace rien ; ce que nous conseillerions est une politique à part.
+
+**Deux défauts trouvés en exécutant.** `computeExposure(cvss, severity, false)` —
+le bonus KEV n'avait jamais joué. Puis le drapeau atteignait l'exposition et pas
+l'échéance : les propriétés de l'actif et l'exploitabilité ne viennent pas du
+même endroit, la première version demandait de le poser à deux endroits, et celui
+qui alimentait l'échéance était celui qu'on oubliait. L'échéance est maintenant
+calculée en SQL depuis `first_seen_at` sur les deux chemins : un rescan ne
+repousse plus rien, et une vulnérabilité re-notée en critique ne garde plus le
+mois qu'on lui avait donné quand personne n'y voyait d'enjeu.
+
+```
+banking_default   0 / 15      exploit_aware   12 / 15
+pci_dss          12 / 15      swift_cscf      12 / 15      dora_critical  12 / 15
+```
+
+### 3.19 Les seuils comportementaux — et un moteur qui n'avait jamais tourné
+
+Migration 000043 : huit types d'anomalie, chacun avec activation, sévérité et
+score, plus les six compteurs. Le moteur les lit depuis un instantané par tenant ;
+le premier chargement est fatal, parce qu'un moteur détectant silencieusement sur
+les valeurs par défaut pendant qu'une console affiche celles du client est une
+divergence que personne ne trouve avant des mois.
+
+**Puis la vérification a montré que le moteur n'avait jamais rien produit.**
+`ueba_profiles` : 0 ligne. `ueba_anomalies` : 0 ligne. Sur une plateforme ayant
+ingéré des milliers d'événements. `entityFrom` ne lisait que `user_id` et
+`asset_id` ; une ligne de log porte un nom. Chaque événement était écarté une
+étape après son arrivée, et aucune ligne de base n'avait jamais existé.
+
+L'identifiant est dérivé du nom quand la source n'en donne pas — stable, scopé
+par tenant, en minuscules, sans lecture sur le chemin chaud. Migration 000044
+stocke le nom à côté : une console affichant un UUID dérivé et aucun moyen de le
+résoudre ne vaut pas mieux que rien.
+
+```
+avant              0 profil,   0 anomalie
+après             12 profils,  4 anomalies   (balanced, 5 échecs)
+privileged_watch  12 profils,  8 anomalies   (3 échecs)
+```
+
+Désactiver tous les signaux est refusé avec la raison. Un test échouait ou
+passait selon l'heure à laquelle la suite tournait — un skip se lit comme un
+succès dans une sortie de CI — donc la fixture est construite contre l'horloge.
+
+### 3.20 Trois écrans, une seule forme
+
+Réglages porte les trois jugements. Écrire trois fois la même chose était la
+façon dont le troisième aurait cessé de dire « vous n'avez pas choisi », qui est
+la phrase qui compte le plus — donc ce qui se répète est écrit une fois : ce qui
+est en vigueur, le sélecteur de profils, l'historique, et la barre motif +
+boutons. Les éditeurs de champs restent séparés : pondérations, délais et seuils
+ne sont pas la même chose.
+
+Les deux nouveaux écrans ont repris les deux corrections que l'écran du risque
+avait coûté à trouver : choisir un profil adopte ses valeurs au lieu de
+réétiqueter celles déjà à l'écran, et le formulaire est réamorcé depuis ce que le
+service a renvoyé plutôt que depuis une relecture qui court.
+
+**Reste** : les pondérations des chemins d'attaque, dernier de ces jugements
+encore tenu en constante.
+
 ## 4. Points forts à préserver
 
 - **`services/syslog` est de qualité production**, pas MVP : RFC3164/5424, CEF, framing octet-counting
