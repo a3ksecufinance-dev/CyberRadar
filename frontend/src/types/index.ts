@@ -154,6 +154,122 @@ export interface SetRiskProfileRequest {
   weights?: PartialRiskWeights
 }
 
+// ─── Remediation deadlines — services/tenant/internal/model/remediation_policy.go
+//
+// The base is the severity. The ceilings only ever tighten it, which is how a
+// policy reads out loud: "critical within three days, or twenty-four hours if it
+// is being exploited". A null ceiling is a condition the institution chose not
+// to treat specially — a decision, not an absence.
+export interface Deadlines {
+  critical_days: number
+  high_days: number
+  medium_days: number
+  low_days: number
+
+  exploited_days?: number | null
+  dmz_days?: number | null
+  cbs_days?: number | null
+  swift_days?: number | null
+  pci_days?: number | null
+
+  minimum_days: number
+}
+
+export type DeadlineField = keyof Deadlines
+/** The conditions that can tighten a deadline, by the name the API clears them under. */
+export type DeadlineCeiling = 'exploited' | 'dmz' | 'cbs' | 'swift' | 'pci'
+
+export interface RemediationPolicy {
+  id: string
+  tenant_id?: string
+  code: string
+  name: string
+  description?: string
+  based_on?: string
+  version: number
+  effective_from: string
+  effective_to?: string
+  deadlines: Deadlines
+  notes?: string
+  created_by?: string
+  created_at: string
+}
+
+export interface ActiveRemediationPolicy {
+  policy: RemediationPolicy
+  chosen: boolean
+}
+
+export interface SetRemediationPolicyRequest {
+  based_on?: string
+  name?: string
+  notes?: string
+  deadlines?: Partial<Deadlines> & { clear_ceilings?: DeadlineCeiling[] }
+}
+
+// ─── Behavioural thresholds — services/tenant/internal/model/behaviour_policy.go
+export interface Thresholds {
+  min_hours_for_baseline: number
+  min_countries_for_baseline: number
+  velocity_threshold: number
+  velocity_window_s: number
+  brute_force_threshold: number
+  brute_force_window_s: number
+}
+export type ThresholdField = keyof Thresholds
+
+/** What one anomaly type is worth: whether it fires, how loud, and what it adds
+ *  to the entity's score. */
+export interface Signal {
+  enabled: boolean
+  severity: RuleSeverity
+  score: number
+}
+
+/** Named rather than a map, mirroring the Go struct: a type the engine knows and
+ *  the policy has never heard of cannot exist. */
+export interface Signals {
+  off_hours: Signal
+  new_country: Signal
+  new_ip_prefix: Signal
+  velocity: Signal
+  brute_force: Signal
+  priv_escalation: Signal
+  lateral_movement: Signal
+  data_exfiltration: Signal
+}
+export type SignalName = keyof Signals
+
+export interface BehaviourPolicy {
+  id: string
+  tenant_id?: string
+  code: string
+  name: string
+  description?: string
+  based_on?: string
+  version: number
+  effective_from: string
+  effective_to?: string
+  thresholds: Thresholds
+  signals: Signals
+  notes?: string
+  created_by?: string
+  created_at: string
+}
+
+export interface ActiveBehaviourPolicy {
+  policy: BehaviourPolicy
+  chosen: boolean
+}
+
+export interface SetBehaviourPolicyRequest {
+  based_on?: string
+  name?: string
+  notes?: string
+  thresholds?: Partial<Thresholds>
+  signals?: Partial<Record<SignalName, Partial<Signal>>>
+}
+
 // ─── Detection library — services/siem/internal/model/library.go ─────────────
 //
 // Severity here is upper case, not the lower-cased `Severity` above: the SIEM

@@ -1,7 +1,9 @@
 import type {
   ApiResponse,
   DetectionRule,
+  BehaviourPolicy,
   PageMeta,
+  RemediationPolicy,
   RiskProfile,
   UpgradePlan,
   UpgradeResult,
@@ -113,6 +115,12 @@ export const ROUTES = {
     riskPresets: '/api/v1/risk-profiles/presets',
     riskActive: '/api/v1/risk-profiles/active',
     riskHistory: '/api/v1/risk-profiles/history',
+    remediationPresets: '/api/v1/remediation-policies/presets',
+    remediationActive: '/api/v1/remediation-policies/active',
+    remediationHistory: '/api/v1/remediation-policies/history',
+    behaviourPresets: '/api/v1/behaviour-policies/presets',
+    behaviourActive: '/api/v1/behaviour-policies/active',
+    behaviourHistory: '/api/v1/behaviour-policies/history',
   },
   identity: {
     users: '/api/v1/users',
@@ -337,6 +345,10 @@ export const api = {
     // than replaced: an auditor asks what the formula was on a given day.
     setRiskProfile: (body: unknown, t?: string) =>
       put<RiskProfile>('tenant', ROUTES.tenant.riskActive, body, t),
+    setRemediationPolicy: (body: unknown, t?: string) =>
+      put<RemediationPolicy>('tenant', ROUTES.tenant.remediationActive, body, t),
+    setBehaviourPolicy: (body: unknown, t?: string) =>
+      put<BehaviourPolicy>('tenant', ROUTES.tenant.behaviourActive, body, t),
   },
   siem: {
     // Adopting with an empty body takes the detection exactly as it ships,

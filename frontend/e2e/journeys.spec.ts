@@ -174,6 +174,24 @@ test.describe('the pages an analyst opens', () => {
     // values is what this page looked like before.
     const inputs = await page.getByRole('spinbutton').count()
     expect(inputs, 'the risk factors are not editable').toBeGreaterThanOrEqual(17)
+
+    // The three judgements the platform used to hold as constants, each with a
+    // policy in force. Anchored on the stored codes rather than on headings: a
+    // code proves the tenant service answered for that section.
+    for (const [section, codes] of [
+      ['#risk', /balanced|pci_dss|swift_cscf|vulnerability_led/],
+      ['#remediation', /banking_default|exploit_aware|pci_dss|swift_cscf|dora_critical/],
+      ['#behaviour', /balanced|round_the_clock|privileged_watch|low_noise/],
+    ] as const) {
+      const text = await page.locator(section).innerText()
+      expect(text, `${section} names no policy code`).toMatch(codes)
+    }
+
+    // Each behavioural signal can be switched off. An institution that cannot
+    // do it here does it downstream, where nobody can see that they did.
+    const toggles = await page.locator('#behaviour').getByRole('button')
+      .filter({ hasText: /^(on|off)$/ }).count()
+    expect(toggles, 'the behavioural signals cannot be switched off').toBe(8)
   })
 
   test('the incident page loads', async ({ page }) => {

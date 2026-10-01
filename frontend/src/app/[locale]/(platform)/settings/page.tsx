@@ -1,11 +1,13 @@
 'use client'
-import { Shield, Users, Key, Info, Scale } from 'lucide-react'
+import { Shield, Users, Key, Info, Scale, Clock, Activity } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { StatusBadge } from '@/components/shared/StatusBadge'
+import { BehaviourPolicy } from '@/components/settings/BehaviourPolicy'
+import { RemediationPolicy } from '@/components/settings/RemediationPolicy'
 import { RiskProfile } from '@/components/settings/RiskProfile'
 import { useUsers } from '@/hooks'
 import { formatDateOpt } from '@/lib/utils'
@@ -18,6 +20,8 @@ import { formatDateOpt } from '@/lib/utils'
 // worse than one that says it cannot report them.
 const sections = [
   { icon: Scale, label: 'Risk appetite', id: 'risk' },
+  { icon: Clock, label: 'Remediation deadlines', id: 'remediation' },
+  { icon: Activity, label: 'Behavioural thresholds', id: 'behaviour' },
   { icon: Users, label: 'Users & Roles', id: 'users' },
   { icon: Key, label: 'API Keys', id: 'api' },
   { icon: Shield, label: 'Platform configuration', id: 'config' },
@@ -56,6 +60,12 @@ export default function SettingsPage() {
               The scoring formula was the platform's, presented as a fact; it is
               a judgement, and it is theirs. */}
           <div id="risk"><RiskProfile /></div>
+
+          {/* The same pattern, applied to the two other judgements the platform
+              used to hold as constants. Three screens, one shape: what is in
+              force, what standard it started from, and what it was on any day. */}
+          <div id="remediation"><RemediationPolicy /></div>
+          <div id="behaviour"><BehaviourPolicy /></div>
 
           {/* Users & Roles — the identity service's own records */}
           <Card id="users">
@@ -155,9 +165,9 @@ export default function SettingsPage() {
               </ul>
               <p className="text-xs text-slate-600">
                 These are read at startup and are not tenant configuration. What <em>is</em> the
-                tenant&apos;s judgement — the risk appetite above — is editable here and versioned.
-                The same is owed to the UEBA thresholds, the remediation deadlines and the attack-path
-                weights, which are still the platform&apos;s constants.
+                tenant&apos;s judgement — the risk appetite, the remediation deadlines and the
+                behavioural thresholds above — is editable here and versioned. The attack-path
+                weights are the last of those still held as platform constants.
               </p>
             </CardContent>
           </Card>
