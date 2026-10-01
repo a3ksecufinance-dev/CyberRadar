@@ -939,8 +939,72 @@ et les seuils, dans une seule forme : ce qui est en vigueur, si le client l'a
 choisi, le standard d'origine, ce qu'il a déplacé, pourquoi, et ce que c'était
 tel jour.
 
-**Reste** : les pondérations des chemins d'attaque sont le dernier de ces
-jugements encore tenu en constante.
+### Les pondérations des chemins d'attaque
+
+Une arête coûte 1,0, plus 1,5 si la technique est difficile, plus 1,0 s'il faut
+des droits d'administration ; chaque saut supplémentaire retire 15 % de la
+menace ; atteindre une cible dont l'inventaire ne dit rien vaut 4,5.
+
+Aucun n'est un fait sur les attaquants. C'est une **posture**. Une équipe qui a
+vu une équipe rouge traverser le parc en une après-midi ne pèse pas la
+« complexité élevée » comme celle qui raisonne depuis le CVSS — et ces nombres
+décident quel chemin un analyste voit en premier, c'est-à-dire ce qui est
+corrigé en premier.
+
+Quatre postures. `balanced` reproduit les constantes à l'identique, et ce qui le
+prouve est la suite de tests écrite contre elles : aucun de ces tests n'a changé,
+et ils passent tous.
+
+**Les pondérations s'appliquent à l'analyse**, depuis la complexité et le
+privilège de chaque arête, et non depuis la colonne `weight`. Cette colonne est
+écrite une fois, à la création de l'arête : une posture qui ne vaudrait que pour
+les arêtes découvertes ensuite reclasserait la moitié d'un graphe en laissant
+l'autre moitié en place. Une arête dont le vocabulaire ne dit rien garde le poids
+avec lequel elle est arrivée.
+
+**Un scénario enregistre la version qui l'a noté.** Sans cela un score de risque
+n'a aucune provenance : relancez-le après un changement de posture et le chiffre
+du rapport du trimestre dernier devient irreproductible, sans que rien ne dise
+pourquoi.
+
+**Un second défaut, trouvé en mesurant.** `SavePaths` insérait sans jamais
+supprimer, et sortait tôt sur un résultat vide. Un scénario annonçant deux
+chemins en portait **trente-huit, issus de dix-neuf exécutions**, chacun noté
+sous les pondérations du jour, sans rien pour les distinguer — et le
+`ON CONFLICT DO NOTHING` ne pouvait pas les dédupliquer, chaque ligne portant un
+uuid neuf. Un scénario dont l'unique route avait été fermée continuait d'afficher
+la route. `SavePaths` prend désormais l'identifiant du scénario et **remplace**,
+en une transaction, y compris quand l'exécution ne trouve rien.
+
+Mesuré sur le graphe de démonstration, mêmes scénarios, une exécution chacun :
+
+```
+balanced             coût min 3,00   meilleur score 3,40
+assume_breach        coût min 2,40   meilleur score 4,55
+exploitability_led   coût min 4,00   meilleur score 2,50
+crown_jewels         coût min 3,00   meilleur score 3,40
+```
+
+`crown_jewels` rejoint `balanced` sur le coût parce qu'il ne déplace que
+l'impact, et ces cibles sont assez renseignées pour saturer les deux plafonds :
+il diffère là où l'inventaire est mince, qui est le cas pour lequel il existe.
+
+Et les décomptes correspondent enfin à ce que les scénarios annoncent : 2/2, 1/1,
+0/0.
+
+### Les quatre écrans
+
+Réglages porte désormais **tous** les jugements que la plateforme tenait en
+constantes : appétit au risque, délais de remédiation, seuils comportementaux,
+pondérations des chemins d'attaque. Une seule forme : ce qui est en vigueur, si
+le client l'a choisi, le standard d'origine, ce qu'il a déplacé, pourquoi, et ce
+que c'était tel jour.
+
+Vérifié de bout en bout : la posture « compromission présumée » choisie à
+l'écran, sa décroissance ajustée à 0,95 avec un motif écrit, enregistrée en v9 —
+et l'exécution suivante classée dessous, enregistrant `assume_breach v9` comme ce
+qui l'a notée. Le risque est passé de 3,73 sous la posture standard à 4,76 sous
+la leur.
 
 ### Le score de risque d'un actif
 

@@ -1497,8 +1497,62 @@ avait coûté à trouver : choisir un profil adopte ses valeurs au lieu de
 réétiqueter celles déjà à l'écran, et le formulaire est réamorcé depuis ce que le
 service a renvoyé plutôt que depuis une relecture qui court.
 
-**Reste** : les pondérations des chemins d'attaque, dernier de ces jugements
-encore tenu en constante.
+### 3.21 Les chemins d'attaque : une posture, pas des constantes
+
+Migration 000045. Dix valeurs : ce qu'un pas coûte (base, complexité, privilège),
+ce que vaut la distance (décroissance par saut), ce que vaut une cible (plafond,
+cible inconnue, bonus système critique) et ce qu'ajoutent plusieurs voies
+d'entrée. Quatre postures, `balanced` reproduisant les constantes.
+
+Ce qui le prouve n'est pas un test écrit pour l'occasion : c'est la suite
+existante, écrite contre ces constantes. Aucun de ces tests n'a été modifié, et
+ils passent tous.
+
+**Les pondérations s'appliquent à l'analyse**, pas à l'écriture de l'arête. La
+colonne `weight` est écrite une fois ; une posture qui ne vaudrait que pour les
+arêtes suivantes reclasserait la moitié d'un graphe. Une arête dont le
+vocabulaire ne dit rien garde son poids — un import qui savait quelque chose que
+ce vocabulaire ne sait pas dire n'est pas aplati.
+
+**Un scénario enregistre la version qui l'a noté** (`policy_code`,
+`policy_version`). Sans cela, le chiffre d'un rapport devient irreproductible dès
+que la posture bouge.
+
+**Un second défaut, trouvé en mesurant.** `SavePaths` insérait sans supprimer, et
+sortait tôt sur un résultat vide : un scénario annonçant deux chemins en portait
+trente-huit, issus de dix-neuf exécutions, mélangées. Il prend désormais
+l'identifiant du scénario et remplace, en une transaction, y compris à vide.
+
+```
+balanced             coût min 3,00   meilleur score 3,40
+assume_breach        coût min 2,40   meilleur score 4,55
+exploitability_led   coût min 4,00   meilleur score 2,50
+crown_jewels         coût min 3,00   meilleur score 3,40
+```
+
+Un `git checkout` sur un fichier aux modifications non commitées les a effacées
+au milieu de ce travail ; elles ont été réappliquées. À ne plus faire : pour
+défaire une mutation de test, restaurer depuis une copie, jamais depuis l'index.
+
+### 3.22 Les quatre jugements, et ce que le patron a donné
+
+Les quatre suivent la même forme : colonnes nommées, versionnées, effectives-datées,
+un profil standard qui reproduit l'existant à l'identique, un `chosen` qui dit au
+client que ce ne sont pas encore ses valeurs, et un motif à côté de ce qu'il
+décide.
+
+| | migration | ce qui était en dur | ce que la mesure a montré |
+|---|---|---|---|
+| Appétit au risque | 000039 | 17 pondérations | 4 actifs à risque élevé contre 2 |
+| Délais de remédiation | 000042 | 4 nombres | 12 retards sur 15 que les délais masquaient |
+| Seuils comportementaux | 000043 | 6 seuils, 8 signaux | 0 → 12 profils, 0 → 8 anomalies |
+| Chemins d'attaque | 000045 | 10 pondérations | 3,40 → 4,55 selon la posture |
+
+Trois des quatre ont révélé un terme mort en les câblant : le bonus KEV jamais
+appliqué, le drapeau d'exploitabilité qui n'atteignait pas l'échéance, le moteur
+UEBA qui n'avait jamais traité un événement, et les chemins qui s'accumulaient
+sur dix-neuf exécutions. Aucun n'était visible en lisant le code ; tous l'étaient
+en l'exécutant et en regardant les nombres.
 
 ## 4. Points forts à préserver
 
