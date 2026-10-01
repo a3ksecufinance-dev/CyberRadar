@@ -34,14 +34,6 @@ const (
 	ScanTypeCloud     = "cloud"
 )
 
-// SLA days by severity (banking-grade: tighter than industry defaults)
-var SLADays = map[string]int{
-	SeverityCritical: 3,
-	SeverityHigh:     7,
-	SeverityMedium:   30,
-	SeverityLow:      90,
-}
-
 // Vulnerability is a CVE or internal finding definition.
 type Vulnerability struct {
 	ID               uuid.UUID  `json:"id"`

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -126,11 +127,37 @@ func (r *VulnRepository) ListVulns(ctx context.Context, f model.VulnFilter) ([]*
 
 // ─── Asset Vulnerabilities (Findings) ────────────────────────────────────────
 
-// UpsertFinding inserts or updates an asset-vulnerability finding and computes SLA.
-func (r *VulnRepository) UpsertFinding(ctx context.Context, tenantID uuid.UUID, req *model.CreateFindingRequest, cvss float64, severity string) (*model.AssetVulnerability, error) {
+// UpsertFinding inserts or updates an asset-vulnerability finding, and with it
+// the deadline the tenant's policy gives that finding.
+//
+// isExploited used to be passed as a literal false here, so the KEV boost in
+// computeExposure — the single strongest signal in vulnerability triage — had
+// never once fired. The caller had the vulnerability in hand the whole time.
+func (r *VulnRepository) UpsertFinding(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	req *model.CreateFindingRequest,
+	cvss float64,
+	severity string,
+	isExploited bool,
+	policy *model.RemediationPolicy,
+	fctx model.FindingContext,
+) (*model.AssetVulnerability, error) {
 	id := uuid.New()
-	exposure := computeExposure(cvss, severity, false)
-	sla := computeSLA(severity)
+	exposure := computeExposure(cvss, severity, isExploited)
+	if policy == nil {
+		policy = model.DefaultRemediationPolicy()
+	}
+
+	// Whether the vulnerability is being exploited belongs to the vulnerability,
+	// not to the asset, so FindingContexts — which reads the asset inventory —
+	// cannot supply it. It is stitched in here rather than at each call site:
+	// the first version of this asked callers to put the same flag in two
+	// places, and the one that fed the deadline was the one they forgot, so the
+	// policy's tightest ceiling never applied to a single finding.
+	fctx.Exploited = isExploited
+
+	days := policy.DueDays(severity, fctx)
 	evidence, _ := json.Marshal(req.Evidence)
 
 	av := &model.AssetVulnerability{
@@ -139,24 +166,28 @@ func (r *VulnRepository) UpsertFinding(ctx context.Context, tenantID uuid.UUID, 
 		Status: model.StatusOpen, ExposureScore: exposure,
 		Port: req.Port, Protocol: req.Protocol, ServiceName: req.ServiceName,
 	}
-	slaTime := time.Now().UTC().Add(time.Duration(sla) * 24 * time.Hour)
-	av.SLADueAt = &slaTime
 
+	// The deadline is counted from first_seen_at, in SQL, on both paths. Two
+	// things follow that a Go-side timestamp got wrong: a re-scan cannot push an
+	// open finding's deadline out, and a vulnerability re-scored from medium to
+	// critical has its deadline recomputed instead of keeping the month it was
+	// given when nobody thought it mattered.
 	if err := r.db.QueryRow(ctx, `
 		INSERT INTO asset_vulnerabilities
 			(id, tenant_id, asset_id, vuln_id, scan_job_id, exposure_score,
 			 port, protocol, service_name, evidence, sla_due_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, NOW() + make_interval(days => $11))
 		ON CONFLICT (tenant_id, asset_id, vuln_id) DO UPDATE SET
 			last_seen_at   = NOW(),
 			scan_job_id    = COALESCE(EXCLUDED.scan_job_id, asset_vulnerabilities.scan_job_id),
 			status         = CASE WHEN asset_vulnerabilities.status IN ('resolved','false_positive')
 			                      THEN 'open' ELSE asset_vulnerabilities.status END,
 			exposure_score = EXCLUDED.exposure_score,
+			sla_due_at     = asset_vulnerabilities.first_seen_at + make_interval(days => $11),
 			updated_at     = NOW()
 		RETURNING id, status, first_seen_at, last_seen_at, sla_due_at, created_at, updated_at`,
 		id, tenantID, req.AssetID, req.VulnID, req.ScanJobID,
-		exposure, req.Port, nvlS(req.Protocol), nvlS(req.ServiceName), evidence, slaTime,
+		exposure, req.Port, nvlS(req.Protocol), nvlS(req.ServiceName), evidence, days,
 	).Scan(&av.ID, &av.Status, &av.FirstSeenAt, &av.LastSeenAt, &av.SLADueAt, &av.CreatedAt, &av.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("upsert finding: %w", err)
 	}
@@ -791,13 +822,6 @@ func computeExposure(cvss float64, severity string, isExploited bool) float64 {
 	return base
 }
 
-func computeSLA(severity string) int {
-	if days, ok := model.SLADays[severity]; ok {
-		return days
-	}
-	return 90
-}
-
 func min10(v float64) float64 {
 	if v > 10 {
 		return 10
@@ -820,4 +844,74 @@ func nvlS(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ─── The remediation policy in force ─────────────────────────────────────────
+
+// RemediationPolicy is the deadlines this tenant is held to.
+//
+// Read through tenant_remediation_policy, a published shape rather than the
+// table: this service computes deadlines, it never decides them. A tenant with
+// no policy of their own comes back on the standard one, with Chosen false, so a
+// screen can say "these are ours, not yours".
+func (r *VulnRepository) RemediationPolicy(ctx context.Context, tenantID uuid.UUID) (*model.RemediationPolicy, error) {
+	var p model.RemediationPolicy
+	err := r.db.QueryRow(ctx, `
+		SELECT code, version, chosen,
+		       critical_days, high_days, medium_days, low_days,
+		       exploited_days, dmz_days, cbs_days, swift_days, pci_days,
+		       minimum_days
+		FROM tenant_remediation_policy WHERE tenant_id = $1`, tenantID).
+		Scan(&p.Code, &p.Version, &p.Chosen,
+			&p.CriticalDays, &p.HighDays, &p.MediumDays, &p.LowDays,
+			&p.ExploitedDays, &p.DMZDays, &p.CBSDays, &p.SWIFTDays, &p.PCIDays,
+			&p.MinimumDays)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No row means no such tenant, which a caller holding a tenant token
+		// cannot reach. Falling back keeps a deadline being computed either way.
+		return model.DefaultRemediationPolicy(), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("remediation policy: %w", err)
+	}
+	return &p, nil
+}
+
+// FindingContexts is what the platform knows about each of these assets that can
+// tighten a deadline.
+//
+// Loaded for the whole batch at once: a bulk scan import creates thousands of
+// findings, and a query per finding would make the deadline the slowest part of
+// ingesting a scan.
+func (r *VulnRepository) FindingContexts(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	assetIDs []uuid.UUID,
+) (map[uuid.UUID]model.FindingContext, error) {
+	out := make(map[uuid.UUID]model.FindingContext, len(assetIDs))
+	if len(assetIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT id, environment = 'dmz', is_cbs_connected, is_swift_connected, is_pci_scope
+		FROM assets WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, assetIDs)
+	if err != nil {
+		return nil, fmt.Errorf("finding contexts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id uuid.UUID
+			c  model.FindingContext
+		)
+		if err := rows.Scan(&id, &c.DMZ, &c.CBS, &c.SWIFT, &c.PCI); err != nil {
+			return nil, fmt.Errorf("scan finding context: %w", err)
+		}
+		out[id] = c
+	}
+	// An asset that is not in the inventory comes back absent rather than as a
+	// zero context, so the caller can tell "no regulated scope" from "we have
+	// never heard of this asset".
+	return out, rows.Err()
 }

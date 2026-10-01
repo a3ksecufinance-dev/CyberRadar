@@ -78,6 +78,14 @@ func main() {
 	riskProfileSvc := service.NewRiskProfileService(riskProfileRepo, logger)
 	riskProfileHandler := handler.NewRiskProfileHandler(riskProfileSvc)
 
+	// The remediation deadlines sit beside the risk appetite for the same
+	// reason: both are what this institution decided, not what the platform
+	// computed, and both have to survive an auditor asking what they were on a
+	// given day.
+	remediationRepo := repository.NewRemediationPolicyRepository(dbPool)
+	remediationSvc := service.NewRemediationPolicyService(remediationRepo, logger)
+	remediationHandler := handler.NewRemediationPolicyHandler(remediationSvc)
+
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
 	// Before everything else: a browser sends a preflight without
@@ -123,6 +131,7 @@ func main() {
 			tenantHandler.RegisterRoutes(r)
 		})
 		riskProfileHandler.RegisterRoutes(r)
+		remediationHandler.RegisterRoutes(r)
 	})
 
 	// ─── Server ──────────────────────────────────────────────
