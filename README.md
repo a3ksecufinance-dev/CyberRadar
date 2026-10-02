@@ -8,6 +8,8 @@ incident. Backend Go en microservices, frontend Next.js.
 - **Audit de code et état réel** : [`plan/19-AUDIT-AND-ROADMAP.md`](plan/19-AUDIT-AND-ROADMAP.md)
   — à lire avant de contribuer : il liste ce qui fonctionne, ce qui est encore
   simulé, et les décisions en attente.
+- **Livraison du contenu de détection** : [`plan/20-CONTENT-RELEASE.md`](plan/20-CONTENT-RELEASE.md)
+  — publier une version, faire tourner une clé, en révoquer une.
 
 ---
 
@@ -462,11 +464,91 @@ confiance, empreinte e952d4d4 » sont deux affirmations différentes ; la second
 est celle que demande un auditeur. Un chargement depuis un répertoire n'enregistre
 ni l'une ni l'autre, ce qui est exactement la distinction à garder.
 
-La CI passe désormais par le chemin publié — construire, signer, vérifier,
-charger depuis le paquet — et vérifie qu'un paquet signé d'une clé non fiable est
-refusé. Une chaîne qui ne chargerait jamais que le répertoire de travail
-n'exercerait jamais ce que fait un déploiement, et on l'apprendrait chez un
-client.
+La CI passe désormais par le chemin publié — construire, signer, publier dans un
+canal, installer ce que le canal dit courant — et vérifie que **quatre** façons
+d'être servi du mauvais contenu échouent, chacune pour sa propre raison. Une
+chaîne qui ne chargerait jamais que le répertoire de travail n'exercerait jamais
+ce que fait un déploiement, et on l'apprendrait chez un client.
+
+### Un canal, parce qu'une signature ne dit pas « à jour »
+
+Une signature prouve que personne n'a altéré la livraison. Elle ne prouve pas
+que c'est celle qu'il faut faire tourner : qui peut vous servir un fichier peut
+vous servir une **livraison authentique mais ancienne**, publiée avant la
+détection qui le concerne. Aucune signature de paquet ne peut l'exclure — le
+paquet est exactement aussi vrai qu'au jour où il a été signé.
+
+Le canal est donc signé lui aussi. `index.json` nomme chaque version publiée
+avec l'empreinte de son manifeste et dit laquelle est courante ; `index.sig` le
+couvre.
+
+```
+contentctl -build dist/p.crpack -publish /srv/crp/content -sign-key …
+contentctl -channel https://content.example.com/crp -trust /etc/crp/trust -verify-only
+contentctl -channel … -trust … -apply            installe ce qui est courant
+contentctl -channel … -version 2026.10.1 …       installe une version nommée
+```
+
+Trois questions deviennent vérifiables au lieu d'être supposées : ce qui existe
+(l'index le liste), ce qui est courant (l'index le dit, sous signature), et si
+le paquet servi est bien celui-là (**son empreinte doit correspondre à celle que
+l'index promettait**). Ce dernier contrôle est ce que l'index achète : sans lui,
+un index signé dirait quelle version est courante et on pourrait toujours servir
+un autre paquet, lui aussi correctement signé, à cette adresse.
+
+Mesuré, chaque refus nommant ce qui ne va pas :
+
+```
+index reculé après signature   la signature par la clé … ne correspond pas
+mauvais paquet à la bonne URL  index.json dit 2026.11.0 empreinte 3878…,
+                               le paquet servi est 0ea4… — les deux sont
+                               correctement signés : ce n'est pas une forgerie,
+                               c'est le mauvais paquet à cette adresse
+version jamais publiée         le canal n'a pas de version 2027.1.0 (publiées : …)
+republier un numéro modifié    2026.11.0 est déjà publié avec l'empreinte 3878…
+installer une version ancienne 2027.1.0 est déjà chargé — dites -allow-downgrade
+```
+
+Le retour arrière est refusé **pour une livraison publiée seulement**. Pointer
+le chargeur sur un répertoire est quelqu'un qui dit « fais correspondre le
+catalogue à ces fichiers » : il n'y a rien à rejouer, et refuser bloquerait le
+cas ordinaire — éditer une détection sur une machine qui a installé une
+livraison plus récente — pour se garder de rien. Un avertissement, pas un refus.
+
+### Révoquer une clé, et savoir ce qu'elle a signé
+
+Le magasin de confiance lit maintenant des fichiers `*.revoked` en plus des
+`*.pub` : un identifiant de clé par ligne, la raison en option.
+
+```
+contentctl -trust-list -trust /etc/crp/trust
+
+  trusted  a4e8740e666ca76df06338327801a045
+  REVOKED  69560669bf010ec4a935de6c4b593989  (revoked, key still on disk) — laptop stolen, INC-4412
+```
+
+**La révocation est additive, pas une suppression.** Retirer une clé en effaçant
+son `.pub` signifie que l'hôte qui a raté le changement continue de lui faire
+confiance et ne dit rien. Un fichier qu'il faut de toute façon distribuer échoue
+dans l'autre sens : celui qui l'a reçu refuse bruyamment, celui qui ne l'a pas
+reçu n'est pas plus mal loti qu'avant. La révocation tient sans le fichier de
+clé, et un identifiant mal tapé fait **échouer** le chargement au lieu d'être
+ignoré — une révocation dont personne n'a vu qu'elle avait échoué est le pire
+cas.
+
+Révoquer arrête la prochaine mauvaise livraison et ne dit rien sur celles déjà
+installées :
+
+```
+contentctl -affected 69560669bf010ec4a935de6c4b593989 -db "$DATABASE_URL"
+
+2 load(s) signed by 69560669bf010ec4a935de6c4b593989:
+  2026-10-02 10:56  2027.1.0   manifest 82430ea2…  +1 -0 =14
+```
+
+La procédure complète — publier, rotation planifiée, clé compromise, clé perdue,
+et ce que chaque refus veut dire — est dans
+[`plan/20-CONTENT-RELEASE.md`](plan/20-CONTENT-RELEASE.md).
 
 ### Le renseignement pilote la détection
 

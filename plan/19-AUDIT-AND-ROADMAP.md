@@ -1616,10 +1616,102 @@ distinction à garder.
 
 La CI passe par le chemin publié et vérifie qu'une clé non fiable est refusée.
 
-**Reste sur ce sujet** : la publication elle-même. `contentctl -pack` accepte un
-chemin ou une URL https, mais rien ne publie encore une livraison quelque part —
-ni la rotation de clé documentée comme procédure, ni la révocation. L'étape
-suivante est opérationnelle, pas architecturale.
+Reste sur ce sujet, traité en §3.25 : la publication elle-même, la rotation de
+clé documentée comme procédure, et la révocation.
+
+### 3.25 Le canal, et le retrait d'une clé
+
+**Une signature ne dit pas « à jour ».** Elle prouve que personne n'a altéré la
+livraison ; elle ne prouve pas que c'est celle qu'il faut faire tourner. Qui
+peut vous servir un fichier peut vous servir une livraison *authentique mais
+ancienne*, publiée avant la détection qui le concerne — et le paquet est
+exactement aussi vrai qu'au jour de sa signature. C'est le trou que §3.24
+laissait ouvert, et aucune amélioration de la signature du paquet ne le ferme.
+
+Le canal est donc signé lui aussi : `index.json` nomme chaque version publiée
+avec l'empreinte de son manifeste et dit laquelle est courante, `index.sig` le
+couvre. Trois questions deviennent vérifiables au lieu d'être supposées : ce qui
+existe, ce qui est courant, et si le paquet servi est bien celui-là.
+
+**Le troisième contrôle est ce que l'index achète.** Sans comparer l'empreinte
+du paquet ouvert à celle que l'index promettait, un index signé dirait quelle
+version est courante et on pourrait toujours servir un autre paquet,
+correctement signé, à cette adresse. Prouvé par mutation : supprimer ce contrôle
+seul laisse passer un paquet republié en place.
+
+Décisions prises, chacune avec une mauvaise réponse tentante :
+
+- **`current` est une valeur de l'index, pas « le plus grand numéro publié ».**
+  Sinon retirer une livraison fautive exigerait de la supprimer, ce qui casse
+  toute épingle écrite dessus.
+- **Rétropublier ne déplace pas `current`.** Combler un trou ou re-signer une
+  archive ne doit pas faire reculer en silence chaque déploiement qui suit.
+- **Un numéro republié avec un contenu différent est refusé.** Laisser 2026.11.0
+  vouloir dire deux choses rendrait sans valeur toutes les épingles existantes,
+  et l'échec se manifesterait comme une détection se comportant différemment sur
+  deux déploiements « à la même version ».
+- **Republier le même paquet est un no-op**, date de publication comprise :
+  rejouer un job de publication ne doit pas horodater à neuf un vieil artefact.
+- **Le comparateur de versions est numérique par segment.** `2026.10.1` suit
+  `2026.9.4`, ce qu'une comparaison de chaînes inverse — et c'est exactement la
+  comparaison dont dépend le refus de retour arrière.
+
+**Le retour arrière est refusé pour une livraison publiée, pas pour un
+répertoire.** Pointer le chargeur sur un répertoire est quelqu'un qui dit « fais
+correspondre le catalogue à ces fichiers » : il n'y a rien à rejouer. J'avais
+d'abord appliqué le refus aux deux, et la première exécution de
+`dev-local.sh content` après avoir testé un canal a échoué — le cas ordinaire,
+bloqué pour se garder de rien. Avertissement pour un répertoire, refus pour une
+livraison.
+
+**La révocation est additive.** Retirer une clé en effaçant son `.pub` signifie
+que l'hôte qui a raté le changement continue de lui faire confiance et ne dit
+rien. Un `*.revoked` qu'il faut de toute façon distribuer échoue dans l'autre
+sens : celui qui l'a reçu refuse bruyamment, celui qui ne l'a pas reçu n'est pas
+plus mal loti qu'avant. Trois conséquences tenues :
+
+- la révocation tient **sans** le fichier de clé — sinon la supprimer la
+  désarmerait ;
+- un refus pour révocation est distinct d'un refus pour clé inconnue : les deux
+  envoient un exploitant chercher ailleurs ;
+- un identifiant mal tapé **fait échouer** le chargement. Une révocation dont
+  personne n'a vu qu'elle avait échoué est le pire cas : on croit la clé
+  retirée et elle ne l'est pas.
+
+`-affected <clé>` répond à ce que la révocation ne dit pas : ce que cette clé a
+signé et que ce déploiement a installé. Retirer une clé arrête la prochaine
+mauvaise livraison, pas celles déjà dans le catalogue, et c'est la question de
+la première heure.
+
+**Un défaut attrapé en exerçant.** `dev-local.sh` ne reconstruisait `contentctl`
+que s'il était absent. Un binaire en cache antérieur au drapeau `-channel`
+échouait en imprimant l'usage de l'outil qu'il avait été — ce qui se lit comme
+une erreur de l'appelant, pas comme une construction périmée. Reconstruit dès
+qu'une source est plus récente.
+
+**Mesures.** Quatre mutations, chacune rattrapée : supprimer la comparaison
+d'empreinte entre l'index et le paquet, comparer les versions comme des chaînes,
+ne plus consulter la liste de révocation, et — la première tentative — supprimer
+l'empreinte en laissant la vérification de numéro, qui a montré que mon test ne
+prouvait pas le bon contrôle. Un test a été ajouté pour le cas que seul
+l'empreinte attrape : le même numéro réécrit en place.
+
+La CI passe par la chaîne complète — construire, signer, publier, installer ce
+que le canal dit courant — et affirme quatre refus **avec leur motif**, pas
+seulement leur code de sortie. Un refus pour le mauvais motif est la façon dont
+un contrôle qui ne s'exécute jamais passe : c'est précisément ce qui était
+arrivé en §3.24.
+
+Procédure écrite : [`plan/20-CONTENT-RELEASE.md`](20-CONTENT-RELEASE.md) —
+publier, rotation planifiée, clé compromise, clé perdue, et ce que chaque refus
+veut dire.
+
+**Reste sur ce sujet, et c'est de l'infrastructure, pas du code** : où le canal
+est hébergé et avec quelle authentification ; la garde de la clé privée, qu'un
+fichier en 0600 ne résout pas (un HSM ou un coffre signataire est la suite, et
+`contentctl` ne sait aujourd'hui lire qu'un PEM) ; et la fraîcheur — un
+déploiement qui n'interroge jamais son canal reste sur une version ancienne sans
+que rien ne l'affirme, l'index ne portant pas de date d'expiration.
 
 ## 4. Points forts à préserver
 
