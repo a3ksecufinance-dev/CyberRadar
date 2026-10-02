@@ -14,6 +14,9 @@ incident. Backend Go en microservices, frontend Next.js.
   simulé, et les décisions en attente.
 - **Livraison du contenu de détection** : [`plan/20-CONTENT-RELEASE.md`](plan/20-CONTENT-RELEASE.md)
   — publier une version, faire tourner une clé, en révoquer une.
+- **Passage en production** : [`plan/21-PRODUCTION-PLAN.md`](plan/21-PRODUCTION-PLAN.md)
+  — les cinq verrous, cinq jalons avec critères de sortie testables, et les
+  décisions qui appartiennent au client.
 
 ---
 

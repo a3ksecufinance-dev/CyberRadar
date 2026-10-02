@@ -62,6 +62,10 @@ visé et le produit existant, et la route entre les deux, voir
 - **[16 — Paramétrage](16-parametrage.md)** — les quatre politiques configurables par tenant.
 - **[`../plan/20-CONTENT-RELEASE.md`](../plan/20-CONTENT-RELEASE.md)** — livrer le contenu de détection, faire tourner et révoquer une clé de signature.
 
+### Mettre en production
+
+- **[`../plan/21-PRODUCTION-PLAN.md`](../plan/21-PRODUCTION-PLAN.md)** — les cinq verrous, cinq jalons avec critères de sortie testables, les décisions qui appartiennent au client, et les six indicateurs de suivi.
+
 ### Contribuer
 
 - **[17 — Interface](17-interface.md)** — Next.js, internationalisation, conventions.

@@ -1889,6 +1889,11 @@ Reste :
 
 ### Phase 4 — Production readiness · 6 à 8 semaines
 
+> **Remplacée par [`21-PRODUCTION-PLAN.md`](21-PRODUCTION-PLAN.md)**, écrit après
+> que les phases 0 à 3 ont été faites et sur des chiffres mesurés. Ce qui suit
+> reste le périmètre ; le plan en donne la séquence, les critères de sortie et
+> les décisions à trancher.
+
 - **Kubernetes + Helm** — le `docker-compose` actuel est strictement destiné au développement.
 - Haute disponibilité : réplication PostgreSQL/ClickHouse, cluster Kafka 3 brokers, PDB, HPA.
 - **Tests de charge** : valider les 100 K EPS annoncés. C'est le chiffre qui sera challengé en appel d'offres.
