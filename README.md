@@ -4,6 +4,10 @@ Plateforme de cybersécurité multi-tenant : ingestion d'événements, détectio
 SIEM/XDR, analyse comportementale, gestion des vulnérabilités et réponse à
 incident. Backend Go en microservices, frontend Next.js.
 
+- **📖 Documentation complète** : [`docs/`](docs/README.md) — vingt guides :
+  architecture, installation, configuration, sécurité, référence API,
+  données, ingestion, les six domaines réels, paramétrage, interface,
+  exploitation, développement, glossaire.
 - **Architecture et roadmap** : [`plan/00-MASTER-PLAN.md`](plan/00-MASTER-PLAN.md)
 - **Audit de code et état réel** : [`plan/19-AUDIT-AND-ROADMAP.md`](plan/19-AUDIT-AND-ROADMAP.md)
   — à lire avant de contribuer : il liste ce qui fonctionne, ce qui est encore

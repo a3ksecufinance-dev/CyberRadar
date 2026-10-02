@@ -201,6 +201,13 @@ jobs:
             -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
           rm /tmp/ci-trust/ci.revoked
 
+      # The API reference is generated from the services' routes. A route added
+      # without regenerating it makes the published list wrong in the one way
+      # nobody notices until a call 404s, so the drift is a failing build.
+      - name: The API reference matches the code
+        working-directory: backend
+        run: make docs-api-check
+
       - name: Test
         working-directory: backend
         run: make test

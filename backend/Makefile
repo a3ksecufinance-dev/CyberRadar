@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate content content-check content-release content-trust seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -77,6 +77,21 @@ content-release: ## Build, sign and publish the detection content into a channel
 
 content-trust: ## Print the signing keys this deployment accepts, and the ones it has revoked
 	go run ./services/siem/cmd/contentctl -trust-list -trust "$(CRP_CONTENT_TRUST)"
+
+
+# ─── Documentation ────────────────────────────────────────────────────────────
+
+# The API reference is derived from the services' own route registrations
+# rather than maintained by hand, because a route list nobody regenerates is a
+# list that is wrong — and wrong silently: the reader finds out when a call
+# 404s. docs-api-check fails the build if the committed file no longer matches
+# the code, so adding a route without documenting it is a red build rather than
+# a support ticket.
+docs-api: ## Regenerate docs/07-reference-api.md from the services' routes
+	python3 scripts/gen-api-reference.py
+
+docs-api-check: ## Fail if the committed API reference has drifted from the code
+	python3 scripts/gen-api-reference.py --check
 
 
 # ─── Attack graph mirror ──────────────────────────────────────────────────────
