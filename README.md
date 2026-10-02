@@ -399,6 +399,75 @@ Prouvé sur une base vierge : les migrations donnent un catalogue vide, le
 chargeur publie quinze entrées en v1 estampillées 2026.10.1, dont deux inactives
 pour leurs prérequis, et une seconde exécution ne change rien.
 
+### Une livraison signée, pas un répertoire
+
+Un paquet qui se livre séparément est un paquet que le déploiement n'a pas
+construit. Une livraison est donc **un fichier signé**, et la charger est une
+affirmation différente de charger un répertoire.
+
+```
+contentctl -keygen deployments/content/signing    une paire de clés de signature
+contentctl -build dist/pack.crpack -sign-key ...  empaqueter une livraison
+contentctl -pack ... -trust ... -verify-only      la vérifier, ne rien charger
+contentctl -pack ... -trust ... -apply            la charger
+```
+
+Trois décisions, chacune avec une mauvaise réponse tentante :
+
+- **La clé de signature n'est pas celle des jetons.** La plateforme a déjà une
+  paire RSA pour les JWT ; la réutiliser ferait d'une compromission de clé de
+  contenu une forgerie de jetons — le rayon d'action du portable d'un auteur de
+  détections deviendrait toutes les sessions de la plateforme.
+- **La confiance est configurée par le déploiement, jamais portée par le
+  paquet.** Un paquet qui embarquerait sa propre clé publique prouverait
+  seulement que celui qui l'a construit avait une clé, ce qui n'est un fait
+  utile à personne.
+- **La signature couvre un manifeste, et le manifeste porte l'empreinte de
+  chaque fichier.** Signer les octets de l'archive marcherait aussi, et ne
+  dirait rien sur *quel* fichier a changé quand la vérification échoue — or un
+  échec qu'un exploitant ne peut pas localiser est un échec qu'il apprend à
+  ignorer.
+
+**L'ordre est l'autre moitié.** La signature est vérifiée sur le manifeste, puis
+chaque fichier contre son empreinte, et seulement ensuite quoi que ce soit est
+analysé. Analyser d'abord, ce serait passer un décodeur YAML sur des octets dont
+personne ne répond — exactement ce contre quoi la signature existe. Un test
+l'affirme : un paquet à la fois altéré et illisible échoue sur l'empreinte, pas
+sur l'analyseur.
+
+Exercé contre le vrai paquet, chaque refus nommant ce qui ne va pas :
+
+```
+détection altérée        CRP-IAM-0001.yaml ne correspond pas à son empreinte
+altérée + remanifestée   la signature ne correspond pas au manifeste
+fichier en plus          porte CRP-ZZZ-9999.yaml, que son manifeste ne nomme pas
+clé non fiable           signé par e03a8af4…, que ce déploiement ne fait pas confiance
+aucune confiance         refusé sauf -allow-unsigned dit explicitement
+```
+
+Le dernier compte le plus : accepter par défaut rendrait la signature
+décorative, et un déploiement ayant oublié de configurer sa confiance ne
+vérifierait rien en ayant l'air de vérifier.
+
+**Ed25519 plutôt que RSA** : aucun paramètre à se tromper, et une clé privée ne
+peut pas être générée à une taille insuffisante par quelqu'un de pressé. La
+génération refuse d'écraser une clé existante, parce que régénérer orpheline
+toutes les livraisons signées avec l'ancienne. Plusieurs clés de confiance sont
+acceptées, pour qu'une rotation n'ouvre pas de fenêtre où plus rien ne vérifie.
+
+La migration 000047 enregistre **ce qui a répondu du chargement** : l'identifiant
+de la clé et l'empreinte du manifeste. « Nous faisons tourner 2026.10.1 » et
+« nous faisons tourner 2026.10.1, signé par la clé à laquelle nous faisons
+confiance, empreinte e952d4d4 » sont deux affirmations différentes ; la seconde
+est celle que demande un auditeur. Un chargement depuis un répertoire n'enregistre
+ni l'une ni l'autre, ce qui est exactement la distinction à garder.
+
+La CI passe désormais par le chemin publié — construire, signer, vérifier,
+charger depuis le paquet — et vérifie qu'un paquet signé d'une clé non fiable est
+refusé. Une chaîne qui ne chargerait jamais que le répertoire de travail
+n'exercerait jamais ce que fait un déploiement, et on l'apprendrait chez un
+client.
+
 ### Le renseignement pilote la détection
 
 L'enrichisseur du pipeline renvoyait une liste d'IOC vide, avec un commentaire

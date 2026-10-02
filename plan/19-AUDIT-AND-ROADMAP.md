@@ -1585,10 +1585,41 @@ le catalogue vivant, qui portait trois lignes v2 expérimentales de mes essais
 précédents — une fenêtre de déduplication élargie et une sévérité abaissée qui
 n'ont jamais été des décisions de contenu. Régénérées depuis la v1.
 
-**Reste sur ce sujet** : le paquet est dans le dépôt du code. L'étape suivante
-serait un artefact signé, publié séparément, qu'un déploiement récupère par
-version — `contentctl` prend déjà un répertoire, donc rien dans le mécanisme ne
-s'y oppose.
+### 3.24 La livraison signée
+
+Un paquet livré séparément est un paquet que le déploiement n'a pas construit.
+Une livraison est donc un `.crpack` signé en Ed25519, et `contentctl` sait le
+construire, le vérifier et le charger.
+
+Trois décisions valaient d'être prises explicitement :
+
+- **Clé de contenu ≠ clé de jetons.** Réutiliser la paire RSA des JWT ferait
+  d'une compromission de clé de contenu une forgerie de jetons.
+- **La confiance vient du déploiement, pas du paquet.** Un paquet portant sa
+  propre clé publique ne prouve rien.
+- **La signature couvre un manifeste d'empreintes**, pas les octets de
+  l'archive : un échec doit nommer le fichier fautif, sinon il est ignoré.
+
+**L'ordre.** Signature, puis empreintes par fichier, puis analyse. Un test
+affirme qu'un paquet altéré *et* illisible échoue sur l'empreinte : atteindre
+l'analyseur signifierait avoir décodé des octets dont personne ne répond.
+
+**Un défaut attrapé en testant.** Le lecteur d'archive refusait les entrées de
+répertoire, donc un paquet construit avec `tar` était rejeté avant même que sa
+signature soit vérifiée — et mes trois premiers tests d'altération passaient
+pour cette raison-là, pas pour la bonne. Les répertoires sont ignorés ; tout ce
+qui n'est pas un fichier ordinaire, un lien symbolique en premier, reste refusé.
+
+Migration 000047 : `signed_by` et `pack_digest` sur l'enregistrement de
+chargement. Un chargement depuis un répertoire n'en porte aucun, ce qui est la
+distinction à garder.
+
+La CI passe par le chemin publié et vérifie qu'une clé non fiable est refusée.
+
+**Reste sur ce sujet** : la publication elle-même. `contentctl -pack` accepte un
+chemin ou une URL https, mais rien ne publie encore une livraison quelque part —
+ni la rotation de clé documentée comme procédure, ni la révocation. L'étape
+suivante est opérationnelle, pas architecturale.
 
 ## 4. Points forts à préserver
 
