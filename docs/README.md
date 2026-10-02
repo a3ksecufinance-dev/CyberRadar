@@ -64,7 +64,9 @@ visé et le produit existant, et la route entre les deux, voir
 
 ### Mettre en production
 
-- **[`../plan/21-PRODUCTION-PLAN.md`](../plan/21-PRODUCTION-PLAN.md)** — les cinq verrous, cinq jalons avec critères de sortie testables, les décisions qui appartiennent au client, et les six indicateurs de suivi.
+- **[`../plan/22-ECART-PREVU-MESURE.md`](../plan/22-ECART-PREVU-MESURE.md)** — ce que la spécification promettait, confronté à ce qui est mesurable : 346 user stories classées, 8 KPI, 14 exigences non fonctionnelles.
+- **[`../plan/23-PLAN-EXECUTION.md`](../plan/23-PLAN-EXECUTION.md)** — la route vers le périmètre complet : 14 lots, 2 235 jours-homme, le graphe de dépendances, les portes de qualité, les huit indicateurs.
+- **[`../plan/21-PRODUCTION-PLAN.md`](../plan/21-PRODUCTION-PLAN.md)** — le détail du déploiement et de la validation, repris comme lots L0 à L2 et L13 du plan d'exécution.
 
 ### Contribuer
 

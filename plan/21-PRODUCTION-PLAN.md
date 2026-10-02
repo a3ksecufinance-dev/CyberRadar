@@ -1,5 +1,10 @@
 # Plan de passage en production
 
+> **Repris par [`23-PLAN-EXECUTION.md`](23-PLAN-EXECUTION.md)**, qui couvre le
+> périmètre complet retenu (les 346 user stories) et dont ce document forme
+> les lots L0, L1, L2 et L13. Le détail tâche par tâche ci-dessous reste la
+> référence pour ces lots ; la séquence d'ensemble est dans `23`.
+
 > Date : 2026-10-02 · Périmètre : `backend/` + `frontend/` + déploiement
 > Remplace la Phase 4 de [`19-AUDIT-AND-ROADMAP.md`](19-AUDIT-AND-ROADMAP.md) §5
 > et consolide les « Reste ouvert » dispersés dans ce document.

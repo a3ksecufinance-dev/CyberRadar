@@ -14,9 +14,13 @@ incident. Backend Go en microservices, frontend Next.js.
   simulé, et les décisions en attente.
 - **Livraison du contenu de détection** : [`plan/20-CONTENT-RELEASE.md`](plan/20-CONTENT-RELEASE.md)
   — publier une version, faire tourner une clé, en révoquer une.
-- **Passage en production** : [`plan/21-PRODUCTION-PLAN.md`](plan/21-PRODUCTION-PLAN.md)
-  — les cinq verrous, cinq jalons avec critères de sortie testables, et les
-  décisions qui appartiennent au client.
+- **Écart prévu / mesuré** : [`plan/22-ECART-PREVU-MESURE.md`](plan/22-ECART-PREVU-MESURE.md)
+  — la spécification d'origine confrontée au dépôt : 346 user stories classées,
+  les 8 KPI, les 14 exigences non fonctionnelles, le schéma, le catalogue d'API.
+- **Plan d'exécution** : [`plan/23-PLAN-EXECUTION.md`](plan/23-PLAN-EXECUTION.md)
+  — la route vers le périmètre complet : 14 lots, 2 235 jours-homme, le graphe
+  de dépendances, les portes de qualité et les huit indicateurs de suivi.
+  Reprend [`plan/21`](plan/21-PRODUCTION-PLAN.md), qui en forme les lots L0 à L2 et L13.
 
 ---
 
