@@ -33,6 +33,12 @@ type Plan struct {
 	Pack    *Pack
 	Source  string
 	Changes []Change
+
+	// SignedBy and Digest are what vouched for the pack, carried through to the
+	// load record. Empty when it came from a directory or was loaded unsigned —
+	// which is exactly what the record has to be able to say.
+	SignedBy string
+	Digest   string
 }
 
 // Counts are the three numbers the load record keeps.
@@ -276,9 +282,11 @@ func Apply(ctx context.Context, db *pgxpool.Pool, pack *Pack, entries []*Entry, 
 	published, retired, unchanged := plan.Counts()
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO detection_content_loads
-			(pack_name, pack_version, source, published, retired, unchanged)
-		VALUES ($1,$2,$3,$4,$5,$6)`,
-		pack.Name, pack.Version, plan.Source, published, retired, unchanged); err != nil {
+			(pack_name, pack_version, source, published, retired, unchanged,
+			 signed_by, pack_digest)
+		VALUES ($1,$2,$3,$4,$5,$6, NULLIF($7,''), NULLIF($8,''))`,
+		pack.Name, pack.Version, plan.Source, published, retired, unchanged,
+		plan.SignedBy, plan.Digest); err != nil {
 		return fmt.Errorf("record the load: %w", err)
 	}
 

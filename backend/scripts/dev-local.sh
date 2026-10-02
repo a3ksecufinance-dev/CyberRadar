@@ -531,8 +531,29 @@ cmd_content() {
 			|| { fail "could not build contentctl"; return 1; }
 	fi
 
+	# A deployment loads a signed release; a developer box loads the directory
+	# it is editing. Both go through the same reconciliation, which is the point
+	# — the difference is only whether anything vouched for where it came from.
+	local -a args=(-db "$DATABASE_URL" -apply -quiet)
+	local what
+	if [[ -n "${CRP_CONTENT_PACK:-}" ]]; then
+		args+=(-pack "$CRP_CONTENT_PACK")
+		what="$(basename "$CRP_CONTENT_PACK")"
+		if [[ -n "${CRP_CONTENT_TRUST:-}" ]]; then
+			args+=(-trust "$CRP_CONTENT_TRUST")
+		else
+			# Said out loud every time. A deployment reaching this by accident
+			# is a deployment that verifies nothing and looks like it does.
+			warn "CRP_CONTENT_PACK is set and CRP_CONTENT_TRUST is not — loading unsigned"
+			args+=(-allow-unsigned)
+		fi
+	else
+		args+=(-dir "$BACKEND_DIR/content/detections")
+		what="the working directory"
+	fi
+
 	local out
-	if ! out="$("$ctl" -dir "$BACKEND_DIR/content/detections" -db "$DATABASE_URL" -apply -quiet 2>&1)"; then
+	if ! out="$("$ctl" "${args[@]}" 2>&1)"; then
 		fail "detection content"
 		printf '%s\n' "$out" | sed 's/^/      /'
 		return 1
@@ -540,7 +561,7 @@ cmd_content() {
 	if [[ -n "$out" ]]; then
 		printf '%s\n' "$out" | sed 's/^/      /'
 	fi
-	ok "catalogue reconciled with the content pack"
+	ok "catalogue reconciled with $what"
 }
 
 # ─── Seed ─────────────────────────────────────────────────────────────────────

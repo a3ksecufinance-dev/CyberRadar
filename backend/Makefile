@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate content content-release seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -48,6 +48,22 @@ migrate: ## Run all PostgreSQL migrations
 		docker exec -i crp-neo4j cypher-shell -u neo4j -p crp_password_dev < $$f; \
 	done
 	@echo "Migrations complete."
+
+content: ## Reconcile the detection catalogue with the content pack
+	go run ./services/siem/cmd/contentctl -apply
+
+content-check: ## Validate the detection content without touching a database
+	go run ./services/siem/cmd/contentctl -check
+
+# A release is built from the content directory and signed, so a deployment can
+# tell a pack we published from one somebody assembled. CRP_CONTENT_SIGN_KEY
+# names the private key; without it the pack is built unsigned and says so.
+content-release: ## Package the detection content into a signed release under dist/
+	@mkdir -p dist
+	go run ./services/siem/cmd/contentctl \
+		-build dist/$(shell sed -n 's/^version: *"\(.*\)"/crp-detections-\1.crpack/p' content/detections/pack.yaml) \
+		-sign-key "$(CRP_CONTENT_SIGN_KEY)"
+
 
 # ─── Attack graph mirror ──────────────────────────────────────────────────────
 
