@@ -126,41 +126,80 @@ jobs:
       # It is also the step that would fail if a detection named a field the
       # engine does not read: content ships without the code, so the check that
       # content is sound has to run on its own.
-      # The catalogue is no longer carried by a migration, so a fresh database
-      # has none until this runs — and the SIEM library tests read it.
       #
-      # It goes through the published path on purpose: build a release, sign it,
-      # verify it, and load from the pack rather than from the directory. A
-      # pipeline that only ever loaded the working directory would never
-      # exercise what a deployment actually does, and the first time anyone
-      # found out would be at a customer.
-      - name: Build, verify and load a signed content release
+      # It goes through the whole published path on purpose — build, sign,
+      # publish into a channel, then install what the channel calls current —
+      # rather than loading the working directory. A pipeline that only ever
+      # loaded the directory would never exercise what a deployment does, and
+      # the first time anyone found out would be at a customer.
+      - name: Build, publish and install a signed content release
         working-directory: backend
         run: |
           set -euo pipefail
           go run ./services/siem/cmd/contentctl -check
           go run ./services/siem/cmd/contentctl -keygen /tmp/ci-content
+          mkdir -p /tmp/ci-trust && cp /tmp/ci-content.pub /tmp/ci-trust/
           go run ./services/siem/cmd/contentctl \
-            -build /tmp/ci-pack.crpack -sign-key /tmp/ci-content.key
+            -build /tmp/ci-pack.crpack -publish /tmp/ci-channel \
+            -sign-key /tmp/ci-content.key
           go run ./services/siem/cmd/contentctl \
-            -pack /tmp/ci-pack.crpack -trust /tmp/ci-content.pub -verify-only
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
           go run ./services/siem/cmd/contentctl \
-            -pack /tmp/ci-pack.crpack -trust /tmp/ci-content.pub -apply \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -apply \
             -db "postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable"
 
-      # A release signed by a key the deployment does not trust has to be
-      # refused. Asserted rather than assumed: a verification that silently
-      # passed everything would look exactly like one that worked.
-      - name: A pack signed by an untrusted key is refused
+      # Each refusal is asserted rather than assumed: a verification that
+      # silently passed everything would look exactly like one that worked.
+      # These are the four ways a deployment can be handed content it should
+      # not install, and each has to fail for its own reason.
+      - name: Content that should be refused is refused
         working-directory: backend
         run: |
           set -euo pipefail
-          go run ./services/siem/cmd/contentctl -keygen /tmp/ci-other
-          if go run ./services/siem/cmd/contentctl \
-               -pack /tmp/ci-pack.crpack -trust /tmp/ci-other.pub -verify-only; then
-            echo "a pack signed by an untrusted key was accepted" >&2
-            exit 1
-          fi
+          ctl() { go run ./services/siem/cmd/contentctl "$@"; }
+
+          # The expected reason is asserted, not just the failure. A refusal
+          # for the wrong reason is how a check that never runs passes: an
+          # archive rejected before its signature is read looks, from the exit
+          # code alone, exactly like one whose signature was checked.
+          refuses() {
+            local what="$1" expect="$2"; shift 2
+            if ctl "$@" >/tmp/ci-refusal 2>&1; then
+              echo "NOT REFUSED: $what" >&2; cat /tmp/ci-refusal >&2; exit 1
+            fi
+            if ! grep -qF -- "$expect" /tmp/ci-refusal; then
+              echo "REFUSED FOR THE WRONG REASON ($what): expected \"$expect\"" >&2
+              cat /tmp/ci-refusal >&2; exit 1
+            fi
+            echo "refused ($what): $(grep -F -- "$expect" /tmp/ci-refusal | head -1)"
+          }
+
+          # Signed by a key this deployment does not trust.
+          ctl -keygen /tmp/ci-other
+          refuses "an untrusted key" "does not trust" \
+            -channel /tmp/ci-channel -trust /tmp/ci-other.pub -verify-only
+
+          # The index edited after it was signed — the replay a channel exists
+          # to stop.
+          cp -r /tmp/ci-channel /tmp/ci-tampered
+          python3 - <<'EOF'
+          import json
+          p = "/tmp/ci-tampered/index.json"
+          d = json.load(open(p)); d["current"] = "0.0.0"
+          open(p, "w").write(json.dumps(d, separators=(",", ":")))
+          EOF
+          refuses "an index edited after signing" "does not match" \
+            -channel /tmp/ci-tampered -trust /tmp/ci-trust -verify-only
+
+          # A trust store the deployment never configured.
+          refuses "no trust configured" "-allow-unsigned" -channel /tmp/ci-channel -verify-only
+
+          # The signing key withdrawn.
+          key_id=$(ctl -trust-list -trust /tmp/ci-trust | awk '/trusted/{print $2}')
+          echo "$key_id withdrawn by CI" > /tmp/ci-trust/ci.revoked
+          refuses "a revoked key" "has revoked (withdrawn by CI)" \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
+          rm /tmp/ci-trust/ci.revoked
 
       - name: Test
         working-directory: backend

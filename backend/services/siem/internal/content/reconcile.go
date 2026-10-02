@@ -3,8 +3,10 @@ package content
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -339,4 +341,73 @@ func orEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// LoadRecord is one recorded reconciliation, as the provenance table holds it.
+type LoadRecord struct {
+	PackName  string
+	Version   string
+	Source    string
+	SignedBy  string
+	Digest    string
+	LoadedAt  time.Time
+	Published int
+	Retired   int
+	Unchanged int
+}
+
+// LastLoad is the most recent load of a pack, or nil when there has never been
+// one.
+//
+// Read before applying, so a deployment can be told it is about to install
+// something older than what it runs. A properly signed pack from six months
+// ago is indistinguishable from the current one by signature alone — the only
+// thing that can tell them apart is knowing what came before.
+func LastLoad(ctx context.Context, db *pgxpool.Pool, packName string) (*LoadRecord, error) {
+	var l LoadRecord
+	err := db.QueryRow(ctx, `
+		SELECT pack_name, pack_version, source,
+		       COALESCE(signed_by,''), COALESCE(pack_digest,''), loaded_at
+		  FROM detection_content_loads
+		 WHERE pack_name = $1
+		 ORDER BY loaded_at DESC
+		 LIMIT 1`, packName).
+		Scan(&l.PackName, &l.Version, &l.Source, &l.SignedBy, &l.Digest, &l.LoadedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the last load: %w", err)
+	}
+	return &l, nil
+}
+
+// LoadsSignedBy is every load this deployment accepted under one key.
+//
+// What a revocation is actually for. Withdrawing a key stops the next bad pack;
+// it says nothing about the ones already installed, and "which of our
+// detections came in under the compromised key" is the question an operator has
+// to answer in the hour after they find out.
+func LoadsSignedBy(ctx context.Context, db *pgxpool.Pool, keyID string) ([]LoadRecord, error) {
+	rows, err := db.Query(ctx, `
+		SELECT pack_name, pack_version, source, COALESCE(pack_digest,''),
+		       loaded_at, published, retired, unchanged
+		  FROM detection_content_loads
+		 WHERE signed_by = $1
+		 ORDER BY loaded_at DESC`, keyID)
+	if err != nil {
+		return nil, fmt.Errorf("read the loads signed by %s: %w", keyID, err)
+	}
+	defer rows.Close()
+
+	var out []LoadRecord
+	for rows.Next() {
+		l := LoadRecord{SignedBy: keyID}
+		if err := rows.Scan(&l.PackName, &l.Version, &l.Source, &l.Digest,
+			&l.LoadedAt, &l.Published, &l.Retired, &l.Unchanged); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }

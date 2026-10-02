@@ -525,8 +525,20 @@ cmd_migrate() {
 cmd_content() {
 	step "Detection content"
 
+	# Rebuilt whenever a source file is newer than the binary, not only when
+	# the binary is missing. A cached contentctl that predates a new flag fails
+	# by printing the usage of the tool it used to be, which reads as a mistake
+	# in the caller rather than as a stale build.
 	local ctl="$BACKEND_DIR/bin/contentctl"
+	local stale=0
 	if [[ ! -x "$ctl" ]]; then
+		stale=1
+	elif [[ -n "$(find "$BACKEND_DIR/services/siem/cmd/contentctl" \
+	                   "$BACKEND_DIR/services/siem/internal/content" \
+	                   -name '*.go' -newer "$ctl" -print -quit 2>/dev/null)" ]]; then
+		stale=1
+	fi
+	if (( stale )); then
 		(cd "$BACKEND_DIR" && go build -o bin/contentctl ./services/siem/cmd/contentctl) \
 			|| { fail "could not build contentctl"; return 1; }
 	fi
@@ -535,21 +547,33 @@ cmd_content() {
 	# it is editing. Both go through the same reconciliation, which is the point
 	# — the difference is only whether anything vouched for where it came from.
 	local -a args=(-db "$DATABASE_URL" -apply -quiet)
-	local what
-	if [[ -n "${CRP_CONTENT_PACK:-}" ]]; then
+	local what from=""
+	if [[ -n "${CRP_CONTENT_CHANNEL:-}" ]]; then
+		# A channel is how a real deployment gets content: it follows a
+		# published index and installs whatever that calls current, rather than
+		# being handed a file by whoever happened to copy one over.
+		args+=(-channel "$CRP_CONTENT_CHANNEL")
+		what="${CRP_CONTENT_VERSION:-the current version} from $CRP_CONTENT_CHANNEL"
+		[[ -n "${CRP_CONTENT_VERSION:-}" ]] && args+=(-version "$CRP_CONTENT_VERSION")
+		from="channel"
+	elif [[ -n "${CRP_CONTENT_PACK:-}" ]]; then
 		args+=(-pack "$CRP_CONTENT_PACK")
 		what="$(basename "$CRP_CONTENT_PACK")"
+		from="pack"
+	else
+		args+=(-dir "$BACKEND_DIR/content/detections")
+		what="the working directory"
+	fi
+
+	if [[ -n "$from" ]]; then
 		if [[ -n "${CRP_CONTENT_TRUST:-}" ]]; then
 			args+=(-trust "$CRP_CONTENT_TRUST")
 		else
 			# Said out loud every time. A deployment reaching this by accident
 			# is a deployment that verifies nothing and looks like it does.
-			warn "CRP_CONTENT_PACK is set and CRP_CONTENT_TRUST is not — loading unsigned"
+			warn "a published release is configured and CRP_CONTENT_TRUST is not — loading unsigned"
 			args+=(-allow-unsigned)
 		fi
-	else
-		args+=(-dir "$BACKEND_DIR/content/detections")
-		what="the working directory"
 	fi
 
 	local out

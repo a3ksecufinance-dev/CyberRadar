@@ -167,7 +167,7 @@ type Opened struct {
 // A nil trust store means "accept unsigned", which the caller has to ask for
 // explicitly. It is a legitimate thing to want while authoring and never a
 // thing a deployment should reach by accident.
-func Open(packPath string, trust TrustStore) (*Opened, error) {
+func Open(packPath string, trust *TrustStore) (*Opened, error) {
 	raw, err := os.ReadFile(packPath) //nolint:gosec // a pack path the operator named
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", packPath, err)

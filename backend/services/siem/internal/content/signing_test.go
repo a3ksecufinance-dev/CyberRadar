@@ -53,7 +53,7 @@ func signingKey(t *testing.T) (ed25519.PrivateKey, string) {
 	return priv, prefix
 }
 
-func trustOf(t *testing.T, prefix string) TrustStore {
+func trustOf(t *testing.T, prefix string) *TrustStore {
 	t.Helper()
 	store, err := LoadTrust(prefix + ".pub")
 	if err != nil {
@@ -248,8 +248,8 @@ func TestTwoTrustedKeysBothVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load trust: %v", err)
 	}
-	if len(store) != 2 {
-		t.Fatalf("%d keys trusted, want 2", len(store))
+	if len(store.IDs()) != 2 {
+		t.Fatalf("%d keys trusted, want 2", len(store.IDs()))
 	}
 
 	for name, key := range map[string]ed25519.PrivateKey{"old": oldKey, "new": newKey} {

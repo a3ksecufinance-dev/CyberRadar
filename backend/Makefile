@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate content content-release seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate content content-check content-release content-trust seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -58,11 +58,25 @@ content-check: ## Validate the detection content without touching a database
 # A release is built from the content directory and signed, so a deployment can
 # tell a pack we published from one somebody assembled. CRP_CONTENT_SIGN_KEY
 # names the private key; without it the pack is built unsigned and says so.
-content-release: ## Package the detection content into a signed release under dist/
+#
+# Building and publishing are one command because the two signatures have to
+# agree: the pack's, and the channel index's that pins the pack's digest. A
+# release job able to do one without the other is a release job that eventually
+# does. CRP_CONTENT_CHANNEL is where the channel lives — a directory, which
+# whatever serves it (a bucket, a web root, a disk carried into an air-gapped
+# site) then publishes unchanged.
+CRP_CONTENT_CHANNEL ?= dist/channel
+CONTENT_PACK = dist/$(shell sed -n 's/^version: *"\(.*\)"/crp-detections-\1.crpack/p' content/detections/pack.yaml)
+
+content-release: ## Build, sign and publish the detection content into a channel
 	@mkdir -p dist
 	go run ./services/siem/cmd/contentctl \
-		-build dist/$(shell sed -n 's/^version: *"\(.*\)"/crp-detections-\1.crpack/p' content/detections/pack.yaml) \
+		-build $(CONTENT_PACK) \
+		-publish "$(CRP_CONTENT_CHANNEL)" \
 		-sign-key "$(CRP_CONTENT_SIGN_KEY)"
+
+content-trust: ## Print the signing keys this deployment accepts, and the ones it has revoked
+	go run ./services/siem/cmd/contentctl -trust-list -trust "$(CRP_CONTENT_TRUST)"
 
 
 # ─── Attack graph mirror ──────────────────────────────────────────────────────

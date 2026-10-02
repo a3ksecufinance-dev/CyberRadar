@@ -34,6 +34,12 @@ import (
 //     digest. Signing the archive bytes directly would work too, but it would
 //     say nothing about which file changed when verification failed — and a
 //     failure an operator cannot localise is a failure they ignore.
+//
+//   · Revocation is additive, not a deletion. Withdrawing a key by deleting its
+//     file means the one host that missed the change keeps trusting it and says
+//     nothing; a .revoked file that has to be distributed anyway fails the other
+//     way — the host that got it refuses, loudly, and the host that did not is
+//     at least no worse off than before.
 
 // KeyPEMType is the PEM block the keys are written under.
 const (
@@ -138,33 +144,46 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	return ed25519.PrivateKey(block.Bytes), nil
 }
 
-// TrustStore is the set of keys a deployment accepts, by key id.
-type TrustStore map[string]ed25519.PublicKey
-
-// LoadTrust reads trusted public keys from a file or a directory of them.
+// TrustStore is what a deployment accepts, and what it has withdrawn.
 //
-// Given by the deployment, never by the pack. Several are allowed so a key can
-// be rotated without a window in which nothing verifies: publish under the new
-// key while the old one is still trusted, then drop the old one.
-func LoadTrust(path string) (TrustStore, error) {
+// Two sets rather than one, because they answer different questions. Removing
+// a key says "we no longer publish under this"; revoking one says "anything
+// this signed is suspect", and the second has to survive the key file still
+// being on disk somewhere.
+type TrustStore struct {
+	keys    map[string]ed25519.PublicKey
+	revoked map[string]string // key id -> why
+}
+
+// RevokedFileSuffix is the extension of a revocation list in a trust directory.
+const RevokedFileSuffix = ".revoked"
+
+// LoadTrust reads trusted public keys, and any revocations, from a file or a
+// directory of them.
+//
+// Given by the deployment, never by the pack. Several keys are allowed so one
+// can be rotated without a window in which nothing verifies: publish under the
+// new key while the old one is still trusted, then drop the old one.
+func LoadTrust(path string) (*TrustStore, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("read the trust store %s: %w", path, err)
 	}
 
-	var files []string
+	var keyFiles, revokedFiles []string
 	if info.IsDir() {
-		matches, err := filepath.Glob(filepath.Join(path, "*.pub"))
-		if err != nil {
+		if keyFiles, err = filepath.Glob(filepath.Join(path, "*.pub")); err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
-		files = matches
+		if revokedFiles, err = filepath.Glob(filepath.Join(path, "*"+RevokedFileSuffix)); err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
 	} else {
-		files = []string{path}
+		keyFiles = []string{path}
 	}
 
-	store := TrustStore{}
-	for _, f := range files {
+	store := &TrustStore{keys: map[string]ed25519.PublicKey{}, revoked: map[string]string{}}
+	for _, f := range keyFiles {
 		raw, err := os.ReadFile(f) //nolint:gosec // a trust path the operator named
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", f, err)
@@ -185,54 +204,140 @@ func LoadTrust(path string) (TrustStore, error) {
 					f, len(block.Bytes))
 			}
 			pub := ed25519.PublicKey(block.Bytes)
-			store[KeyID(pub)] = pub
+			store.keys[KeyID(pub)] = pub
 		}
 	}
 
-	if len(store) == 0 {
+	for _, f := range revokedFiles {
+		if err := store.readRevocations(f); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(store.keys) == 0 {
 		return nil, fmt.Errorf("%s holds no trusted key; a trust store of nothing would verify nothing and look like it had", path)
 	}
 	return store, nil
 }
 
+// readRevocations parses one revocation list: a key id per line, optionally
+// followed by the reason, with # comments.
+//
+// A malformed identifier is an error rather than a line skipped. A revocation
+// nobody noticed had failed is the one case where silence is worst: the
+// operator believes the key is withdrawn and it is not.
+func (t *TrustStore) readRevocations(path string) error {
+	raw, err := os.ReadFile(path) //nolint:gosec // a trust path the operator named
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	for n, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		id, reason, _ := strings.Cut(line, " ")
+		id = strings.ToLower(strings.TrimSpace(id))
+		if !isKeyID(id) {
+			return fmt.Errorf("%s line %d: %q is not a key identifier (32 hex characters); "+
+				"a mistyped revocation withdraws nothing and looks like it did", path, n+1, id)
+		}
+		t.revoked[id] = strings.TrimSpace(reason)
+	}
+	return nil
+}
+
+func isKeyID(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
 // Verify checks a signature over a manifest against the trusted keys, and
 // reports which key vouched for it.
 //
-// The key id in the manifest is a hint, not an authority: it says which key to
-// try, and a pack naming a key the deployment does not trust is refused for
-// that reason rather than silently tried against the others.
-func (t TrustStore) Verify(manifest []byte, signature []byte, keyID string) (string, error) {
+// The key id is a hint, not an authority: it says which key to try, and a
+// signature naming a key the deployment does not trust is refused for that
+// reason rather than silently tried against the others.
+//
+// The messages name no subject — "signed by key X, which…" — because the same
+// check covers a pack's manifest and a channel's index, and a caller that has
+// already said which it is reads better than one correcting the other.
+func (t *TrustStore) Verify(manifest []byte, signature []byte, keyID string) (string, error) {
 	if keyID != "" {
-		pub, ok := t[keyID]
+		if why, gone := t.revoked[keyID]; gone {
+			return "", fmt.Errorf("signed by key %s, which this deployment has revoked%s",
+				keyID, becauseOf(why))
+		}
+		pub, ok := t.keys[keyID]
 		if !ok {
-			return "", fmt.Errorf("the pack is signed by key %s, which this deployment does not trust (trusted: %s)",
+			return "", fmt.Errorf("signed by key %s, which this deployment does not trust (trusted: %s)",
 				keyID, strings.Join(t.IDs(), ", "))
 		}
 		if !ed25519.Verify(pub, manifest, signature) {
-			return "", fmt.Errorf("the signature by key %s does not match the manifest; the pack has been altered since it was signed", keyID)
+			return "", fmt.Errorf("the signature by key %s does not match; it has been altered since it was signed", keyID)
 		}
 		return keyID, nil
 	}
 
 	// No key named. Try them all rather than refuse: an older pack format or a
 	// hand-built one may carry a signature and no identifier.
-	for id, pub := range t {
+	for id, pub := range t.keys {
+		if _, gone := t.revoked[id]; gone {
+			continue
+		}
 		if ed25519.Verify(pub, manifest, signature) {
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("no trusted key verifies this pack's signature")
+	// A revoked key that would have verified is reported as revoked rather than
+	// as unknown: the two send an operator looking in different places.
+	for id, pub := range t.keys {
+		if why, gone := t.revoked[id]; gone && ed25519.Verify(pub, manifest, signature) {
+			return "", fmt.Errorf("signed by key %s, which this deployment has revoked%s", id, becauseOf(why))
+		}
+	}
+	return "", fmt.Errorf("no trusted key verifies this signature")
 }
 
-// IDs are the trusted key identifiers, for an error message that names them.
-func (t TrustStore) IDs() []string {
-	out := make([]string, 0, len(t))
-	for id := range t {
+func becauseOf(why string) string {
+	if why == "" {
+		return ""
+	}
+	return " (" + why + ")"
+}
+
+// IDs are the trusted key identifiers that have not been revoked, for an error
+// message that names them.
+func (t *TrustStore) IDs() []string {
+	out := make([]string, 0, len(t.keys))
+	for id := range t.keys {
+		if _, gone := t.revoked[id]; !gone {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// RevokedIDs are the withdrawn key identifiers, whether or not the deployment
+// still holds the key itself.
+func (t *TrustStore) RevokedIDs() []string {
+	out := make([]string, 0, len(t.revoked))
+	for id := range t.revoked {
 		out = append(out, id)
 	}
 	sort.Strings(out)
 	return out
 }
+
+// RevocationReason is why a key was withdrawn, empty when none was recorded.
+func (t *TrustStore) RevocationReason(id string) string { return t.revoked[id] }
+
+// Holds reports whether the deployment has the key itself, revoked or not.
+func (t *TrustStore) Holds(id string) bool { _, ok := t.keys[id]; return ok }
 
 // Sign produces a detached signature over the manifest bytes.
 func Sign(priv ed25519.PrivateKey, manifest []byte) []byte {
