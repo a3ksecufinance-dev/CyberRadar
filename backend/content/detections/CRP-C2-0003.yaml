@@ -1,0 +1,44 @@
+# CRP-C2-0003 — Résolution d'un domaine malveillant connu
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-C2-0003
+title: Résolution d'un domaine malveillant connu
+description: Un domaine ou une URL de l'événement figure au renseignement.
+category: Network
+severity: HIGH
+mitre:
+  tactic: TA0011
+  technique: T1071.001
+conditions:
+  field_matches:
+  - op: contains
+    field: ioc_matched
+    value: 'domain:'
+actions:
+- type: notify
+dedup_window_s: 600
+rationale: >-
+  Une résolution précède le flux. Détecter à la résolution donne la fenêtre la plus large
+  pour intervenir avant que quoi que ce soit ne sorte.
+false_positives: >-
+  Un poste qui résout un domaine cité dans un courriel sans jamais s'y connecter. La résolution
+  est un signal, pas une preuve de connexion.
+response: >-
+  Vérifier si un flux a suivi. Sinon, traiter comme une exposition à instruire plutôt que
+  comme une compromission.
+frameworks:
+- DORA
+- ISO27001
+controls:
+- DORA-10.3
+- A.5.7
+requires: []
+enabled_by_default: true
+tags:
+- renseignement
+- standard

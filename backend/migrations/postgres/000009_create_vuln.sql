@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS vulnerabilities (
     modified_at       TIMESTAMPTZ,
     -- External references
     nvd_url           TEXT,
-    references        TEXT[]      NOT NULL DEFAULT '{}',
+    -- not named "references": that is a reserved word in PostgreSQL
+    reference_urls    TEXT[]      NOT NULL DEFAULT '{}',
     tags              TEXT[]      NOT NULL DEFAULT '{}',
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),

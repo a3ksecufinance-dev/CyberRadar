@@ -14,9 +14,9 @@ import (
 
 // DashboardService orchestrates dashboard, widget, and report operations.
 type DashboardService struct {
-	repo    *repository.DashboardRepository
-	kpi     *repository.KPIRepository
-	logger  zerolog.Logger
+	repo   *repository.DashboardRepository
+	kpi    *repository.KPIRepository
+	logger zerolog.Logger
 }
 
 // NewDashboardService creates a DashboardService.
@@ -153,11 +153,11 @@ func (s *DashboardService) PlatformOverview(ctx context.Context, tenantID uuid.U
 
 	siem := allMetrics[model.SourceSIEM]
 	ueba := allMetrics[model.SourceUEBA]
-	ti   := allMetrics[model.SourceTI]
+	ti := allMetrics[model.SourceTI]
 	vuln := allMetrics[model.SourceVuln]
-	ap   := allMetrics[model.SourceAttackPath]
+	ap := allMetrics[model.SourceAttackPath]
 	soar := allMetrics[model.SourceSOAR]
-	kg   := allMetrics[model.SourceKG]
+	kg := allMetrics[model.SourceKG]
 
 	// Compute composite risk score: weighted average across domains
 	scores := []float64{
@@ -267,16 +267,16 @@ func (s *DashboardService) buildReportPayload(ctx context.Context, tenantID uuid
 	switch reportType {
 	case model.ReportExecutiveSummary:
 		payload["summary"] = map[string]any{
-			"open_incidents":    overview.OpenIncidents,
-			"critical_alerts":   overview.CriticalAlerts,
-			"critical_vulns":    overview.CriticalVulns,
-			"overall_risk":      overview.OverallRiskScore,
-			"active_anomalies":  overview.ActiveAnomalies,
+			"open_incidents":   overview.OpenIncidents,
+			"critical_alerts":  overview.CriticalAlerts,
+			"critical_vulns":   overview.CriticalVulns,
+			"overall_risk":     overview.OverallRiskScore,
+			"active_anomalies": overview.ActiveAnomalies,
 		}
 	case model.ReportVulnPosture:
 		payload["vuln"] = map[string]any{
-			"critical":      overview.CriticalVulns,
-			"sla_breached":  overview.SLABreachedVulns,
+			"critical":     overview.CriticalVulns,
+			"sla_breached": overview.SLABreachedVulns,
 		}
 	case model.ReportIncidentSummary:
 		payload["incidents"] = map[string]any{
@@ -285,9 +285,9 @@ func (s *DashboardService) buildReportPayload(ctx context.Context, tenantID uuid
 		}
 	case model.ReportThreatIntelligence:
 		payload["ti"] = map[string]any{
-			"active_iocs":    overview.ActiveIOCs,
-			"hits_today":     overview.IOCHitsToday,
-			"attack_paths":   overview.AttackPaths,
+			"active_iocs":  overview.ActiveIOCs,
+			"hits_today":   overview.IOCHitsToday,
+			"attack_paths": overview.AttackPaths,
 		}
 	}
 	return payload, nil

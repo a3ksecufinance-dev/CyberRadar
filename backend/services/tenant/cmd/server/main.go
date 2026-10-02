@@ -9,13 +9,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/tenant/internal/handler"
 	"github.com/cyberradar/platform/services/tenant/internal/repository"
 	"github.com/cyberradar/platform/services/tenant/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -29,10 +32,23 @@ func main() {
 	zerolog.SetGlobalLevel(logLevel)
 	logger := log.With().Str("service", "tenant-service").Logger()
 
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"tenant-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	// ─── Config ──────────────────────────────────────────────
 	dsn := mustEnv("DATABASE_URL")
 	port := envOrDefault("SERVICE_PORT", "8001")
-	jwtSecret := mustEnv("JWT_SECRET")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
 
 	// ─── Database ────────────────────────────────────────────
 	ctx := context.Background()
@@ -41,6 +57,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("failed to connect to postgres")
 	}
 	defer dbPool.Close()
+
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, dbPool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
 	logger.Info().Msg("postgres connected")
 
 	// ─── Wiring ──────────────────────────────────────────────
@@ -48,10 +72,38 @@ func main() {
 	tenantSvc := service.NewTenantService(tenantRepo, logger)
 	tenantHandler := handler.NewTenantHandler(tenantSvc)
 
+	// Risk appetite is tenant configuration, so it lives here — but under its
+	// own authority, not the tenants:* one. See RegisterRoutes.
+	riskProfileRepo := repository.NewRiskProfileRepository(dbPool)
+	riskProfileSvc := service.NewRiskProfileService(riskProfileRepo, logger)
+	riskProfileHandler := handler.NewRiskProfileHandler(riskProfileSvc)
+
+	// The remediation deadlines sit beside the risk appetite for the same
+	// reason: both are what this institution decided, not what the platform
+	// computed, and both have to survive an auditor asking what they were on a
+	// given day.
+	remediationRepo := repository.NewRemediationPolicyRepository(dbPool)
+	remediationSvc := service.NewRemediationPolicyService(remediationRepo, logger)
+	remediationHandler := handler.NewRemediationPolicyHandler(remediationSvc)
+
+	behaviourRepo := repository.NewBehaviourPolicyRepository(dbPool)
+	behaviourSvc := service.NewBehaviourPolicyService(behaviourRepo, logger)
+	behaviourHandler := handler.NewBehaviourPolicyHandler(behaviourSvc)
+
+	attackRepo := repository.NewAttackPolicyRepository(dbPool)
+	attackSvc := service.NewAttackPolicyService(attackRepo, logger)
+	attackHandler := handler.NewAttackPolicyHandler(attackSvc)
+
 	// ─── Router ──────────────────────────────────────────────
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
 
 	// Global middleware
+	r.Use(observe.Middleware("tenant-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
@@ -59,6 +111,7 @@ func main() {
 	r.Use(chimiddleware.Compress(5))
 
 	// Health endpoints (no auth required)
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"tenant-service"}`)
@@ -74,8 +127,21 @@ func main() {
 
 	// API routes (JWT auth middleware applied)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
-		tenantHandler.RegisterRoutes(r)
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
+
+		// Two groups, because they are two authorities. Creating a tenant is
+		// administrative; setting a risk appetite is a risk-management
+		// decision, and in the seeded matrix the CISO holds the second and not
+		// the first. Mounting the profile inside the tenants group would have
+		// required both.
+		r.Group(func(r chi.Router) {
+			r.Use(authmw.RequirePermissionByMethod("tenants"))
+			tenantHandler.RegisterRoutes(r)
+		})
+		riskProfileHandler.RegisterRoutes(r)
+		remediationHandler.RegisterRoutes(r)
+		behaviourHandler.RegisterRoutes(r)
+		attackHandler.RegisterRoutes(r)
 	})
 
 	// ─── Server ──────────────────────────────────────────────
@@ -108,67 +174,6 @@ func main() {
 		logger.Error().Err(err).Msg("shutdown error")
 	}
 	logger.Info().Msg("tenant-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func validateJWT(tokenStr, secret string) (*jwtClaims, error) {
-	token, err := gojwt.ParseWithClaims(tokenStr, &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-		return []byte(secret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, err
-	}
-	claims, ok := token.Claims.(*jwtClaims)
-	if !ok {
-		return nil, gojwt.ErrTokenInvalidClaims
-	}
-	return claims, nil
-}
-
-// jwtMiddleware validates JWT and injects tenant_id + roles into request context.
-// SECURITY: tenant_id MUST come from the JWT — never from request body or query params.
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing or invalid Authorization header"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			tokenStr := auth[7:]
-			claims, err := validateJWT(tokenStr, secret)
-			if err != nil {
-				logger.Warn().Err(err).Str("path", r.URL.Path).Msg("jwt_invalid")
-				w.Header().Set("Content-Type", "application/json")
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid or expired token"}}`,
-					http.StatusUnauthorized)
-				return
-			}
-
-			// Inject into context — downstream code reads from context only
-			ctx := r.Context()
-			ctx = contextWithValue(ctx, "tenant_id", claims.TenantID)
-			ctx = contextWithValue(ctx, "user_id", claims.UserID)
-			ctx = contextWithValue(ctx, "is_super_admin", claims.IsAdmin)
-			ctx = contextWithValue(ctx, "roles", claims.Roles)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
-func contextWithValue(ctx context.Context, key, val any) context.Context {
-	return context.WithValue(ctx, key, val)
 }
 
 // ─── Config helpers ───────────────────────────────────────────────────────────

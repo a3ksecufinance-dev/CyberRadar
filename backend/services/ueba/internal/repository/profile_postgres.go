@@ -26,13 +26,18 @@ func NewProfileRepository(db *pgxpool.Pool) *ProfileRepository {
 // ─── Entity Profiles ──────────────────────────────────────────────────────────
 
 // GetOrCreate loads an existing profile or inserts a blank one.
-func (r *ProfileRepository) GetOrCreate(ctx context.Context, tenantID, entityID uuid.UUID, entityType string) (*model.EntityProfile, error) {
+func (r *ProfileRepository) GetOrCreate(ctx context.Context, tenantID, entityID uuid.UUID, entityType, entityName string) (*model.EntityProfile, error) {
 	id := uuid.New()
+	// The name is refreshed on conflict, not only on insert: a username that
+	// changes case or a host that is renamed should read correctly in the
+	// console, and the identifier is derived from the name as the source first
+	// gave it, so it does not move.
 	_, err := r.db.Exec(ctx, `
-		INSERT INTO ueba_profiles (id, tenant_id, entity_id, entity_type)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (tenant_id, entity_id) DO NOTHING`,
-		id, tenantID, entityID, entityType,
+		INSERT INTO ueba_profiles (id, tenant_id, entity_id, entity_type, entity_name)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+		ON CONFLICT (tenant_id, entity_id) DO UPDATE
+		   SET entity_name = COALESCE(NULLIF(EXCLUDED.entity_name, ''), ueba_profiles.entity_name)`,
+		id, tenantID, entityID, entityType, entityName,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert profile: %w", err)
@@ -42,7 +47,7 @@ func (r *ProfileRepository) GetOrCreate(ctx context.Context, tenantID, entityID 
 
 func (r *ProfileRepository) get(ctx context.Context, tenantID, entityID uuid.UUID) (*model.EntityProfile, error) {
 	row := r.db.QueryRow(ctx, `
-		SELECT id, tenant_id, entity_id, entity_type,
+		SELECT id, tenant_id, entity_id, entity_type, COALESCE(entity_name, ''),
 		       normal_hours, normal_countries, normal_ip_prefixes, normal_event_types,
 		       risk_score, login_score, access_score, data_score, peer_score, temporal_score,
 		       event_count, anomaly_count, last_seen_at, baseline_ready, peer_group_id,
@@ -124,7 +129,7 @@ func (r *ProfileRepository) ListProfiles(ctx context.Context, f model.ProfileFil
 	}
 
 	q := fmt.Sprintf(`
-		SELECT id, tenant_id, entity_id, entity_type,
+		SELECT id, tenant_id, entity_id, entity_type, COALESCE(entity_name, ''),
 		       normal_hours, normal_countries, normal_ip_prefixes, normal_event_types,
 		       risk_score, login_score, access_score, data_score, peer_score, temporal_score,
 		       event_count, anomaly_count, last_seen_at, baseline_ready, peer_group_id,
@@ -387,7 +392,7 @@ type scannable interface {
 func scanProfile(row scannable) (*model.EntityProfile, error) {
 	p := &model.EntityProfile{}
 	err := row.Scan(
-		&p.ID, &p.TenantID, &p.EntityID, &p.EntityType,
+		&p.ID, &p.TenantID, &p.EntityID, &p.EntityType, &p.EntityName,
 		&p.NormalHours, &p.NormalCountries, &p.NormalIPPrefixes, &p.NormalEventTypes,
 		&p.RiskScore, &p.LoginScore, &p.AccessScore, &p.DataScore, &p.PeerScore, &p.TemporalScore,
 		&p.EventCount, &p.AnomalyCount, &p.LastSeenAt, &p.BaselineReady, &p.PeerGroupID,

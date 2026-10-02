@@ -39,32 +39,32 @@ const (
 
 // Threat actor motivations
 const (
-	MotivationFinancial   = "financial"
-	MotivationEspionage   = "espionage"
-	MotivationHacktivism  = "hacktivism"
-	MotivationDisruption  = "disruption"
+	MotivationFinancial  = "financial"
+	MotivationEspionage  = "espionage"
+	MotivationHacktivism = "hacktivism"
+	MotivationDisruption = "disruption"
 )
 
 // Feed is a configured threat intelligence source.
 type Feed struct {
-	ID             uuid.UUID  `json:"id"`
-	TenantID       uuid.UUID  `json:"tenant_id"`
-	Name           string     `json:"name"`
-	Description    string     `json:"description,omitempty"`
-	FeedType       string     `json:"feed_type"`
-	URL            string     `json:"url,omitempty"`
-	ApiKeyRef      string     `json:"api_key_ref,omitempty"`  // Vault path
-	CollectionID   string     `json:"collection_id,omitempty"`
-	PollIntervalS  int        `json:"poll_interval_s"`
-	Enabled        bool       `json:"enabled"`
-	TLP            int        `json:"tlp"`
-	Confidence     int        `json:"confidence"`
-	LastPolledAt   *time.Time `json:"last_polled_at,omitempty"`
-	LastIOCCount   int        `json:"last_ioc_count"`
-	ErrorCount     int        `json:"error_count"`
-	LastError      string     `json:"last_error,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	TenantID      uuid.UUID  `json:"tenant_id"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description,omitempty"`
+	FeedType      string     `json:"feed_type"`
+	URL           string     `json:"url,omitempty"`
+	ApiKeyRef     string     `json:"api_key_ref,omitempty"` // Vault path
+	CollectionID  string     `json:"collection_id,omitempty"`
+	PollIntervalS int        `json:"poll_interval_s"`
+	Enabled       bool       `json:"enabled"`
+	TLP           int        `json:"tlp"`
+	Confidence    int        `json:"confidence"`
+	LastPolledAt  *time.Time `json:"last_polled_at,omitempty"`
+	LastIOCCount  int        `json:"last_ioc_count"`
+	ErrorCount    int        `json:"error_count"`
+	LastError     string     `json:"last_error,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // IOC is a single indicator of compromise.
@@ -98,25 +98,25 @@ type IOC struct {
 
 // ThreatActor is a known threat group or individual.
 type ThreatActor struct {
-	ID              uuid.UUID  `json:"id"`
-	TenantID        uuid.UUID  `json:"tenant_id"`
-	Name            string     `json:"name"`
-	Aliases         []string   `json:"aliases"`
-	Description     string     `json:"description,omitempty"`
-	Motivation      string     `json:"motivation,omitempty"`
-	Sophistication  string     `json:"sophistication"`
-	OriginCountry   string     `json:"origin_country,omitempty"`
-	FirstSeen       *time.Time `json:"first_seen,omitempty"`
-	LastSeen        *time.Time `json:"last_seen,omitempty"`
-	MitreGroups     []string   `json:"mitre_groups"`
-	TTPs            []string   `json:"ttps"`
-	TargetsCBS      bool       `json:"targets_cbs"`
-	TargetsSWIFT    bool       `json:"targets_swift"`
-	TargetsATM      bool       `json:"targets_atm"`
-	StixID          string     `json:"stix_id,omitempty"`
-	Tags            []string   `json:"tags"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	ID             uuid.UUID  `json:"id"`
+	TenantID       uuid.UUID  `json:"tenant_id"`
+	Name           string     `json:"name"`
+	Aliases        []string   `json:"aliases"`
+	Description    string     `json:"description,omitempty"`
+	Motivation     string     `json:"motivation,omitempty"`
+	Sophistication string     `json:"sophistication"`
+	OriginCountry  string     `json:"origin_country,omitempty"`
+	FirstSeen      *time.Time `json:"first_seen,omitempty"`
+	LastSeen       *time.Time `json:"last_seen,omitempty"`
+	MitreGroups    []string   `json:"mitre_groups"`
+	TTPs           []string   `json:"ttps"`
+	TargetsCBS     bool       `json:"targets_cbs"`
+	TargetsSWIFT   bool       `json:"targets_swift"`
+	TargetsATM     bool       `json:"targets_atm"`
+	StixID         string     `json:"stix_id,omitempty"`
+	Tags           []string   `json:"tags"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // IOCHit records a single IOC match event.
@@ -158,14 +158,14 @@ type TIStats struct {
 // ─── Request / filter models ──────────────────────────────────────────────────
 
 type IOCFilter struct {
-	TenantID  uuid.UUID
-	IOCType   string
-	Severity  string
-	FeedID    *uuid.UUID
-	IsActive  *bool
-	Search    string
-	Limit     int
-	Offset    int
+	TenantID uuid.UUID
+	IOCType  string
+	Severity string
+	FeedID   *uuid.UUID
+	IsActive *bool
+	Search   string
+	Limit    int
+	Offset   int
 }
 
 type CreateFeedRequest struct {

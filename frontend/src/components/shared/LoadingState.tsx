@@ -1,14 +1,16 @@
 // LoadingState — skeleton placeholders while data is fetching.
 // Variants: 'table' for rows, 'cards' for stat cards, 'page' for full page.
 
+import type { CSSProperties } from 'react'
+
 interface Props {
   variant?: 'table' | 'cards' | 'page'
   rows?: number
   cols?: number
 }
 
-function Skeleton({ className }: { className?: string }) {
-  return <div className={`animate-pulse rounded bg-slate-800 ${className ?? ''}`} />
+function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
+  return <div className={`animate-pulse rounded bg-slate-800 ${className ?? ''}`} style={style} />
 }
 
 function CardsSkeleton({ cols = 4 }: { cols?: number }) {

@@ -9,14 +9,14 @@ import (
 // ─── Asset types ──────────────────────────────────────────────────────────────
 
 const (
-	AssetTypeApplication     = "application"
-	AssetTypeDatabase        = "database"
-	AssetTypeInfrastructure  = "infrastructure"
-	AssetTypeNetwork         = "network"
-	AssetTypeData            = "data"
-	AssetTypeThirdParty      = "third_party"
-	AssetTypeProcess         = "process"
-	AssetTypePeople          = "people"
+	AssetTypeApplication    = "application"
+	AssetTypeDatabase       = "database"
+	AssetTypeInfrastructure = "infrastructure"
+	AssetTypeNetwork        = "network"
+	AssetTypeData           = "data"
+	AssetTypeThirdParty     = "third_party"
+	AssetTypeProcess        = "process"
+	AssetTypePeople         = "people"
 )
 
 // ─── Criticality levels ───────────────────────────────────────────────────────
@@ -31,27 +31,27 @@ const (
 // ─── Scenario types ───────────────────────────────────────────────────────────
 
 const (
-	ScenarioRansomware          = "ransomware"
-	ScenarioDataBreach          = "data_breach"
-	ScenarioInsiderThreat       = "insider_threat"
-	ScenarioSupplyChain         = "supply_chain"
-	ScenarioDDoS                = "ddos"
-	ScenarioFraud               = "fraud"
-	ScenarioRegulatory          = "regulatory"
+	ScenarioRansomware           = "ransomware"
+	ScenarioDataBreach           = "data_breach"
+	ScenarioInsiderThreat        = "insider_threat"
+	ScenarioSupplyChain          = "supply_chain"
+	ScenarioDDoS                 = "ddos"
+	ScenarioFraud                = "fraud"
+	ScenarioRegulatory           = "regulatory"
 	ScenarioBusinessInterruption = "business_interruption"
-	ScenarioAPT                 = "apt"
-	ScenarioPhishing            = "phishing"
-	ScenarioPrivilegeAbuse      = "privilege_abuse"
-	ScenarioThirdPartyBreach    = "third_party_breach"
+	ScenarioAPT                  = "apt"
+	ScenarioPhishing             = "phishing"
+	ScenarioPrivilegeAbuse       = "privilege_abuse"
+	ScenarioThirdPartyBreach     = "third_party_breach"
 )
 
 // ─── Treatment types ──────────────────────────────────────────────────────────
 
 const (
-	TreatmentMitigate  = "mitigate"
-	TreatmentAccept    = "accept"
-	TreatmentTransfer  = "transfer"
-	TreatmentAvoid     = "avoid"
+	TreatmentMitigate = "mitigate"
+	TreatmentAccept   = "accept"
+	TreatmentTransfer = "transfer"
+	TreatmentAvoid    = "avoid"
 )
 
 // ─── KRI categories ───────────────────────────────────────────────────────────
@@ -95,29 +95,29 @@ type RiskAsset struct {
 }
 
 type RiskScenario struct {
-	ID                   uuid.UUID  `json:"id"`
-	TenantID             uuid.UUID  `json:"tenant_id"`
-	Name                 string     `json:"name"`
-	Description          string     `json:"description,omitempty"`
-	ScenarioType         string     `json:"scenario_type"`
-	ThreatActor          string     `json:"threat_actor,omitempty"`
-	AnnualProbability    float64    `json:"annual_probability"`
-	PrimaryLoss          int64      `json:"primary_loss"`
-	SecondaryLoss        int64      `json:"secondary_loss"`
-	TotalLoss            int64      `json:"total_loss"`
-	RiskLevel            string     `json:"risk_level"`
-	RiskScore            int        `json:"risk_score"`
-	MitigatingControls   []string   `json:"mitigating_controls"`
-	ResidualProbability  float64    `json:"residual_probability"`
-	ResidualLoss         int64      `json:"residual_loss"`
-	Frameworks           []string   `json:"frameworks"`
-	AssetIDs             []uuid.UUID `json:"asset_ids"`
-	Status               string     `json:"status"`
-	ReviewedAt           *time.Time `json:"reviewed_at,omitempty"`
-	ReviewedBy           *uuid.UUID `json:"reviewed_by,omitempty"`
-	CreatedBy            *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                  uuid.UUID   `json:"id"`
+	TenantID            uuid.UUID   `json:"tenant_id"`
+	Name                string      `json:"name"`
+	Description         string      `json:"description,omitempty"`
+	ScenarioType        string      `json:"scenario_type"`
+	ThreatActor         string      `json:"threat_actor,omitempty"`
+	AnnualProbability   float64     `json:"annual_probability"`
+	PrimaryLoss         int64       `json:"primary_loss"`
+	SecondaryLoss       int64       `json:"secondary_loss"`
+	TotalLoss           int64       `json:"total_loss"`
+	RiskLevel           string      `json:"risk_level"`
+	RiskScore           int         `json:"risk_score"`
+	MitigatingControls  []string    `json:"mitigating_controls"`
+	ResidualProbability float64     `json:"residual_probability"`
+	ResidualLoss        int64       `json:"residual_loss"`
+	Frameworks          []string    `json:"frameworks"`
+	AssetIDs            []uuid.UUID `json:"asset_ids"`
+	Status              string      `json:"status"`
+	ReviewedAt          *time.Time  `json:"reviewed_at,omitempty"`
+	ReviewedBy          *uuid.UUID  `json:"reviewed_by,omitempty"`
+	CreatedBy           *uuid.UUID  `json:"created_by,omitempty"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 type RiskTreatment struct {
@@ -164,23 +164,23 @@ type RiskAssessment struct {
 }
 
 type RiskKRI struct {
-	ID             uuid.UUID  `json:"id"`
-	TenantID       uuid.UUID  `json:"tenant_id"`
-	Name           string     `json:"name"`
-	Description    string     `json:"description,omitempty"`
-	Category       string     `json:"category"`
-	MetricName     string     `json:"metric_name"`
-	Unit           string     `json:"unit"`
-	CurrentValue   float64    `json:"current_value"`
-	ThresholdGreen *float64   `json:"threshold_green,omitempty"`
-	ThresholdAmber *float64   `json:"threshold_amber,omitempty"`
-	Status         string     `json:"status"`
-	Trend          string     `json:"trend"`
-	SourceService  string     `json:"source_service,omitempty"`
-	LastUpdatedAt  time.Time  `json:"last_updated_at"`
-	IsActive       bool       `json:"is_active"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	TenantID       uuid.UUID `json:"tenant_id"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	Category       string    `json:"category"`
+	MetricName     string    `json:"metric_name"`
+	Unit           string    `json:"unit"`
+	CurrentValue   float64   `json:"current_value"`
+	ThresholdGreen *float64  `json:"threshold_green,omitempty"`
+	ThresholdAmber *float64  `json:"threshold_amber,omitempty"`
+	Status         string    `json:"status"`
+	Trend          string    `json:"trend"`
+	SourceService  string    `json:"source_service,omitempty"`
+	LastUpdatedAt  time.Time `json:"last_updated_at"`
+	IsActive       bool      `json:"is_active"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type RiskKRIHistory struct {
@@ -195,17 +195,17 @@ type RiskKRIHistory struct {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 type RiskStats struct {
-	TotalAssets        int                `json:"total_assets"`
-	TotalScenarios     int                `json:"total_scenarios"`
-	OpenTreatments     int                `json:"open_treatments"`
-	TotalALE           int64              `json:"total_ale"`
-	AvgResidualRisk    float64            `json:"avg_residual_risk"`
-	ScenariosByLevel   map[string]int     `json:"scenarios_by_level"`
-	ScenariosByType    map[string]int     `json:"scenarios_by_type"`
-	AssetsByCriticality map[string]int    `json:"assets_by_criticality"`
-	KRIsByStatus       map[string]int     `json:"kris_by_status"`
-	TopRiskyAssets     []*RiskAsset       `json:"top_risky_assets"`
-	TopScenarios       []*RiskScenario    `json:"top_scenarios"`
+	TotalAssets         int             `json:"total_assets"`
+	TotalScenarios      int             `json:"total_scenarios"`
+	OpenTreatments      int             `json:"open_treatments"`
+	TotalALE            int64           `json:"total_ale"`
+	AvgResidualRisk     float64         `json:"avg_residual_risk"`
+	ScenariosByLevel    map[string]int  `json:"scenarios_by_level"`
+	ScenariosByType     map[string]int  `json:"scenarios_by_type"`
+	AssetsByCriticality map[string]int  `json:"assets_by_criticality"`
+	KRIsByStatus        map[string]int  `json:"kris_by_status"`
+	TopRiskyAssets      []*RiskAsset    `json:"top_risky_assets"`
+	TopScenarios        []*RiskScenario `json:"top_scenarios"`
 }
 
 // ─── Request models ───────────────────────────────────────────────────────────

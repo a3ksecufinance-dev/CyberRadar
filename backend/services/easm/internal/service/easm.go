@@ -192,8 +192,8 @@ func (s *EASMService) simulateScan(tenantID uuid.UUID, scan *model.EASMScan) {
 	delay := time.Duration(2+rand.Intn(4)) * time.Second
 	time.Sleep(delay)
 
-	assetsFound := 3 + rand.Intn(13)    // 3–15
-	exposuresFound := 1 + rand.Intn(8)  // 1–8
+	assetsFound := 3 + rand.Intn(13)   // 3–15
+	exposuresFound := 1 + rand.Intn(8) // 1–8
 
 	// Publish Kafka event
 	payload := map[string]any{

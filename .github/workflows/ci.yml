@@ -1,0 +1,335 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    name: Backend — build, vet, test
+    runs-on: ubuntu-latest
+    # Tests that talk to a real dependency skip when none is reachable, and a
+    # skip is indistinguishable from a pass in CI output. These services, plus
+    # the *_TEST_* variables below, turn those skips into failures — so the
+    # shared detection counters and the PAM activity windows cannot go green by
+    # never running.
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      clickhouse:
+        # The dashboard's KPI store. Its repository was never exercised against
+        # a real server, and every read in it was broken by a driver binding
+        # rule no unit test could have caught.
+        image: clickhouse/clickhouse-server:24.3-alpine
+        ports: ["9000:9000", "8123:8123"]
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      neo4j:
+        # The attack graph's mirror. Its Cypher, its tenant filtering and the
+        # claim that the traversal returns the same paths from either store are
+        # only worth anything run against a real server.
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/crp_password_dev
+        ports: ["7687:7687", "7474:7474"]
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+      postgres:
+        # pgvector, not plain postgres: migration 000034 creates the extension
+        # and the copilot knowledge tests search a real HNSW index.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/9
+      PAM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      COPILOT_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      IR_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      IDENTITY_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      DASHBOARD_TEST_CH: localhost:9000
+      ATTACKPATH_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      ATTACKPATH_TEST_NEO4J: bolt://localhost:7687
+      KG_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      KG_TEST_NEO4J: bolt://localhost:7687
+      RBAC_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      ASSET_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      SIEM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: crp_password_dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Apply migrations
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          for f in migrations/postgres/*.sql; do
+            psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      # Six of these seven never applied — a TTL on a DateTime64 column and a
+      # DESC in a sorting key — so the SIEM, UEBA, TI, vuln and audit schemas
+      # did not exist. Failing the build on a bad one is the point.
+      - name: Apply ClickHouse migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          for f in migrations/clickhouse/*.sql; do
+            echo "applying $(basename "$f")"
+            docker run --rm --network host -i \
+              clickhouse/clickhouse-server:24.3-alpine \
+              clickhouse-client --host localhost --multiquery < "$f"
+          done
+
+      - name: Format
+        working-directory: backend
+        run: make fmt-check
+
+      - name: Build
+        working-directory: backend
+        run: make build
+
+      - name: Vet
+        working-directory: backend
+        run: make vet
+
+      # The detection catalogue is no longer carried by a migration, so a fresh
+      # database has none until this runs — and the SIEM library tests read it.
+      # It is also the step that would fail if a detection named a field the
+      # engine does not read: content ships without the code, so the check that
+      # content is sound has to run on its own.
+      #
+      # It goes through the whole published path on purpose — build, sign,
+      # publish into a channel, then install what the channel calls current —
+      # rather than loading the working directory. A pipeline that only ever
+      # loaded the directory would never exercise what a deployment does, and
+      # the first time anyone found out would be at a customer.
+      - name: Build, publish and install a signed content release
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go run ./services/siem/cmd/contentctl -check
+          go run ./services/siem/cmd/contentctl -keygen /tmp/ci-content
+          mkdir -p /tmp/ci-trust && cp /tmp/ci-content.pub /tmp/ci-trust/
+          go run ./services/siem/cmd/contentctl \
+            -build /tmp/ci-pack.crpack -publish /tmp/ci-channel \
+            -sign-key /tmp/ci-content.key
+          go run ./services/siem/cmd/contentctl \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
+          go run ./services/siem/cmd/contentctl \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -apply \
+            -db "postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable"
+
+      # Each refusal is asserted rather than assumed: a verification that
+      # silently passed everything would look exactly like one that worked.
+      # These are the four ways a deployment can be handed content it should
+      # not install, and each has to fail for its own reason.
+      - name: Content that should be refused is refused
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          ctl() { go run ./services/siem/cmd/contentctl "$@"; }
+
+          # The expected reason is asserted, not just the failure. A refusal
+          # for the wrong reason is how a check that never runs passes: an
+          # archive rejected before its signature is read looks, from the exit
+          # code alone, exactly like one whose signature was checked.
+          refuses() {
+            local what="$1" expect="$2"; shift 2
+            if ctl "$@" >/tmp/ci-refusal 2>&1; then
+              echo "NOT REFUSED: $what" >&2; cat /tmp/ci-refusal >&2; exit 1
+            fi
+            if ! grep -qF -- "$expect" /tmp/ci-refusal; then
+              echo "REFUSED FOR THE WRONG REASON ($what): expected \"$expect\"" >&2
+              cat /tmp/ci-refusal >&2; exit 1
+            fi
+            echo "refused ($what): $(grep -F -- "$expect" /tmp/ci-refusal | head -1)"
+          }
+
+          # Signed by a key this deployment does not trust.
+          ctl -keygen /tmp/ci-other
+          refuses "an untrusted key" "does not trust" \
+            -channel /tmp/ci-channel -trust /tmp/ci-other.pub -verify-only
+
+          # The index edited after it was signed — the replay a channel exists
+          # to stop.
+          cp -r /tmp/ci-channel /tmp/ci-tampered
+          python3 - <<'EOF'
+          import json
+          p = "/tmp/ci-tampered/index.json"
+          d = json.load(open(p)); d["current"] = "0.0.0"
+          open(p, "w").write(json.dumps(d, separators=(",", ":")))
+          EOF
+          refuses "an index edited after signing" "does not match" \
+            -channel /tmp/ci-tampered -trust /tmp/ci-trust -verify-only
+
+          # A trust store the deployment never configured.
+          refuses "no trust configured" "-allow-unsigned" -channel /tmp/ci-channel -verify-only
+
+          # The signing key withdrawn.
+          key_id=$(ctl -trust-list -trust /tmp/ci-trust | awk '/trusted/{print $2}')
+          echo "$key_id withdrawn by CI" > /tmp/ci-trust/ci.revoked
+          refuses "a revoked key" "has revoked (withdrawn by CI)" \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
+          rm /tmp/ci-trust/ci.revoked
+
+      # The API reference is generated from the services' routes. A route added
+      # without regenerating it makes the published list wrong in the one way
+      # nobody notices until a call 404s, so the drift is a failing build.
+      - name: The API reference matches the code
+        working-directory: backend
+        run: make docs-api-check
+
+      - name: Test
+        working-directory: backend
+        run: make test
+
+  migrations:
+    name: Migrations — apply to a clean database
+    runs-on: ubuntu-latest
+    # A reserved word used as a column name shipped unnoticed because nothing
+    # ever ran these files. This job applies all of them to an empty database.
+    services:
+      postgres:
+        # pgvector, not plain postgres: 000034 runs CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply PostgreSQL migrations
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          for f in migrations/postgres/*.sql; do
+            echo "→ $f"
+            psql -h 127.0.0.1 -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Report schema
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' tables created' FROM information_schema.tables WHERE table_schema='public'"
+
+  frontend:
+    name: Frontend — typecheck, lint, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      # next-intl renders the key itself when it cannot resolve one, so a page
+      # with a missing translation looks built rather than broken. Five shipped
+      # that way before this step existed.
+      - name: Translations
+        working-directory: frontend
+        run: npm run check:messages
+
+      - name: Build
+        working-directory: frontend
+        # next build needs these present; they are not secrets at build time.
+        env:
+          NEXTAUTH_URL: http://localhost:3000
+          NEXTAUTH_SECRET: ci-build-only-not-a-real-secret-000000000
+          KEYCLOAK_CLIENT_ID: ci
+          KEYCLOAK_CLIENT_SECRET: ci
+          KEYCLOAK_ISSUER: http://localhost:8080/realms/cyberradar
+          NEXT_PUBLIC_API_URL: http://localhost:8001
+        run: npm run build
+
+  vulnerabilities:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    # Reports rather than gates, for two reasons, and should be made blocking
+    # once both are cleared:
+    #   - npm audit still reports 1 critical and 4 high, all of which only a
+    #     Next 16 migration resolves. The critical one is a DoS in the Image
+    #     Optimizer, which this app disables (images.unoptimized in
+    #     next.config.mjs), so it is not reachable here.
+    #   - govulncheck could not be run before this landed: the development
+    #     environment cannot reach vuln.go.dev. Its first run needs triage.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          fail=0
+          for m in internal services/*/; do
+            echo "→ $m"
+            (cd "$m" && govulncheck ./...) || fail=1
+          done
+          exit $fail
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high

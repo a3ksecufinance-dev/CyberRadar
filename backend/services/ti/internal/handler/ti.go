@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/ti/internal/model"
 	"github.com/cyberradar/platform/services/ti/internal/service"
@@ -60,7 +61,7 @@ func (h *TIHandler) ListFeeds(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"feeds": feeds, "total": len(feeds)})
+	response.OKWithMeta(w, feeds, &response.Meta{Total: int64(len(feeds))})
 }
 
 func (h *TIHandler) CreateFeed(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +162,7 @@ func (h *TIHandler) ListIOCs(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"iocs": iocs, "total": total})
+	response.OKWithMeta(w, iocs, &response.Meta{Total: int64(total)})
 }
 
 func (h *TIHandler) CreateIOC(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +232,7 @@ func (h *TIHandler) ListHits(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"hits": hits, "total": len(hits)})
+	response.OKWithMeta(w, hits, &response.Meta{Total: int64(len(hits))})
 }
 
 // ─── Threat Actors ────────────────────────────────────────────────────────────
@@ -244,7 +245,7 @@ func (h *TIHandler) ListThreatActors(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"actors": actors, "total": len(actors)})
+	response.OKWithMeta(w, actors, &response.Meta{Total: int64(len(actors))})
 }
 
 func (h *TIHandler) CreateThreatActor(w http.ResponseWriter, r *http.Request) {
@@ -281,9 +282,7 @@ func (h *TIHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -297,16 +296,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

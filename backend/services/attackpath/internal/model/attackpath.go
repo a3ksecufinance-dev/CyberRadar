@@ -17,23 +17,23 @@ const (
 
 // Edge types
 const (
-	EdgeTypeNetworkAccess    = "network_access"
-	EdgeTypeCredentialReuse  = "credential_reuse"
-	EdgeTypeExploit          = "exploit"
-	EdgeTypeTrust            = "trust_relationship"
-	EdgeTypeRDP              = "rdp"
-	EdgeTypeSSH              = "ssh"
-	EdgeTypeSMB              = "smb"
-	EdgeTypeAPICall          = "api_call"
-	EdgeTypeSupplyChain      = "supply_chain"
+	EdgeTypeNetworkAccess   = "network_access"
+	EdgeTypeCredentialReuse = "credential_reuse"
+	EdgeTypeExploit         = "exploit"
+	EdgeTypeTrust           = "trust_relationship"
+	EdgeTypeRDP             = "rdp"
+	EdgeTypeSSH             = "ssh"
+	EdgeTypeSMB             = "smb"
+	EdgeTypeAPICall         = "api_call"
+	EdgeTypeSupplyChain     = "supply_chain"
 )
 
 // Path types
 const (
-	PathTypeLateralMovement    = "lateral_movement"
-	PathTypePrivEscalation     = "privilege_escalation"
-	PathTypeDataAccess         = "data_access"
-	PathTypeExfiltration       = "exfiltration"
+	PathTypeLateralMovement = "lateral_movement"
+	PathTypePrivEscalation  = "privilege_escalation"
+	PathTypeDataAccess      = "data_access"
+	PathTypeExfiltration    = "exfiltration"
 )
 
 // Scenario statuses
@@ -70,67 +70,76 @@ type AttackNode struct {
 
 // AttackEdge is a directed edge in the attack graph.
 type AttackEdge struct {
-	ID                  uuid.UUID      `json:"id"`
-	TenantID            uuid.UUID      `json:"tenant_id"`
-	SourceID            uuid.UUID      `json:"source_id"`
-	TargetID            uuid.UUID      `json:"target_id"`
-	EdgeType            string         `json:"edge_type"`
-	AttackComplexity    string         `json:"attack_complexity"`
-	PrivilegesRequired  string         `json:"privileges_required"`
-	VulnID              *uuid.UUID     `json:"vuln_id,omitempty"`
-	CVEID               string         `json:"cve_id,omitempty"`
-	MitreTechnique      string         `json:"mitre_technique,omitempty"`
-	Weight              float64        `json:"weight"`
-	IsActive            bool           `json:"is_active"`
-	EvidenceSource      string         `json:"evidence_source"`
-	Properties          map[string]any `json:"properties,omitempty"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
+	ID                 uuid.UUID      `json:"id"`
+	TenantID           uuid.UUID      `json:"tenant_id"`
+	SourceID           uuid.UUID      `json:"source_id"`
+	TargetID           uuid.UUID      `json:"target_id"`
+	EdgeType           string         `json:"edge_type"`
+	AttackComplexity   string         `json:"attack_complexity"`
+	PrivilegesRequired string         `json:"privileges_required"`
+	VulnID             *uuid.UUID     `json:"vuln_id,omitempty"`
+	CVEID              string         `json:"cve_id,omitempty"`
+	MitreTechnique     string         `json:"mitre_technique,omitempty"`
+	Weight             float64        `json:"weight"`
+	IsActive           bool           `json:"is_active"`
+	EvidenceSource     string         `json:"evidence_source"`
+	Properties         map[string]any `json:"properties,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
 // AttackScenario defines a simulation: entry points + high-value targets.
 type AttackScenario struct {
-	ID            uuid.UUID  `json:"id"`
-	TenantID      uuid.UUID  `json:"tenant_id"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description,omitempty"`
+	ID            uuid.UUID   `json:"id"`
+	TenantID      uuid.UUID   `json:"tenant_id"`
+	Name          string      `json:"name"`
+	Description   string      `json:"description,omitempty"`
 	EntryNodeIDs  []uuid.UUID `json:"entry_node_ids"`
 	TargetNodeIDs []uuid.UUID `json:"target_node_ids"`
 	MaxHops       int         `json:"max_hops"`
 	IncludeTypes  []string    `json:"include_types"`
 	Status        string      `json:"status"`
 	PathCount     int         `json:"path_count"`
-	ShortestPath  *int        `json:"shortest_path,omitempty"`
-	CriticalPath  *int        `json:"critical_path,omitempty"`
-	LastRunAt     *time.Time  `json:"last_run_at,omitempty"`
-	LastRunMS     int         `json:"last_run_ms,omitempty"`
-	RiskScore     float64     `json:"risk_score"`
-	CreatedBy     *uuid.UUID  `json:"created_by,omitempty"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	// ShortestPath is the fewest hops; CheapestPathCost is the weighted
+	// shortest route, which is the one an attacker would take. CriticalPath is
+	// the hop count of the highest-scoring route — it used to hold the longest
+	// one and call it the most critical.
+	ShortestPath     *int       `json:"shortest_path,omitempty"`
+	CriticalPath     *int       `json:"critical_path,omitempty"`
+	CheapestPathCost *float64   `json:"cheapest_path_cost,omitempty"`
+	LastRunAt        *time.Time `json:"last_run_at,omitempty"`
+	LastRunMS        int        `json:"last_run_ms,omitempty"`
+	RiskScore        float64    `json:"risk_score"`
+	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // AttackPath is a discovered chain of nodes and edges from entry to target.
 type AttackPath struct {
-	ID                uuid.UUID   `json:"id"`
-	TenantID          uuid.UUID   `json:"tenant_id"`
-	ScenarioID        uuid.UUID   `json:"scenario_id"`
-	EntryNodeID       uuid.UUID   `json:"entry_node_id"`
-	TargetNodeID      uuid.UUID   `json:"target_node_id"`
-	NodeSequence      []uuid.UUID `json:"node_sequence"`
-	EdgeSequence      []uuid.UUID `json:"edge_sequence"`
-	HopCount          int         `json:"hop_count"`
-	PathScore         float64     `json:"path_score"`
-	Likelihood        float64     `json:"likelihood"`
-	Impact            float64     `json:"impact"`
-	PathType          string      `json:"path_type"`
-	HasInternetEntry  bool        `json:"has_internet_entry"`
-	HasExploitStep    bool        `json:"has_exploit_step"`
-	HasPrivEsc        bool        `json:"has_priv_esc"`
-	MitreTactics      []string    `json:"mitre_tactics"`
-	ChokePointNodeID  *uuid.UUID  `json:"choke_point_node_id,omitempty"`
-	ChokePointEdgeID  *uuid.UUID  `json:"choke_point_edge_id,omitempty"`
-	DiscoveredAt      time.Time   `json:"discovered_at"`
+	ID           uuid.UUID   `json:"id"`
+	TenantID     uuid.UUID   `json:"tenant_id"`
+	ScenarioID   uuid.UUID   `json:"scenario_id"`
+	EntryNodeID  uuid.UUID   `json:"entry_node_id"`
+	TargetNodeID uuid.UUID   `json:"target_node_id"`
+	NodeSequence []uuid.UUID `json:"node_sequence"`
+	EdgeSequence []uuid.UUID `json:"edge_sequence"`
+	HopCount     int         `json:"hop_count"`
+	// TotalCost is the accumulated traversal weight of the route's edges.
+	// Hops are not effort: a one-hop route needing an admin credential and a
+	// remote exploit costs an attacker more than three hops over open shares.
+	TotalCost        float64    `json:"total_cost"`
+	PathScore        float64    `json:"path_score"`
+	Likelihood       float64    `json:"likelihood"`
+	Impact           float64    `json:"impact"`
+	PathType         string     `json:"path_type"`
+	HasInternetEntry bool       `json:"has_internet_entry"`
+	HasExploitStep   bool       `json:"has_exploit_step"`
+	HasPrivEsc       bool       `json:"has_priv_esc"`
+	MitreTactics     []string   `json:"mitre_tactics"`
+	ChokePointNodeID *uuid.UUID `json:"choke_point_node_id,omitempty"`
+	ChokePointEdgeID *uuid.UUID `json:"choke_point_edge_id,omitempty"`
+	DiscoveredAt     time.Time  `json:"discovered_at"`
 	// Enriched for API responses
 	Nodes []AttackNode `json:"nodes,omitempty"`
 	Edges []AttackEdge `json:"edges,omitempty"`
@@ -145,8 +154,8 @@ type AttackGraphStats struct {
 	CompromisedNodes    int     `json:"compromised_nodes"`
 	TotalScenarios      int     `json:"total_scenarios"`
 	TotalPaths          int     `json:"total_paths"`
-	HighRiskPaths       int     `json:"high_risk_paths"`   // path_score >= 7
-	ShortestPath        int     `json:"shortest_path"`     // across all scenarios
+	HighRiskPaths       int     `json:"high_risk_paths"` // path_score >= 7
+	ShortestPath        int     `json:"shortest_path"`   // across all scenarios
 	AvgPathLength       float64 `json:"avg_path_length"`
 	PathsWithExploit    int     `json:"paths_with_exploit"`
 	PathsWithPrivEsc    int     `json:"paths_with_priv_esc"`
@@ -154,10 +163,10 @@ type AttackGraphStats struct {
 
 // ChokePoint identifies the most impactful node/edge to remediate.
 type ChokePoint struct {
-	NodeID     uuid.UUID `json:"node_id"`
-	Label      string    `json:"label"`
-	PathsBlocked int     `json:"paths_blocked"`  // how many paths go through this node
-	RiskReduction float64 `json:"risk_reduction"` // estimated risk score reduction
+	NodeID        uuid.UUID `json:"node_id"`
+	Label         string    `json:"label"`
+	PathsBlocked  int       `json:"paths_blocked"`  // how many paths go through this node
+	RiskReduction float64   `json:"risk_reduction"` // estimated risk score reduction
 }
 
 // ─── Request / filter models ──────────────────────────────────────────────────
@@ -222,4 +231,25 @@ type PathFilter struct {
 	PathType   string
 	Limit      int
 	Offset     int
+}
+
+// ScenarioOutcome is what one scenario run recorded.
+//
+// It is a struct rather than seven positional arguments: the previous
+// signature took two *int and a float64 in a row, which is exactly the shape
+// where a shortest path and a critical path get swapped without the compiler
+// noticing.
+type ScenarioOutcome struct {
+	PathCount        int
+	ShortestPath     *int
+	CriticalPath     *int
+	CheapestPathCost *float64
+	RiskScore        float64
+	DurationMS       int
+
+	// Which weightings scored this run. Without them the risk score is a number
+	// with no provenance: re-run the scenario after the stance moves and the
+	// figure in last quarter's report is irreproducible, with nothing saying why.
+	PolicyCode    string
+	PolicyVersion int
 }

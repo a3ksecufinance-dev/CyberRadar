@@ -13,10 +13,17 @@ type Envelope struct {
 }
 
 // Meta holds pagination and context info.
+//
+// Total is always emitted: it carried omitempty, so a page with no results
+// answered without one, and a client could not tell "no matches" from "this
+// endpoint does not report a total". Zero matches is an answer.
+//
+// Page and Limit keep omitempty because they genuinely do not apply to an
+// endpoint that returns everything it has; their absence says so.
 type Meta struct {
 	Page     int    `json:"page,omitempty"`
 	Limit    int    `json:"limit,omitempty"`
-	Total    int64  `json:"total,omitempty"`
+	Total    int64  `json:"total"`
 	TenantID string `json:"tenant_id,omitempty"`
 }
 
@@ -56,6 +63,11 @@ func Created(w http.ResponseWriter, data any) {
 	write(w, http.StatusCreated, Envelope{Data: data, Error: nil})
 }
 
+// Accepted sends a 202 response: the request was taken, the work is not done.
+func Accepted(w http.ResponseWriter, data any) {
+	write(w, http.StatusAccepted, Envelope{Data: data, Error: nil})
+}
+
 // NoContent sends a 204 response.
 func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
@@ -81,10 +93,17 @@ func Forbidden(w http.ResponseWriter, message string) {
 }
 
 // NotFound sends a 404 response.
-func NotFound(w http.ResponseWriter, resource string) {
+// NotFound answers 404 with message as given.
+//
+// It used to take a resource name and append " not found" itself, which none
+// of the other helpers do. Most callers passed a full message instead — a
+// domain error already reading "X not found" — so the answer came out as
+// "X not found not found". It now takes a message, like Unauthorized,
+// Forbidden and Conflict.
+func NotFound(w http.ResponseWriter, message string) {
 	write(w, http.StatusNotFound, Envelope{Error: &Error{
 		Code:    "NOT_FOUND",
-		Message: resource + " not found",
+		Message: message,
 	}})
 }
 

@@ -4,10 +4,10 @@ import (
 	"strings"
 
 	"github.com/cyberradar/platform/internal/pkg/event"
+	"github.com/cyberradar/platform/internal/pkg/iocindex"
 )
 
 // ThreatEnricher adds threat intelligence context to normalized events.
-// Production: connect to D6 Threat Intel service via gRPC or Redis cache.
 type ThreatEnricher struct{}
 
 // NewThreatEnricher creates a ThreatEnricher.
@@ -24,9 +24,14 @@ type ThreatResult struct {
 	RiskScore      float32
 }
 
-// Enrich derives threat metadata from a normalized event.
-// Stub: applies heuristic rules. Replace with D6 Threat Intel API call in Sprint 3+.
-func (t *ThreatEnricher) Enrich(e *event.NormalizedEvent) ThreatResult {
+// Enrich derives threat metadata from a normalized event and whatever
+// indicators it matched.
+//
+// The hits come from the caller because looking them up is a shared index, not
+// this type's business. What is this type's business is what a match is worth:
+// an event that reached an address a feed calls a command-and-control server
+// is not a medium-severity event, whatever severity the connector put on it.
+func (t *ThreatEnricher) Enrich(e *event.NormalizedEvent, hits []iocindex.Hit) ThreatResult {
 	var result ThreatResult
 
 	result.ThreatScore = baseThreatScore(e)
@@ -35,8 +40,31 @@ func (t *ThreatEnricher) Enrich(e *event.NormalizedEvent) ThreatResult {
 	// Heuristic MITRE ATT&CK mapping based on action keywords
 	result.MitreTactic, result.MitreTechnique = heuristicMITRE(e)
 
-	// IOC matching stub — D6 will replace with real IOC feed lookups
-	result.IOCMatched = stubIOCMatch(e)
+	// A matched indicator is evidence, not a hint. It raises the score to a
+	// floor rather than adding to it: adding would let two weak matches
+	// outweigh one certain one, and would make the threshold a rule has to
+	// compare against depend on how many fields happened to match.
+	for _, hit := range hits {
+		result.IOCMatched = append(result.IOCMatched, hit.Label())
+		if floor := iocSeverityFloor(hit.Entry.Severity); floor > result.ThreatScore {
+			result.ThreatScore = floor
+		}
+		if floor := iocSeverityFloor(hit.Entry.Severity); floor > result.RiskScore {
+			result.RiskScore = floor
+		}
+		// The feed's attribution beats a keyword in the action string.
+		if hit.Entry.MitreTactic != "" {
+			result.MitreTactic = hit.Entry.MitreTactic
+		}
+		if hit.Entry.MitreTechnique != "" {
+			result.MitreTechnique = hit.Entry.MitreTechnique
+		}
+	}
+	if result.IOCMatched == nil {
+		// An empty list, never nil: a consumer reading this field should not
+		// have to tell "no matches" from "this field was not populated".
+		result.IOCMatched = []string{}
+	}
 
 	// Boost risk for sanctioned geo
 	if e.GeoCountry != nil && IsSanctioned(*e.GeoCountry) {
@@ -53,6 +81,23 @@ func (t *ThreatEnricher) Enrich(e *event.NormalizedEvent) ThreatResult {
 	}
 
 	return result
+}
+
+// iocSeverityFloor is the score an event cannot fall below once it has matched
+// an indicator of that severity.
+func iocSeverityFloor(severity string) float32 {
+	switch strings.ToUpper(severity) {
+	case "CRITICAL":
+		return 9.0
+	case "HIGH":
+		return 8.0
+	case "MEDIUM":
+		return 6.0
+	case "LOW":
+		return 4.0
+	default:
+		return 0.0
+	}
 }
 
 func baseThreatScore(e *event.NormalizedEvent) float32 {
@@ -99,12 +144,6 @@ func heuristicMITRE(e *event.NormalizedEvent) (tactic, technique string) {
 	default:
 		return "", ""
 	}
-}
-
-func stubIOCMatch(e *event.NormalizedEvent) []string {
-	// TODO: Query D6 Threat Intel IOC cache (Redis) with IPs, domains, hashes
-	// For now: return empty — no false positives from stubs
-	return []string{}
 }
 
 func contains(s string, keywords ...string) bool {

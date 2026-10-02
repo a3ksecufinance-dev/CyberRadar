@@ -215,10 +215,10 @@ func (r *IRRepository) CreateIncident(ctx context.Context, tenantID uuid.UUID, r
 		  attack_vector,iocs,mitre_tactics,mitre_techniques,team_members,
 		  playbook_id,detected_at,tags,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-		 RETURNING id,tenant_id,incident_number,title,description,incident_type,severity,status,priority,
-		           source,source_ref,affected_systems,affected_users,affected_data,
-		           is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		           mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		 RETURNING id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,severity,status,priority,
+		           COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,affected_systems,affected_users,affected_data,
+		           is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		           mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		           playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		           recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		           requires_notification,notification_sent_at,tags,created_by,created_at,updated_at`,
@@ -248,11 +248,11 @@ func (r *IRRepository) GetIncident(ctx context.Context, tenantID, id uuid.UUID) 
 	var inc model.IRIncident
 	var iocsRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT i.id,i.tenant_id,i.incident_number,i.title,i.description,i.incident_type,
-		        i.severity,i.status,i.priority,i.source,i.source_ref,
+		`SELECT i.id,i.tenant_id,i.incident_number,i.title,COALESCE(i.description,'') AS description,i.incident_type,
+		        i.severity,i.status,i.priority,COALESCE(i.source,'') AS source,COALESCE(i.source_ref,'') AS source_ref,
 		        i.affected_systems,i.affected_users,i.affected_data,
-		        i.is_contained,i.data_exfiltrated,i.estimated_impact,i.attack_vector,i.iocs,
-		        i.mitre_tactics,i.mitre_techniques,i.lead_id,i.lead_name,i.team_members,
+		        i.is_contained,i.data_exfiltrated,COALESCE(i.estimated_impact,'') AS estimated_impact,COALESCE(i.attack_vector,'') AS attack_vector,i.iocs,
+		        i.mitre_tactics,i.mitre_techniques,i.lead_id,COALESCE(i.lead_name,'') AS lead_name,i.team_members,
 		        i.playbook_id,i.detected_at,i.reported_at,i.contained_at,i.eradicated_at,
 		        i.recovered_at,i.closed_at,i.mttd_minutes,i.mttr_minutes,
 		        i.requires_notification,i.notification_sent_at,i.tags,i.created_by,i.created_at,i.updated_at,
@@ -318,11 +318,11 @@ func (r *IRRepository) ListIncidents(ctx context.Context, tenantID uuid.UUID, f 
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT i.id,i.tenant_id,i.incident_number,i.title,i.description,i.incident_type,
-		        i.severity,i.status,i.priority,i.source,i.source_ref,
+		`SELECT i.id,i.tenant_id,i.incident_number,i.title,COALESCE(i.description,'') AS description,i.incident_type,
+		        i.severity,i.status,i.priority,COALESCE(i.source,'') AS source,COALESCE(i.source_ref,'') AS source_ref,
 		        i.affected_systems,i.affected_users,i.affected_data,
-		        i.is_contained,i.data_exfiltrated,i.estimated_impact,i.attack_vector,i.iocs,
-		        i.mitre_tactics,i.mitre_techniques,i.lead_id,i.lead_name,i.team_members,
+		        i.is_contained,i.data_exfiltrated,COALESCE(i.estimated_impact,'') AS estimated_impact,COALESCE(i.attack_vector,'') AS attack_vector,i.iocs,
+		        i.mitre_tactics,i.mitre_techniques,i.lead_id,COALESCE(i.lead_name,'') AS lead_name,i.team_members,
 		        i.playbook_id,i.detected_at,i.reported_at,i.contained_at,i.eradicated_at,
 		        i.recovered_at,i.closed_at,i.mttd_minutes,i.mttr_minutes,
 		        i.requires_notification,i.notification_sent_at,i.tags,i.created_by,i.created_at,i.updated_at
@@ -486,11 +486,11 @@ func (r *IRRepository) UpdateIncident(ctx context.Context, tenantID, id uuid.UUI
 	err = r.db.QueryRow(ctx,
 		`UPDATE ir_incidents SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,incident_number,title,description,incident_type,
-		           severity,status,priority,source,source_ref,
+		 RETURNING id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,
+		           severity,status,priority,COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,
 		           affected_systems,affected_users,affected_data,
-		           is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		           mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		           is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		           mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		           playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		           recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		           requires_notification,notification_sent_at,tags,created_by,created_at,updated_at`,
@@ -917,11 +917,11 @@ func (r *IRRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 
 	// Recent incidents (last 5 open)
 	recentRows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,incident_number,title,description,incident_type,
-		        severity,status,priority,source,source_ref,
+		`SELECT id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,
+		        severity,status,priority,COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,
 		        affected_systems,affected_users,affected_data,
-		        is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		        mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		        is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		        mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		        playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		        recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		        requires_notification,notification_sent_at,tags,created_by,created_at,updated_at

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	
 	"github.com/cyberradar/platform/services/ot/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -154,19 +153,29 @@ func (r *OTRepository) ListAssets(ctx context.Context, tenantID uuid.UUID, f mod
 	args := []any{tenantID}
 	n := 2
 	if f.Site != "" {
-		cond = append(cond, fmt.Sprintf("site=$%d", n)); args = append(args, f.Site); n++
+		cond = append(cond, fmt.Sprintf("site=$%d", n))
+		args = append(args, f.Site)
+		n++
 	}
 	if f.AssetType != "" {
-		cond = append(cond, fmt.Sprintf("asset_type=$%d", n)); args = append(args, f.AssetType); n++
+		cond = append(cond, fmt.Sprintf("asset_type=$%d", n))
+		args = append(args, f.AssetType)
+		n++
 	}
 	if f.RiskLevel != "" {
-		cond = append(cond, fmt.Sprintf("risk_level=$%d", n)); args = append(args, f.RiskLevel); n++
+		cond = append(cond, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, f.RiskLevel)
+		n++
 	}
 	if f.PurdueLevel != 0 {
-		cond = append(cond, fmt.Sprintf("purdue_level=$%d", n)); args = append(args, f.PurdueLevel); n++
+		cond = append(cond, fmt.Sprintf("purdue_level=$%d", n))
+		args = append(args, f.PurdueLevel)
+		n++
 	}
 	if f.IsActive != nil {
-		cond = append(cond, fmt.Sprintf("is_active=$%d", n)); args = append(args, *f.IsActive); n++
+		cond = append(cond, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *f.IsActive)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -215,56 +224,90 @@ func (r *OTRepository) UpdateAsset(ctx context.Context, tenantID, id uuid.UUID, 
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.FirmwareVersion != nil {
-		sets = append(sets, fmt.Sprintf("firmware_version=$%d", n)); args = append(args, *req.FirmwareVersion); n++
+		sets = append(sets, fmt.Sprintf("firmware_version=$%d", n))
+		args = append(args, *req.FirmwareVersion)
+		n++
 	}
 	if req.IPAddress != nil {
-		sets = append(sets, fmt.Sprintf("ip_address=$%d", n)); args = append(args, *req.IPAddress); n++
+		sets = append(sets, fmt.Sprintf("ip_address=$%d", n))
+		args = append(args, *req.IPAddress)
+		n++
 	}
 	if req.Site != nil {
-		sets = append(sets, fmt.Sprintf("site=$%d", n)); args = append(args, *req.Site); n++
+		sets = append(sets, fmt.Sprintf("site=$%d", n))
+		args = append(args, *req.Site)
+		n++
 	}
 	if req.Zone != nil {
-		sets = append(sets, fmt.Sprintf("zone=$%d", n)); args = append(args, *req.Zone); n++
+		sets = append(sets, fmt.Sprintf("zone=$%d", n))
+		args = append(args, *req.Zone)
+		n++
 	}
 	if req.PurdueLevel != nil {
-		sets = append(sets, fmt.Sprintf("purdue_level=$%d", n)); args = append(args, *req.PurdueLevel); n++
+		sets = append(sets, fmt.Sprintf("purdue_level=$%d", n))
+		args = append(args, *req.PurdueLevel)
+		n++
 	}
 	if req.RiskScore != nil {
-		sets = append(sets, fmt.Sprintf("risk_score=$%d", n)); args = append(args, *req.RiskScore); n++
+		sets = append(sets, fmt.Sprintf("risk_score=$%d", n))
+		args = append(args, *req.RiskScore)
+		n++
 	}
 	if req.RiskLevel != nil {
-		sets = append(sets, fmt.Sprintf("risk_level=$%d", n)); args = append(args, *req.RiskLevel); n++
+		sets = append(sets, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, *req.RiskLevel)
+		n++
 	}
 	if req.IsInternetFacing != nil {
-		sets = append(sets, fmt.Sprintf("is_internet_facing=$%d", n)); args = append(args, *req.IsInternetFacing); n++
+		sets = append(sets, fmt.Sprintf("is_internet_facing=$%d", n))
+		args = append(args, *req.IsInternetFacing)
+		n++
 	}
 	if req.IsPatched != nil {
-		sets = append(sets, fmt.Sprintf("is_patched=$%d", n)); args = append(args, *req.IsPatched); n++
+		sets = append(sets, fmt.Sprintf("is_patched=$%d", n))
+		args = append(args, *req.IsPatched)
+		n++
 		if *req.IsPatched {
-			sets = append(sets, fmt.Sprintf("last_patched_at=$%d", n)); args = append(args, time.Now().UTC()); n++
+			sets = append(sets, fmt.Sprintf("last_patched_at=$%d", n))
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 	if req.Criticality != nil {
-		sets = append(sets, fmt.Sprintf("criticality=$%d", n)); args = append(args, *req.Criticality); n++
+		sets = append(sets, fmt.Sprintf("criticality=$%d", n))
+		args = append(args, *req.Criticality)
+		n++
 	}
 	if req.Protocol != nil {
-		sets = append(sets, fmt.Sprintf("protocol=$%d", n)); args = append(args, req.Protocol); n++
+		sets = append(sets, fmt.Sprintf("protocol=$%d", n))
+		args = append(args, req.Protocol)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 	if req.Metadata != nil {
 		meta, _ := json.Marshal(req.Metadata)
-		sets = append(sets, fmt.Sprintf("metadata=$%d", n)); args = append(args, meta); n++
+		sets = append(sets, fmt.Sprintf("metadata=$%d", n))
+		args = append(args, meta)
+		n++
 	}
 
 	var a model.OTAsset
@@ -321,7 +364,9 @@ func (r *OTRepository) ListZones(ctx context.Context, tenantID uuid.UUID, site s
 	args := []any{tenantID}
 	n := 2
 	if site != "" {
-		cond = append(cond, fmt.Sprintf("site=$%d", n)); args = append(args, site); n++
+		cond = append(cond, fmt.Sprintf("site=$%d", n))
+		args = append(args, site)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,name,description,zone_type,purdue_level,site,
@@ -353,25 +398,39 @@ func (r *OTRepository) UpdateZone(ctx context.Context, tenantID, id uuid.UUID, r
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.IsAirGapped != nil {
-		sets = append(sets, fmt.Sprintf("is_air_gapped=$%d", n)); args = append(args, *req.IsAirGapped); n++
+		sets = append(sets, fmt.Sprintf("is_air_gapped=$%d", n))
+		args = append(args, *req.IsAirGapped)
+		n++
 	}
 	if req.FirewallPresent != nil {
-		sets = append(sets, fmt.Sprintf("firewall_present=$%d", n)); args = append(args, *req.FirewallPresent); n++
+		sets = append(sets, fmt.Sprintf("firewall_present=$%d", n))
+		args = append(args, *req.FirewallPresent)
+		n++
 	}
 	if req.IDSPresent != nil {
-		sets = append(sets, fmt.Sprintf("ids_present=$%d", n)); args = append(args, *req.IDSPresent); n++
+		sets = append(sets, fmt.Sprintf("ids_present=$%d", n))
+		args = append(args, *req.IDSPresent)
+		n++
 	}
 	if req.RiskScore != nil {
-		sets = append(sets, fmt.Sprintf("risk_score=$%d", n)); args = append(args, *req.RiskScore); n++
+		sets = append(sets, fmt.Sprintf("risk_score=$%d", n))
+		args = append(args, *req.RiskScore)
+		n++
 	}
 	if req.NetworkRanges != nil {
-		sets = append(sets, fmt.Sprintf("network_ranges=$%d", n)); args = append(args, req.NetworkRanges); n++
+		sets = append(sets, fmt.Sprintf("network_ranges=$%d", n))
+		args = append(args, req.NetworkRanges)
+		n++
 	}
 
 	var z model.OTZone
@@ -417,7 +476,9 @@ func (r *OTRepository) ListCommunications(ctx context.Context, tenantID uuid.UUI
 	args := []any{tenantID}
 	n := 2
 	if anomalousOnly {
-		cond = append(cond, fmt.Sprintf("is_anomalous=$%d", n)); args = append(args, true); n++
+		cond = append(cond, fmt.Sprintf("is_anomalous=$%d", n))
+		args = append(args, true)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,src_asset_id,dst_asset_id,src_zone_id,dst_zone_id,
@@ -480,13 +541,19 @@ func (r *OTRepository) ListVulnerabilities(ctx context.Context, tenantID uuid.UU
 	args := []any{tenantID}
 	n := 2
 	if f.AssetID != nil {
-		cond = append(cond, fmt.Sprintf("asset_id=$%d", n)); args = append(args, *f.AssetID); n++
+		cond = append(cond, fmt.Sprintf("asset_id=$%d", n))
+		args = append(args, *f.AssetID)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -528,20 +595,29 @@ func (r *OTRepository) UpdateVulnerability(ctx context.Context, tenantID, id uui
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "patched" || *req.Status == "mitigated" {
 			sets = append(sets, fmt.Sprintf("remediated_at=COALESCE(remediated_at,$%d)", n))
-			args = append(args, time.Now().UTC()); n++
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.PatchAvailable != nil {
-		sets = append(sets, fmt.Sprintf("patch_available=$%d", n)); args = append(args, *req.PatchAvailable); n++
+		sets = append(sets, fmt.Sprintf("patch_available=$%d", n))
+		args = append(args, *req.PatchAvailable)
+		n++
 	}
 	if req.PatchNotes != nil {
-		sets = append(sets, fmt.Sprintf("patch_notes=$%d", n)); args = append(args, *req.PatchNotes); n++
+		sets = append(sets, fmt.Sprintf("patch_notes=$%d", n))
+		args = append(args, *req.PatchNotes)
+		n++
 	}
 	if req.Workaround != nil {
-		sets = append(sets, fmt.Sprintf("workaround=$%d", n)); args = append(args, *req.Workaround); n++
+		sets = append(sets, fmt.Sprintf("workaround=$%d", n))
+		args = append(args, *req.Workaround)
+		n++
 	}
 
 	var v model.OTVulnerability
@@ -595,9 +671,12 @@ func (r *OTRepository) CreateEvent(ctx context.Context, tenantID uuid.UUID, req 
 		 (tenant_id,asset_id,zone_id,event_type,severity,title,description,
 		  source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,event_time,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		           source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		           acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		           COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		           COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		           COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		           COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		           COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		           event_time,tags,created_at,updated_at`,
 		tenantID, req.AssetID, req.ZoneID, req.EventType, req.Severity,
 		req.Title, req.Description, req.SourceIP, req.DestIP, req.Protocol,
@@ -614,16 +693,24 @@ func (r *OTRepository) ListEvents(ctx context.Context, tenantID uuid.UUID, f mod
 	args := []any{tenantID}
 	n := 2
 	if f.AssetID != nil {
-		cond = append(cond, fmt.Sprintf("asset_id=$%d", n)); args = append(args, *f.AssetID); n++
+		cond = append(cond, fmt.Sprintf("asset_id=$%d", n))
+		args = append(args, *f.AssetID)
+		n++
 	}
 	if f.EventType != "" {
-		cond = append(cond, fmt.Sprintf("event_type=$%d", n)); args = append(args, f.EventType); n++
+		cond = append(cond, fmt.Sprintf("event_type=$%d", n))
+		args = append(args, f.EventType)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -635,9 +722,12 @@ func (r *OTRepository) ListEvents(ctx context.Context, tenantID uuid.UUID, f mod
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		        source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		        acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		        COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		        COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		        COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		        COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		        COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		        event_time,tags,created_at,updated_at
 		 FROM ot_events WHERE `+where+
 			fmt.Sprintf(` ORDER BY event_time DESC LIMIT $%d OFFSET $%d`, n, n+1),
@@ -667,24 +757,37 @@ func (r *OTRepository) UpdateEvent(ctx context.Context, tenantID, id uuid.UUID, 
 	now := time.Now().UTC()
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 	}
 	if req.AcknowledgedBy != nil {
-		sets = append(sets, fmt.Sprintf("acknowledged_by=$%d", n)); args = append(args, *req.AcknowledgedBy); n++
-		sets = append(sets, fmt.Sprintf("acknowledged_at=COALESCE(acknowledged_at,$%d)", n)); args = append(args, now); n++
+		sets = append(sets, fmt.Sprintf("acknowledged_by=$%d", n))
+		args = append(args, *req.AcknowledgedBy)
+		n++
+		sets = append(sets, fmt.Sprintf("acknowledged_at=COALESCE(acknowledged_at,$%d)", n))
+		args = append(args, now)
+		n++
 	}
 	if req.ResolvedBy != nil {
-		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n)); args = append(args, *req.ResolvedBy); n++
-		sets = append(sets, fmt.Sprintf("resolved_at=COALESCE(resolved_at,$%d)", n)); args = append(args, now); n++
+		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n))
+		args = append(args, *req.ResolvedBy)
+		n++
+		sets = append(sets, fmt.Sprintf("resolved_at=COALESCE(resolved_at,$%d)", n))
+		args = append(args, now)
+		n++
 	}
 
 	var e model.OTEvent
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_events SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		           source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		           acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		 RETURNING id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		           COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		           COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		           COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		           COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		           COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		           event_time,tags,created_at,updated_at`,
 		args...,
 	).Scan(&e.ID, &e.TenantID, &e.AssetID, &e.ZoneID, &e.EventType, &e.Severity, &e.Status,
@@ -728,7 +831,9 @@ func (r *OTRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, pol
 	args := []any{tenantID}
 	n := 2
 	if policyType != "" {
-		cond = append(cond, fmt.Sprintf("policy_type=$%d", n)); args = append(args, policyType); n++
+		cond = append(cond, fmt.Sprintf("policy_type=$%d", n))
+		args = append(args, policyType)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,name,description,policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at
@@ -758,20 +863,30 @@ func (r *OTRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.UUID,
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.Rule != nil {
 		rule, _ := json.Marshal(req.Rule)
-		sets = append(sets, fmt.Sprintf("rule=$%d", n)); args = append(args, rule); n++
+		sets = append(sets, fmt.Sprintf("rule=$%d", n))
+		args = append(args, rule)
+		n++
 	}
 	if req.Action != nil {
-		sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, *req.Action); n++
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, *req.Action)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 
 	var p model.OTPolicy
@@ -830,10 +945,14 @@ func (r *OTRepository) ListPatches(ctx context.Context, tenantID uuid.UUID, asse
 	args := []any{tenantID}
 	n := 2
 	if assetID != nil {
-		cond = append(cond, fmt.Sprintf("asset_id=$%d", n)); args = append(args, *assetID); n++
+		cond = append(cond, fmt.Sprintf("asset_id=$%d", n))
+		args = append(args, *assetID)
+		n++
 	}
 	if status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, status)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,asset_id,patch_type,title,description,version_before,version_after,
@@ -866,20 +985,29 @@ func (r *OTRepository) UpdatePatch(ctx context.Context, tenantID, id uuid.UUID, 
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "applied" {
 			sets = append(sets, fmt.Sprintf("applied_at=COALESCE(applied_at,$%d)", n))
-			args = append(args, time.Now().UTC()); n++
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.AppliedBy != nil {
-		sets = append(sets, fmt.Sprintf("applied_by=$%d", n)); args = append(args, *req.AppliedBy); n++
+		sets = append(sets, fmt.Sprintf("applied_by=$%d", n))
+		args = append(args, *req.AppliedBy)
+		n++
 	}
 	if req.AppliedAt != nil {
-		sets = append(sets, fmt.Sprintf("applied_at=$%d", n)); args = append(args, *req.AppliedAt); n++
+		sets = append(sets, fmt.Sprintf("applied_at=$%d", n))
+		args = append(args, *req.AppliedAt)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 
 	var p model.OTPatch
@@ -947,7 +1075,8 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows.Scan(&k, &v)
 			stats.AssetsByType[k] = v
 		}
@@ -959,7 +1088,8 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 	if rows2 != nil {
 		defer rows2.Close()
 		for rows2.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows2.Scan(&k, &v)
 			stats.AssetsByPurdue["level_"+k] = v
 		}
@@ -971,7 +1101,8 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 	if rows3 != nil {
 		defer rows3.Close()
 		for rows3.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows3.Scan(&k, &v)
 			stats.EventsBySeverity[k] = v
 		}
@@ -983,7 +1114,8 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 	if rows4 != nil {
 		defer rows4.Close()
 		for rows4.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows4.Scan(&k, &v)
 			stats.VulnsBySeverity[k] = v
 		}
@@ -1018,9 +1150,12 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 
 	// Recent critical events
 	erows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,description,
-		        source_ip,dest_ip,protocol,raw_payload,detected_by,detection_rule,
-		        acknowledged_by,acknowledged_at,resolved_by,resolved_at,
+		`SELECT id,tenant_id,asset_id,zone_id,event_type,severity,status,title,COALESCE(description,'') AS description,
+		        COALESCE(source_ip,'') AS source_ip,COALESCE(dest_ip,'') AS dest_ip,
+		        COALESCE(protocol,'') AS protocol,COALESCE(raw_payload,'') AS raw_payload,
+		        COALESCE(detected_by,'') AS detected_by,COALESCE(detection_rule,'') AS detection_rule,
+		        COALESCE(acknowledged_by,'') AS acknowledged_by,acknowledged_at,
+		        COALESCE(resolved_by,'') AS resolved_by,resolved_at,
 		        event_time,tags,created_at,updated_at
 		 FROM ot_events WHERE tenant_id=$1 AND status='open'
 		 ORDER BY event_time DESC LIMIT 5`, tenantID)

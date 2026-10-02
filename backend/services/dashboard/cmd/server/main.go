@@ -12,14 +12,17 @@ import (
 	"time"
 
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/dashboard/internal/handler"
 	"github.com/cyberradar/platform/services/dashboard/internal/model"
 	"github.com/cyberradar/platform/services/dashboard/internal/repository"
 	"github.com/cyberradar/platform/services/dashboard/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -30,11 +33,24 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "dashboard-service").Logger()
 
-	port     := envOrDefault("SERVICE_PORT", "8015")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL    := mustEnv("DATABASE_URL")
-	chURL    := mustEnv("CLICKHOUSE_URL")
-	brokers  := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"dashboard-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8015")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	chURL := mustEnv("CLICKHOUSE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -45,6 +61,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("postgres connect failed")
 	}
 	defer pool.Close()
+
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, pool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
 
 	// ── ClickHouse ────────────────────────────────────────────────────────────
 	chConn, err := clickhouse.Open(&clickhouse.Options{
@@ -63,9 +87,9 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	dashRepo := repository.NewDashboardRepository(pool)
-	kpiRepo  := repository.NewKPIRepository(chConn)
-	dashSvc  := service.NewDashboardService(dashRepo, kpiRepo, logger)
-	dashH    := handler.NewDashboardHandler(dashSvc)
+	kpiRepo := repository.NewKPIRepository(chConn)
+	dashSvc := service.NewDashboardService(dashRepo, kpiRepo, logger)
+	dashH := handler.NewDashboardHandler(dashSvc)
 
 	// ── Kafka consumer: ingest KPI snapshots from all domain services ─────────
 	// Each domain publishes a crp.events.kpi message with:
@@ -79,6 +103,12 @@ func main() {
 			MinBytes:    1,
 			MaxBytes:    10 << 20,
 			MaxWait:     time.Second,
+			// A consumer that starts before its topic exists is assigned no
+			// partitions, and without this it never notices when the topic
+			// appears — it blocks on ReadMessage forever, with no error to show
+			// for it. Seen for real: the dashboard's KPI ingestor started ahead of
+			// the first producer and consumed nothing until it was restarted.
+			WatchPartitionChanges: true,
 		})
 		defer r.Close()
 		logger.Info().Msg("dashboard kpi consumer started")
@@ -121,18 +151,26 @@ func main() {
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
+	r.Use(observe.Middleware("dashboard-service"))
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"dashboard-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
+		r.Use(authmw.RequirePermissionByMethod("reports"))
 		dashH.RegisterRoutes(r)
 	})
 
@@ -160,42 +198,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("dashboard-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

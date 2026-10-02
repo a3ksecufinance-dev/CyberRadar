@@ -472,6 +472,79 @@ func (r *PAMRepository) UpsertRiskProfile(ctx context.Context, p *model.Identity
 	return err
 }
 
+// ActivityWindows holds an identity's activity over the windows the risk
+// profile reports. Every figure is derived from identity_activity_daily, so
+// each is true to its name rather than a lifetime total.
+type ActivityWindows struct {
+	EventsToday     int
+	Events7d        int
+	Anomalies7d     int
+	Anomalies30d    int
+	PrivSessions30d int
+}
+
+// RecordActivity adds one day's worth of counts for an identity.
+//
+// The increment happens in the database, not in Go: the profile row used to be
+// read, incremented in memory and written back whole, so two replicas handling
+// events for the same identity silently lost one another's counts.
+func (r *PAMRepository) RecordActivity(ctx context.Context, tenantID, identityID uuid.UUID, day time.Time, events, anomalies, privSessions int) error {
+	const q = `
+		INSERT INTO identity_activity_daily (tenant_id, identity_id, day, events, anomalies, priv_sessions)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (tenant_id, identity_id, day) DO UPDATE SET
+			events        = identity_activity_daily.events        + EXCLUDED.events,
+			anomalies     = identity_activity_daily.anomalies     + EXCLUDED.anomalies,
+			priv_sessions = identity_activity_daily.priv_sessions + EXCLUDED.priv_sessions`
+
+	_, err := r.db.Exec(ctx, q, tenantID, identityID, day.UTC(), events, anomalies, privSessions)
+	if err != nil {
+		return fmt.Errorf("record identity activity: %w", err)
+	}
+	return nil
+}
+
+// ReadActivityWindows sums an identity's recent activity per window.
+//
+// The windows are inclusive of today and count back whole UTC days, so "7
+// days" means today plus the six before it.
+func (r *PAMRepository) ReadActivityWindows(ctx context.Context, tenantID, identityID uuid.UUID, now time.Time) (ActivityWindows, error) {
+	today := now.UTC().Truncate(24 * time.Hour)
+
+	const q = `
+		SELECT
+			COALESCE(SUM(events)        FILTER (WHERE day  = $3), 0),
+			COALESCE(SUM(events)        FILTER (WHERE day >= $4), 0),
+			COALESCE(SUM(anomalies)     FILTER (WHERE day >= $4), 0),
+			COALESCE(SUM(anomalies)     FILTER (WHERE day >= $5), 0),
+			COALESCE(SUM(priv_sessions) FILTER (WHERE day >= $5), 0)
+		FROM identity_activity_daily
+		WHERE tenant_id = $1 AND identity_id = $2 AND day >= $5`
+
+	var w ActivityWindows
+	err := r.db.QueryRow(ctx, q,
+		tenantID, identityID,
+		today,
+		today.AddDate(0, 0, -6),  // 7-day window, today included
+		today.AddDate(0, 0, -29), // 30-day window, today included
+	).Scan(&w.EventsToday, &w.Events7d, &w.Anomalies7d, &w.Anomalies30d, &w.PrivSessions30d)
+	if err != nil {
+		return ActivityWindows{}, fmt.Errorf("read identity activity windows: %w", err)
+	}
+	return w, nil
+}
+
+// PurgeActivityBefore drops rows past the widest window any figure uses.
+// Without it the table grows one row per identity per day for ever.
+func (r *PAMRepository) PurgeActivityBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.db.Exec(ctx,
+		`DELETE FROM identity_activity_daily WHERE day < $1`, cutoff.UTC().Truncate(24*time.Hour))
+	if err != nil {
+		return 0, fmt.Errorf("purge identity activity: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // GetRiskProfile returns the risk profile for an identity.
 func (r *PAMRepository) GetRiskProfile(ctx context.Context, tenantID, identityID uuid.UUID) (*model.IdentityRiskProfile, error) {
 	const q = `

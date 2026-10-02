@@ -8,15 +8,18 @@ import { StatusBadge } from '@/components/shared/StatusBadge'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { formatDate } from '@/lib/utils'
-import { useDashboardOverview, useSIEMAlerts } from '@/hooks'
+import { SeverityBars } from '@/components/charts/SeverityBars'
+import { useComplianceStats, useDashboardOverview, useSIEMAlerts, useSIEMStats } from '@/hooks'
+import type { ComplianceScore } from '@/types'
 
-// ─── Static compliance config (scores come from compliance service) ────────────
-const compliance = [
-  { label: 'DORA',    score: 78, color: 'bg-cyan-500',   text: 'text-cyan-400' },
-  { label: 'PCI-DSS', score: 83, color: 'bg-blue-500',   text: 'text-blue-400' },
-  { label: 'GDPR',    score: 91, color: 'bg-violet-500',  text: 'text-violet-400' },
-  { label: 'NIS2',    score: 87, color: 'bg-indigo-500',  text: 'text-indigo-400' },
-]
+// Framework scores are computed by the compliance service from its own
+// assessments. They used to be four constants in this file — numbers that
+// looked like a posture and answered to nothing.
+const scoreBar = (pct: number) =>
+  pct >= 85 ? 'bg-emerald-500' : pct >= 70 ? 'bg-amber-500' : 'bg-red-500'
+
+const scoreText = (pct: number) =>
+  pct >= 85 ? 'text-emerald-400' : pct >= 70 ? 'text-amber-400' : 'text-red-400'
 
 // ─── Security score ring ───────────────────────────────────────────────────────
 function ScoreRing({ score }: { score: number }) {
@@ -40,9 +43,9 @@ function ScoreRing({ score }: { score: number }) {
 }
 
 // ─── Compliance mini rings ─────────────────────────────────────────────────────
-function ComplianceRing({ label, score, color, text }: { label: string; score: number; color: string; text: string }) {
+function ComplianceRing({ score }: { score: ComplianceScore }) {
   const circumference = 125.7 // 2π × 20
-  const colorClass = color.replace('bg-', 'text-')
+  const pct = Math.round(score.score_pct)
   return (
     <div className="text-center">
       <div className="relative mx-auto h-12 w-12">
@@ -51,16 +54,16 @@ function ComplianceRing({ label, score, color, text }: { label: string; score: n
           <circle
             cx="24" cy="24" r="20" fill="none"
             strokeWidth="4" strokeLinecap="round"
-            className={colorClass}
-            strokeDasharray={`${(score / 100) * circumference} ${circumference}`}
+            className={scoreText(pct)}
+            strokeDasharray={`${(pct / 100) * circumference} ${circumference}`}
             stroke="currentColor"
           />
         </svg>
         <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-slate-300">
-          {score}%
+          {pct}%
         </span>
       </div>
-      <p className="mt-1 text-[10px] text-slate-500">{label}</p>
+      <p className="mt-1 text-[10px] text-slate-500">{score.framework_code}</p>
     </div>
   )
 }
@@ -96,8 +99,11 @@ export default function DashboardPage() {
 
   const { data: overview, isLoading: overviewLoading, error: overviewError, mutate: retryOverview } = useDashboardOverview()
   const { data: alertsData, isLoading: alertsLoading } = useSIEMAlerts({ limit: '5', status: 'open' })
+  const { data: alertStats } = useSIEMStats()
+  const { data: complianceStats } = useComplianceStats()
 
   const alerts = alertsData?.items ?? []
+  const frameworks = complianceStats?.frameworks ?? []
 
   return (
     <div className="space-y-6">
@@ -137,12 +143,14 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Compliance rings */}
-          <div className="ml-auto flex gap-4">
-            {compliance.map((c) => (
-              <ComplianceRing key={c.label} {...c} />
-            ))}
-          </div>
+          {/* Compliance rings — one per framework the tenant has activated */}
+          {frameworks.length > 0 && (
+            <div className="ml-auto flex gap-4">
+              {frameworks.slice(0, 4).map((f) => (
+                <ComplianceRing key={f.framework_id} score={f} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -212,7 +220,7 @@ export default function DashboardPage() {
                           {a.category} · {formatDate(a.event_time)}
                         </p>
                       </div>
-                      <StatusBadge status={a.status} />
+                      <StatusBadge status={a.status ?? 'open'} />
                     </div>
                   ))}
                 </div>
@@ -227,36 +235,48 @@ export default function DashboardPage() {
             <CardTitle>{t('doraStatus')}</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {compliance.map((c) => (
-                <div key={c.label}>
-                  <div className="mb-1 flex items-center justify-between text-xs">
-                    <span className="font-medium text-slate-300">{c.label}</span>
-                    <span className="text-slate-400">{c.score}%</span>
+            {frameworks.length === 0 ? (
+              <p className="py-6 text-center text-xs text-slate-500">
+                No framework activated for this tenant yet
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {frameworks.map((f) => (
+                  <div key={f.framework_id}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-300">{f.framework_code}</span>
+                      <span className="text-slate-400">{Math.round(f.score_pct)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-slate-700">
+                      <div
+                        className={`h-1.5 rounded-full transition-all ${scoreBar(f.score_pct)}`}
+                        style={{ width: `${Math.min(100, f.score_pct)}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-600">
+                      {f.compliant} compliant · {f.partial} partial · {f.non_compliant} failing
+                      {f.not_assessed > 0 && ` · ${f.not_assessed} not assessed`}
+                    </p>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-slate-700">
-                    <div className={`h-1.5 rounded-full ${c.color} transition-all`} style={{ width: `${c.score}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 space-y-2 border-t border-slate-700 pt-4">
-              {[
-                { label: '26 security domains active', ok: true },
-                { label: 'DORA incident reporting ready', ok: true },
-                { label: 'Supply chain monitoring', ok: true },
-                { label: 'ISO 27001 certification', ok: false },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center gap-2 text-xs">
-                  <div className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${item.ok ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className={item.ok ? 'text-slate-400' : 'text-amber-400'}>{item.label}</span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Alert distribution — straight from the SIEM's own counters */}
+      {alertStats && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <SeverityBars title="Open alerts by severity" breakdown={alertStats.by_severity} />
+          <SeverityBars
+            title="Alerts by category"
+            breakdown={alertStats.by_category}
+            palette="status"
+            emptyMessage="No alerts categorised yet"
+          />
+        </div>
+      )}
     </div>
   )
 }

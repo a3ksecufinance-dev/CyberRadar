@@ -2,27 +2,111 @@ package service
 
 import (
 	"context"
+	"time"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/attackpath/internal/model"
 	"github.com/cyberradar/platform/services/attackpath/internal/repository"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 )
 
+// GraphMirror receives a copy of every write that changes the attack graph.
+//
+// It exists so the graph can be kept in a second store — Neo4j — while
+// PostgreSQL stays the source of truth. Only the graph is mirrored: scenarios
+// and the paths a run discovers are records, not topology, and stay relational.
+type GraphMirror interface {
+	MirrorNode(ctx context.Context, n *model.AttackNode) error
+	MirrorEdge(ctx context.Context, e *model.AttackEdge) error
+	MirrorCompromised(ctx context.Context, tenantID, nodeID uuid.UUID, compromised bool) error
+}
+
+// mirrorFailures counts writes PostgreSQL accepted and the mirror did not.
+//
+// Any value above zero means the two stores have drifted, so it belongs on the
+// dashboard next to the reconciliation the operator runs: the counter says that
+// something diverged, Reconcile says what.
+var mirrorFailures = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "attackpath_graph_mirror_failures_total",
+	Help: "Graph writes accepted by PostgreSQL that the mirrored graph store refused.",
+}, []string{"kind"})
+
+func init() { observe.MustRegister(mirrorFailures) }
+
+// mirrorTimeout bounds one mirrored write. It is short on purpose: past it the
+// write is recorded as a divergence for Reconcile to pick up, which is cheaper
+// than holding the caller.
+const mirrorTimeout = 5 * time.Second
+
 // AttackPathService orchestrates graph management and path analysis.
 type AttackPathService struct {
-	repo     *repository.GraphRepository
+	repo *repository.GraphRepository
+	// store is what the traversal reads. It defaults to repo, and is the
+	// Neo4j store when a deployment has switched reads over.
+	store    GraphStore
+	mirror   GraphMirror
 	analyzer *Analyzer
 	logger   zerolog.Logger
 }
 
+// Option configures an AttackPathService.
+type Option func(*AttackPathService)
+
+// WithGraphStore points the traversal at a store other than PostgreSQL.
+//
+// This is the read switch of the Neo4j migration: it changes where the graph is
+// read from and nothing else, which is what makes parity between the two stores
+// the only thing that has to be established before flipping it.
+func WithGraphStore(store GraphStore) Option {
+	return func(s *AttackPathService) {
+		if store != nil {
+			s.store = store
+		}
+	}
+}
+
+// WithMirror copies every graph write to a second store.
+func WithMirror(m GraphMirror) Option {
+	return func(s *AttackPathService) { s.mirror = m }
+}
+
 // NewAttackPathService creates an AttackPathService.
-func NewAttackPathService(repo *repository.GraphRepository, logger zerolog.Logger) *AttackPathService {
-	return &AttackPathService{
-		repo:     repo,
-		analyzer: NewAnalyzer(repo, logger),
-		logger:   logger,
+func NewAttackPathService(repo *repository.GraphRepository, logger zerolog.Logger, opts ...Option) *AttackPathService {
+	s := &AttackPathService{repo: repo, store: repo, logger: logger}
+	for _, opt := range opts {
+		opt(s)
+	}
+	// The repository is the policy source too: the weightings live in the same
+	// database as the graph, and a run reads them once.
+	s.analyzer = NewAnalyzer(s.store, repo, logger)
+	return s
+}
+
+// mirrorWrite copies to the secondary store a write PostgreSQL has accepted.
+//
+// A mirror failure does not fail the request. PostgreSQL is the source of
+// truth, and making the write depend on the mirror would turn a secondary store
+// into an availability dependency of the primary — a graph the platform could
+// no longer record because a reporting database was down. The failure is
+// logged and counted instead, and Reconcile turns that into the list of what
+// actually diverged.
+func (s *AttackPathService) mirrorWrite(ctx context.Context, kind string, write func(context.Context) error) {
+	if s.mirror == nil {
+		return
+	}
+	// The mirror gets its own short deadline, detached from the request's
+	// cancellation. Detached, because a client that hangs up must not leave the
+	// two stores in different states; short, because the write has already been
+	// accepted and the caller is waiting on a copy that is allowed to fail.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mirrorTimeout)
+	defer cancel()
+
+	if err := write(ctx); err != nil {
+		mirrorFailures.WithLabelValues(kind).Inc()
+		s.logger.Error().Err(err).Str("kind", kind).Msg("graph_mirror_write_failed")
 	}
 }
 
@@ -33,6 +117,7 @@ func (s *AttackPathService) UpsertNode(ctx context.Context, tenantID uuid.UUID, 
 	if err != nil {
 		return nil, apierrors.Internal("upsert node", err)
 	}
+	s.mirrorWrite(ctx, "node", func(ctx context.Context) error { return s.mirror.MirrorNode(ctx, n) })
 	return n, nil
 }
 
@@ -59,6 +144,9 @@ func (s *AttackPathService) MarkCompromised(ctx context.Context, tenantID, nodeI
 	if err := s.repo.MarkCompromised(ctx, tenantID, nodeID, compromised); err != nil {
 		return apierrors.Internal("mark compromised", err)
 	}
+	s.mirrorWrite(ctx, "compromised", func(ctx context.Context) error {
+		return s.mirror.MirrorCompromised(ctx, tenantID, nodeID, compromised)
+	})
 	return nil
 }
 
@@ -69,6 +157,7 @@ func (s *AttackPathService) UpsertEdge(ctx context.Context, tenantID uuid.UUID, 
 	if err != nil {
 		return nil, apierrors.Internal("upsert edge", err)
 	}
+	s.mirrorWrite(ctx, "edge", func(ctx context.Context) error { return s.mirror.MirrorEdge(ctx, e) })
 	return e, nil
 }
 

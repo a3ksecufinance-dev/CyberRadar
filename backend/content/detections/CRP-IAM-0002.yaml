@@ -1,0 +1,54 @@
+# CRP-IAM-0002 — Attaque en force sur un compte unique
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-IAM-0002
+title: Attaque en force sur un compte unique
+description: Dix échecs ou plus sur le même compte en dix minutes, quelle que soit la source.
+category: IAM
+severity: HIGH
+mitre:
+  tactic: TA0006
+  technique: T1110.001
+conditions:
+  threshold:
+    count: 10
+    group_by:
+    - user_name
+    window_seconds: 600
+  field_matches:
+  - op: eq
+    field: category
+    value: IAM
+  - op: eq
+    field: outcome
+    value: failure
+actions:
+- type: notify
+dedup_window_s: 600
+rationale: >-
+  Distinct du bourrage : ici c'est une cible nommée que l'on martèle, souvent un compte à
+  privilèges dont l'attaquant connaît déjà le nom.
+false_positives: >-
+  Un compte de service dont le mot de passe a été changé sans mettre à jour l'appelant produit
+  exactement ce motif, sans arrêt.
+response: >-
+  Identifier si le compte est nominatif ou de service. Un compte de service en échec répété
+  est une rotation mal finie ; un compte nominatif est une attaque.
+frameworks:
+- DORA
+- PCIDSS
+- ISO27001
+controls:
+- DORA-10.3
+- PCI-8.3.6
+- A.8.16
+requires: []
+enabled_by_default: true
+tags:
+- authentification
+- standard

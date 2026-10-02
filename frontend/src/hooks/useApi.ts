@@ -16,7 +16,13 @@ export function useApiGet<T>(
 ) {
   const { data: session } = useSession()
   const token = session?.accessToken
-  const key = apiKey(service, path, params)
+  // Null until there is a token: SWR treats a null key as "do not fetch".
+  // Without it the first render fires before the session resolves, the request
+  // goes out with no Authorization header, the service answers 401 — and SWR
+  // caches that failure under a key that does not change when the token
+  // arrives, so the panel reads "Missing Authorization header" for the rest of
+  // the session while the very same call from a console returns 200.
+  const key = token ? apiKey(service, path, params) : null
 
   return useSWR<T>(key, swrFetcher<T>(token), {
     ...config,
@@ -32,7 +38,8 @@ export function useApiList<T>(
 ) {
   const { data: session } = useSession()
   const token = session?.accessToken
-  const key = apiKey(service, path, params)
+  // See useApiGet: no key, and so no request, until the session has a token.
+  const key = token ? apiKey(service, path, params) : null
 
   return useSWR<{ items: T[]; meta: PageMeta }>(key, swrListFetcher<T>(token), {
     ...config,

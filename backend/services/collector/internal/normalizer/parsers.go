@@ -15,22 +15,22 @@ import (
 // Unknown fields are preserved in RawEvent.
 
 type jsonEvent struct {
-	Timestamp   string  `json:"timestamp"`
-	Action      string  `json:"action"`
-	Category    string  `json:"category"`
-	Severity    string  `json:"severity"`
-	Outcome     string  `json:"outcome"`
-	UserID      string  `json:"user_id"`
-	UserName    string  `json:"user_name"`
-	UserEmail   string  `json:"user_email"`
-	AssetID     string  `json:"asset_id"`
-	Hostname    string  `json:"hostname"`
-	AssetType   string  `json:"asset_type"`
-	SrcIP       string  `json:"src_ip"`
-	DstIP       string  `json:"dst_ip"`
-	SrcPort     uint16  `json:"src_port"`
-	DstPort     uint16  `json:"dst_port"`
-	RiskScore   float32 `json:"risk_score"`
+	Timestamp string  `json:"timestamp"`
+	Action    string  `json:"action"`
+	Category  string  `json:"category"`
+	Severity  string  `json:"severity"`
+	Outcome   string  `json:"outcome"`
+	UserID    string  `json:"user_id"`
+	UserName  string  `json:"user_name"`
+	UserEmail string  `json:"user_email"`
+	AssetID   string  `json:"asset_id"`
+	Hostname  string  `json:"hostname"`
+	AssetType string  `json:"asset_type"`
+	SrcIP     string  `json:"src_ip"`
+	DstIP     string  `json:"dst_ip"`
+	SrcPort   uint16  `json:"src_port"`
+	DstPort   uint16  `json:"dst_port"`
+	RiskScore float32 `json:"risk_score"`
 }
 
 func fromJSON(raw event.RawEvent) (*event.NormalizedEvent, error) {
@@ -266,11 +266,11 @@ func fromLEEF(raw event.RawEvent) (*event.NormalizedEvent, error) {
 // Expects JSON-encoded Windows Event (from Winlogbeat or NXLog).
 
 type winEvent struct {
-	TimeCreated  string `json:"TimeCreated"`
-	EventID      int    `json:"EventId"`
-	Channel      string `json:"Channel"`
-	Computer     string `json:"Computer"`
-	UserData     struct {
+	TimeCreated string `json:"TimeCreated"`
+	EventID     int    `json:"EventId"`
+	Channel     string `json:"Channel"`
+	Computer    string `json:"Computer"`
+	UserData    struct {
 		SubjectUserName string `json:"SubjectUserName"`
 		TargetUserName  string `json:"TargetUserName"`
 		IpAddress       string `json:"IpAddress"`

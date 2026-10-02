@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate fmt tidy
+.PHONY: help dev down build test lint migrate content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -11,14 +11,16 @@ help: ## Show this help
 # ─── Infrastructure ───────────────────────────────────────────────────────────
 
 infra-up: ## Start all infrastructure containers
-	$(DOCKER_COMPOSE) up -d postgres clickhouse redis kafka vault jaeger prometheus grafana
+	# Keycloak belongs here: the interface signs in against it, so an estate
+	# brought up without it starts every service and lets nobody in.
+	$(DOCKER_COMPOSE) up -d postgres keycloak clickhouse neo4j redis kafka vault jaeger prometheus grafana
 	@echo "⏳ Waiting for services to be healthy..."
 	@sleep 5
 
 infra-down: ## Stop infrastructure containers
 	$(DOCKER_COMPOSE) down
 
-dev: infra-up migrate ## Start infra + run migrations + start all services
+dev: jwt-keys infra-up migrate seed ## Start infra, migrate, seed identities, start all services
 	$(DOCKER_COMPOSE) up -d tenant-service identity-service audit-service notification-service collector-service pipeline-worker asset-service pam-service siem-service ueba-service ti-service vuln-service attackpath-service knowledgegraph-service soar-service dashboard-service copilot-service apifw-service compliance-service easm-service fraud-service dlp-service netsec-service risk-service iga-service cspm-service ir-service scs-service ot-service mobile-service dspm-service syslog-connector
 
 down: ## Stop all containers
@@ -40,7 +42,84 @@ migrate: ## Run all PostgreSQL migrations
 		echo "  → $$f"; \
 		curl -s -u crp_user:crp_password_dev "http://localhost:8123/?database=default" --data-binary @$$f; \
 	done
+	@echo "Running Neo4j migrations..."
+	@for f in migrations/neo4j/*.cypher; do \
+		echo "  → $$f"; \
+		docker exec -i crp-neo4j cypher-shell -u neo4j -p crp_password_dev < $$f; \
+	done
 	@echo "Migrations complete."
+
+content: ## Reconcile the detection catalogue with the content pack
+	go run ./services/siem/cmd/contentctl -apply
+
+content-check: ## Validate the detection content without touching a database
+	go run ./services/siem/cmd/contentctl -check
+
+# A release is built from the content directory and signed, so a deployment can
+# tell a pack we published from one somebody assembled. CRP_CONTENT_SIGN_KEY
+# names the private key; without it the pack is built unsigned and says so.
+#
+# Building and publishing are one command because the two signatures have to
+# agree: the pack's, and the channel index's that pins the pack's digest. A
+# release job able to do one without the other is a release job that eventually
+# does. CRP_CONTENT_CHANNEL is where the channel lives — a directory, which
+# whatever serves it (a bucket, a web root, a disk carried into an air-gapped
+# site) then publishes unchanged.
+CRP_CONTENT_CHANNEL ?= dist/channel
+CONTENT_PACK = dist/$(shell sed -n 's/^version: *"\(.*\)"/crp-detections-\1.crpack/p' content/detections/pack.yaml)
+
+content-release: ## Build, sign and publish the detection content into a channel
+	@mkdir -p dist
+	go run ./services/siem/cmd/contentctl \
+		-build $(CONTENT_PACK) \
+		-publish "$(CRP_CONTENT_CHANNEL)" \
+		-sign-key "$(CRP_CONTENT_SIGN_KEY)"
+
+content-trust: ## Print the signing keys this deployment accepts, and the ones it has revoked
+	go run ./services/siem/cmd/contentctl -trust-list -trust "$(CRP_CONTENT_TRUST)"
+
+
+# ─── Documentation ────────────────────────────────────────────────────────────
+
+# The API reference is derived from the services' own route registrations
+# rather than maintained by hand, because a route list nobody regenerates is a
+# list that is wrong — and wrong silently: the reader finds out when a call
+# 404s. docs-api-check fails the build if the committed file no longer matches
+# the code, so adding a route without documenting it is a red build rather than
+# a support ticket.
+docs-api: ## Regenerate docs/07-reference-api.md from the services' routes
+	python3 scripts/gen-api-reference.py
+
+docs-api-check: ## Fail if the committed API reference has drifted from the code
+	python3 scripts/gen-api-reference.py --check
+
+
+# ─── Attack graph mirror ──────────────────────────────────────────────────────
+
+# PostgreSQL is the source of truth and mirrored writes are allowed to fail, so
+# the two stores can drift. This is what says whether they have — and it exits
+# non-zero when they disagree, so a scheduled run is an alert rather than a log
+# line nobody reads. Pointing reads at Neo4j is only defensible once it reports
+# parity.
+graph-reconcile: ## Compare the attack graph in PostgreSQL and Neo4j
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/attackpath/cmd/reconcile/
+
+graph-backfill: ## Copy the attack graph from PostgreSQL into Neo4j, then verify
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/attackpath/cmd/reconcile/ -backfill
+
+kg-reconcile: ## Compare the knowledge graph in PostgreSQL and Neo4j
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/knowledgegraph/cmd/reconcile/
+
+kg-backfill: ## Copy the knowledge graph from PostgreSQL into Neo4j, then verify
+	DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
+	go run ./services/knowledgegraph/cmd/reconcile/ -backfill
 
 migrate-status: ## Show migration status
 	PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
@@ -63,6 +142,8 @@ build: ## Build all service binaries
 	go build -o bin/ti-service ./services/ti/cmd/server/
 	go build -o bin/vuln-service ./services/vuln/cmd/server/
 	go build -o bin/attackpath-service ./services/attackpath/cmd/server/
+	go build -o bin/attackpath-reconcile ./services/attackpath/cmd/reconcile/
+	go build -o bin/kg-reconcile ./services/knowledgegraph/cmd/reconcile/
 	go build -o bin/knowledgegraph-service ./services/knowledgegraph/cmd/server/
 	go build -o bin/soar-service ./services/soar/cmd/server/
 	go build -o bin/dashboard-service ./services/dashboard/cmd/server/
@@ -82,6 +163,7 @@ build: ## Build all service binaries
 	go build -o bin/mobile-service ./services/mobile/cmd/server/
 	go build -o bin/dspm-service ./services/dspm/cmd/server/
 	go build -o bin/syslog-connector ./services/syslog/cmd/server/
+	go build -o bin/demo-seed ./internal/cmd/demoseed/
 	@echo "Build complete → bin/"
 
 build-tenant: ## Build tenant service only
@@ -130,43 +212,83 @@ docker-build: ## Build Docker images for all services
 syslog-certs: ## Generate self-signed TLS certs for syslog connector (dev only)
 	./scripts/gen-syslog-certs.sh
 
+seed: ## Give the realm's users an identity on the platform (nobody can sign in without this)
+	@echo "Seeding identities..."
+	@PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
+		-v ON_ERROR_STOP=1 -q -f migrations/seed/001_identities.sql
+	@PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation -tAc \
+		"SELECT count(*) || ' identities' FROM identities WHERE status='active'"
+
+smoke: ## Read every service's list endpoints against a running platform and fail on any 5xx
+	APICHECK_DSN=postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable \
+		go test ./internal/pkg/apicheck/ -run TestEveryReadRouteAnswers -v -count=1
+
+e2e: ## Drive the interface in a browser against a running, seeded platform
+	cd ../frontend && npx playwright test
+
+demo: ## Fill the tenant with a demonstration estate, through the platform's own API
+	go run ./internal/cmd/demoseed/
+
+vault-seed: ## Load development secrets into Vault (dev only)
+	./scripts/vault-seed.sh
+
+jwt-keys: ## Generate the RSA key pair used to sign JWTs (dev only)
+	./scripts/gen-jwt-keys.sh
+
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
+# Each service is its own module, so ./... from the root matches nothing —
+# every target below iterates over the modules listed in go.work.
+MODULES := internal $(patsubst %/,%,$(wildcard services/*/))
+
 test: ## Run all tests
-	go test ./... -v -timeout 60s
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && go test ./... -timeout 120s) || fail=1; \
+	done; exit $$fail
 
 test-tenant: ## Run tenant service tests
-	go test ./services/tenant/... -v
+	cd services/tenant && go test ./... -v
 
 test-identity: ## Run identity service tests
-	go test ./services/identity/... -v
+	cd services/identity && go test ./... -v
 
 test-audit: ## Run audit service tests
-	go test ./services/audit/... -v
+	cd services/audit && go test ./... -v
 
 test-cover: ## Run tests with coverage
-	go test ./... -coverprofile=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
+	@echo "mode: set" > $(CURDIR)/coverage.out
+	@for m in $(MODULES); do \
+		(cd $$m && go test ./... -coverprofile=cover.tmp -covermode=set >/dev/null 2>&1; \
+		 [ -f cover.tmp ] && tail -n +2 cover.tmp >> $(CURDIR)/coverage.out; rm -f cover.tmp) || true; \
+	done
+	go tool cover -html=$(CURDIR)/coverage.out -o coverage.html
 	@echo "Coverage report → coverage.html"
 
 # ─── Code quality ─────────────────────────────────────────────────────────────
 
 lint: ## Run golangci-lint
-	golangci-lint run ./...
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && golangci-lint run ./...) || fail=1; \
+	done; exit $$fail
 
 fmt: ## Format all Go code
 	gofmt -w -s .
-	goimports -w .
+
+fmt-check: ## Fail if any Go file is not gofmt-formatted
+	@out=$$(gofmt -l -s .); \
+	if [ -n "$$out" ]; then echo "not gofmt'd:"; echo "$$out"; exit 1; fi
 
 tidy: ## Tidy all go.mod files
 	go work sync
-	@for d in internal services/tenant services/identity services/audit services/notification services/collector services/pipeline services/asset services/pam services/siem services/ueba services/ti services/vuln services/attackpath services/knowledgegraph services/soar services/dashboard services/copilot services/apifw services/compliance services/easm services/fraud services/dlp services/netsec services/risk services/iga services/cspm services/ir services/scs services/ot; do \
-		echo "  → $$d"; \
-		cd $$d && go mod tidy && cd -; \
+	@for m in $(MODULES); do \
+		echo "  → $$m"; \
+		(cd $$m && go mod tidy); \
 	done
 
 vet: ## Run go vet
-	go vet ./...
+	@fail=0; for m in $(MODULES); do \
+		(cd $$m && go vet ./...) || fail=1; \
+	done; exit $$fail
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 

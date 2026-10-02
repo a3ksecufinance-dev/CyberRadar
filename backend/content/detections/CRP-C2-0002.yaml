@@ -1,0 +1,47 @@
+# CRP-C2-0002 — Balise vers une adresse de commande et de contrôle
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-C2-0002
+title: Balise vers une adresse de commande et de contrôle
+description: Une adresse IP de l'événement figure au renseignement, sur un flux réseau.
+category: Network
+severity: CRITICAL
+mitre:
+  tactic: TA0011
+  technique: T1071.001
+conditions:
+  field_matches:
+  - op: contains
+    field: ioc_matched
+    value: 'ip:'
+  - op: eq
+    field: category
+    value: Network
+actions:
+- type: notify
+- type: block_ip
+dedup_window_s: 600
+rationale: >-
+  Plus étroit que CRP-C2-0001 et bien plus actionnable : une adresse, un flux sortant, un
+  blocage possible immédiatement.
+false_positives: >-
+  Les mêmes que 0001, plus le cas d'une adresse réattribuée depuis que le flux l'a notée.
+response: >-
+  Bloquer sortant. Chercher les autres hôtes qui ont parlé à la même adresse sur la même fenêtre
+  — c'est ainsi qu'on trouve l'étendue.
+frameworks:
+- DORA
+- SWIFTCSP
+controls:
+- DORA-10.3
+- CSCF-6.4
+requires: []
+enabled_by_default: true
+tags:
+- renseignement
+- standard

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	
 	"github.com/cyberradar/platform/services/scs/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -187,41 +186,67 @@ func (r *SCSRepository) UpdateVendor(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Website != nil {
-		sets = append(sets, fmt.Sprintf("website=$%d", n)); args = append(args, *req.Website); n++
+		sets = append(sets, fmt.Sprintf("website=$%d", n))
+		args = append(args, *req.Website)
+		n++
 	}
 	if req.RiskTier != nil {
-		sets = append(sets, fmt.Sprintf("risk_tier=$%d", n)); args = append(args, *req.RiskTier); n++
-		sets = append(sets, fmt.Sprintf("risk_level=$%d", n)); args = append(args, riskLevelFromTier(*req.RiskTier)); n++
+		sets = append(sets, fmt.Sprintf("risk_tier=$%d", n))
+		args = append(args, *req.RiskTier)
+		n++
+		sets = append(sets, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, riskLevelFromTier(*req.RiskTier))
+		n++
 	}
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 	}
 	if req.ContactName != nil {
-		sets = append(sets, fmt.Sprintf("contact_name=$%d", n)); args = append(args, *req.ContactName); n++
+		sets = append(sets, fmt.Sprintf("contact_name=$%d", n))
+		args = append(args, *req.ContactName)
+		n++
 	}
 	if req.ContactEmail != nil {
-		sets = append(sets, fmt.Sprintf("contact_email=$%d", n)); args = append(args, *req.ContactEmail); n++
+		sets = append(sets, fmt.Sprintf("contact_email=$%d", n))
+		args = append(args, *req.ContactEmail)
+		n++
 	}
 	if req.HasSOC2 != nil {
-		sets = append(sets, fmt.Sprintf("has_soc2=$%d", n)); args = append(args, *req.HasSOC2); n++
+		sets = append(sets, fmt.Sprintf("has_soc2=$%d", n))
+		args = append(args, *req.HasSOC2)
+		n++
 	}
 	if req.HasISO27001 != nil {
-		sets = append(sets, fmt.Sprintf("has_iso27001=$%d", n)); args = append(args, *req.HasISO27001); n++
+		sets = append(sets, fmt.Sprintf("has_iso27001=$%d", n))
+		args = append(args, *req.HasISO27001)
+		n++
 	}
 	if req.HasPCIDSS != nil {
-		sets = append(sets, fmt.Sprintf("has_pci_dss=$%d", n)); args = append(args, *req.HasPCIDSS); n++
+		sets = append(sets, fmt.Sprintf("has_pci_dss=$%d", n))
+		args = append(args, *req.HasPCIDSS)
+		n++
 	}
 	if req.NextAssessmentAt != nil {
-		sets = append(sets, fmt.Sprintf("next_assessment_at=$%d", n)); args = append(args, *req.NextAssessmentAt); n++
+		sets = append(sets, fmt.Sprintf("next_assessment_at=$%d", n))
+		args = append(args, *req.NextAssessmentAt)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var v model.SCSVendor
@@ -295,16 +320,24 @@ func (r *SCSRepository) ListComponents(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.Ecosystem != "" {
-		cond = append(cond, fmt.Sprintf("ecosystem=$%d", n)); args = append(args, f.Ecosystem); n++
+		cond = append(cond, fmt.Sprintf("ecosystem=$%d", n))
+		args = append(args, f.Ecosystem)
+		n++
 	}
 	if f.HasVulns != nil {
-		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *f.HasVulns); n++
+		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *f.HasVulns)
+		n++
 	}
 	if f.IsEOL != nil {
-		cond = append(cond, fmt.Sprintf("is_end_of_life=$%d", n)); args = append(args, *f.IsEOL); n++
+		cond = append(cond, fmt.Sprintf("is_end_of_life=$%d", n))
+		args = append(args, *f.IsEOL)
+		n++
 	}
 	if f.IsDeprecated != nil {
-		cond = append(cond, fmt.Sprintf("is_deprecated=$%d", n)); args = append(args, *f.IsDeprecated); n++
+		cond = append(cond, fmt.Sprintf("is_deprecated=$%d", n))
+		args = append(args, *f.IsDeprecated)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -347,28 +380,44 @@ func (r *SCSRepository) UpdateComponent(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.IsDeprecated != nil {
-		sets = append(sets, fmt.Sprintf("is_deprecated=$%d", n)); args = append(args, *req.IsDeprecated); n++
+		sets = append(sets, fmt.Sprintf("is_deprecated=$%d", n))
+		args = append(args, *req.IsDeprecated)
+		n++
 	}
 	if req.IsEndOfLife != nil {
-		sets = append(sets, fmt.Sprintf("is_end_of_life=$%d", n)); args = append(args, *req.IsEndOfLife); n++
+		sets = append(sets, fmt.Sprintf("is_end_of_life=$%d", n))
+		args = append(args, *req.IsEndOfLife)
+		n++
 	}
 	if req.HasKnownVulns != nil {
-		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *req.HasKnownVulns); n++
+		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *req.HasKnownVulns)
+		n++
 	}
 	if req.VulnCount != nil {
-		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n)); args = append(args, *req.VulnCount); n++
+		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n))
+		args = append(args, *req.VulnCount)
+		n++
 	}
 	if req.CriticalVulnCount != nil {
-		sets = append(sets, fmt.Sprintf("critical_vuln_count=$%d", n)); args = append(args, *req.CriticalVulnCount); n++
+		sets = append(sets, fmt.Sprintf("critical_vuln_count=$%d", n))
+		args = append(args, *req.CriticalVulnCount)
+		n++
 	}
 	if req.License != nil {
-		sets = append(sets, fmt.Sprintf("license=$%d", n)); args = append(args, *req.License); n++
+		sets = append(sets, fmt.Sprintf("license=$%d", n))
+		args = append(args, *req.License)
+		n++
 	}
 	if req.UsedIn != nil {
-		sets = append(sets, fmt.Sprintf("used_in=$%d", n)); args = append(args, req.UsedIn); n++
+		sets = append(sets, fmt.Sprintf("used_in=$%d", n))
+		args = append(args, req.UsedIn)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	// Recompute risk score inline if vuln data changed
@@ -404,15 +453,15 @@ func (r *SCSRepository) CreateSBOM(ctx context.Context, tenantID uuid.UUID, req 
 
 	// Process components first
 	var (
-		totalComps     int
-		directComps    int
+		totalComps      int
+		directComps     int
 		transitiveComps int
-		critVulns      int
-		highVulns      int
-		medVulns       int
-		lowVulns       int
-		deprecatedCnt  int
-		eolCnt         int
+		critVulns       int
+		highVulns       int
+		medVulns        int
+		lowVulns        int
+		deprecatedCnt   int
+		eolCnt          int
 	)
 
 	componentIDs := make([]uuid.UUID, 0, len(req.Components))
@@ -570,10 +619,14 @@ func (r *SCSRepository) ListAssessments(ctx context.Context, tenantID, vendorID 
 	args := []any{tenantID}
 	n := 2
 	if vendorID != uuid.Nil {
-		cond = append(cond, fmt.Sprintf("a.vendor_id=$%d", n)); args = append(args, vendorID); n++
+		cond = append(cond, fmt.Sprintf("a.vendor_id=$%d", n))
+		args = append(args, vendorID)
+		n++
 	}
 	if status != "" {
-		cond = append(cond, fmt.Sprintf("a.status=$%d", n)); args = append(args, status); n++
+		cond = append(cond, fmt.Sprintf("a.status=$%d", n))
+		args = append(args, status)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,vendor_id,assessment_type,status,score,max_score,risk_rating,
@@ -611,43 +664,64 @@ func (r *SCSRepository) UpdateAssessment(ctx context.Context, tenantID, id uuid.
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		now := time.Now().UTC()
 		switch *req.Status {
 		case "in_progress":
 			sets = append(sets, fmt.Sprintf("started_at=COALESCE(started_at,$%d)", n))
-			args = append(args, now); n++
+			args = append(args, now)
+			n++
 		case "completed":
 			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n))
-			args = append(args, now); n++
+			args = append(args, now)
+			n++
 			sets = append(sets, fmt.Sprintf("last_assessment_at=$%d", n))
-			args = append(args, now); n++
+			args = append(args, now)
+			n++
 		}
 	}
 	if req.Score != nil {
-		sets = append(sets, fmt.Sprintf("score=$%d", n)); args = append(args, *req.Score); n++
+		sets = append(sets, fmt.Sprintf("score=$%d", n))
+		args = append(args, *req.Score)
+		n++
 	}
 	if req.RiskRating != nil {
-		sets = append(sets, fmt.Sprintf("risk_rating=$%d", n)); args = append(args, *req.RiskRating); n++
+		sets = append(sets, fmt.Sprintf("risk_rating=$%d", n))
+		args = append(args, *req.RiskRating)
+		n++
 	}
 	if req.Questionnaire != nil {
 		q, _ := json.Marshal(req.Questionnaire)
-		sets = append(sets, fmt.Sprintf("questionnaire=$%d", n)); args = append(args, q); n++
+		sets = append(sets, fmt.Sprintf("questionnaire=$%d", n))
+		args = append(args, q)
+		n++
 	}
 	if req.Findings != nil {
 		f, _ := json.Marshal(req.Findings)
 		cnt := len(req.Findings)
-		sets = append(sets, fmt.Sprintf("findings=$%d", n)); args = append(args, f); n++
-		sets = append(sets, fmt.Sprintf("findings_count=$%d", n)); args = append(args, cnt); n++
+		sets = append(sets, fmt.Sprintf("findings=$%d", n))
+		args = append(args, f)
+		n++
+		sets = append(sets, fmt.Sprintf("findings_count=$%d", n))
+		args = append(args, cnt)
+		n++
 	}
 	if req.Recommendations != nil {
-		sets = append(sets, fmt.Sprintf("recommendations=$%d", n)); args = append(args, *req.Recommendations); n++
+		sets = append(sets, fmt.Sprintf("recommendations=$%d", n))
+		args = append(args, *req.Recommendations)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.NextDueAt != nil {
-		sets = append(sets, fmt.Sprintf("next_due_at=$%d", n)); args = append(args, *req.NextDueAt); n++
+		sets = append(sets, fmt.Sprintf("next_due_at=$%d", n))
+		args = append(args, *req.NextDueAt)
+		n++
 	}
 
 	var a model.SCSAssessment
@@ -718,13 +792,19 @@ func (r *SCSRepository) ListAlerts(ctx context.Context, tenantID uuid.UUID, f mo
 	args := []any{tenantID}
 	n := 2
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.AlertType != "" {
-		cond = append(cond, fmt.Sprintf("alert_type=$%d", n)); args = append(args, f.AlertType); n++
+		cond = append(cond, fmt.Sprintf("alert_type=$%d", n))
+		args = append(args, f.AlertType)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -767,16 +847,24 @@ func (r *SCSRepository) UpdateAlert(ctx context.Context, tenantID, id uuid.UUID,
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "resolved" {
-			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n)); args = append(args, time.Now().UTC()); n++
+			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n))
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.Remediation != nil {
-		sets = append(sets, fmt.Sprintf("remediation=$%d", n)); args = append(args, *req.Remediation); n++
+		sets = append(sets, fmt.Sprintf("remediation=$%d", n))
+		args = append(args, *req.Remediation)
+		n++
 	}
 	if req.ResolvedBy != nil {
-		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n)); args = append(args, *req.ResolvedBy); n++
+		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n))
+		args = append(args, *req.ResolvedBy)
+		n++
 	}
 
 	var a model.SCSAlert
@@ -824,7 +912,9 @@ func (r *SCSRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, po
 	args := []any{tenantID}
 	n := 2
 	if policyType != "" {
-		cond = append(cond, fmt.Sprintf("policy_type=$%d", n)); args = append(args, policyType); n++
+		cond = append(cond, fmt.Sprintf("policy_type=$%d", n))
+		args = append(args, policyType)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,name,description,policy_type,rule,action,is_active,created_by,created_at,updated_at
@@ -854,20 +944,30 @@ func (r *SCSRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.Rule != nil {
 		rule, _ := json.Marshal(req.Rule)
-		sets = append(sets, fmt.Sprintf("rule=$%d", n)); args = append(args, rule); n++
+		sets = append(sets, fmt.Sprintf("rule=$%d", n))
+		args = append(args, rule)
+		n++
 	}
 	if req.Action != nil {
-		sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, *req.Action); n++
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, *req.Action)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 
 	var p model.SCSPolicy
@@ -929,7 +1029,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows.Scan(&k, &v)
 			stats.AlertsBySeverity[k] = v
 		}
@@ -941,7 +1042,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows2 != nil {
 		defer rows2.Close()
 		for rows2.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows2.Scan(&k, &v)
 			stats.AlertsByType[k] = v
 		}
@@ -953,7 +1055,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows3 != nil {
 		defer rows3.Close()
 		for rows3.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows3.Scan(&k, &v)
 			stats.VendorsByTier["tier_"+k] = v
 		}

@@ -15,42 +15,42 @@ const (
 
 // ── Hunt job types ────────────────────────────────────────────────────────────
 const (
-	HuntTypeThreatHunt        = "threat_hunt"
-	HuntTypeIncidentTriage    = "incident_triage"
+	HuntTypeThreatHunt         = "threat_hunt"
+	HuntTypeIncidentTriage     = "incident_triage"
 	HuntTypeVulnPrioritization = "vuln_prioritization"
-	HuntTypeAttackPathSummary = "attack_path_summary"
-	HuntTypeIOCCorrelation    = "ioc_correlation"
-	HuntTypeEntityProfiling   = "entity_profiling"
+	HuntTypeAttackPathSummary  = "attack_path_summary"
+	HuntTypeIOCCorrelation     = "ioc_correlation"
+	HuntTypeEntityProfiling    = "entity_profiling"
 )
 
 // ── Tool names exposed to Claude ──────────────────────────────────────────────
 const (
-	ToolQueryAlerts      = "query_alerts"
-	ToolLookupIOC        = "lookup_ioc"
-	ToolGetIncident      = "get_incident"
-	ToolQueryAnomalies   = "query_anomalies"
-	ToolQueryVulns       = "query_vulnerabilities"
+	ToolQueryAlerts       = "query_alerts"
+	ToolLookupIOC         = "lookup_ioc"
+	ToolGetIncident       = "get_incident"
+	ToolQueryAnomalies    = "query_anomalies"
+	ToolQueryVulns        = "query_vulnerabilities"
 	ToolAnalyzeAttackPath = "analyze_attack_path"
-	ToolSearchEntities   = "search_entities"
-	ToolGetAsset         = "get_asset"
-	ToolQueryStats       = "query_platform_stats"
-	ToolHuntThreats      = "hunt_threats"
+	ToolSearchEntities    = "search_entities"
+	ToolGetAsset          = "get_asset"
+	ToolQueryStats        = "query_platform_stats"
+	ToolHuntThreats       = "hunt_threats"
 )
 
 // ─── Core models ──────────────────────────────────────────────────────────────
 
 // Session is a multi-turn conversation context.
 type Session struct {
-	ID             uuid.UUID      `json:"id"`
-	TenantID       uuid.UUID      `json:"tenant_id"`
-	UserID         uuid.UUID      `json:"user_id"`
-	Title          string         `json:"title,omitempty"`
-	Context        map[string]any `json:"context,omitempty"`
-	IsActive       bool           `json:"is_active"`
-	MessageCount   int            `json:"message_count"`
-	LastMessageAt  *time.Time     `json:"last_message_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID            uuid.UUID      `json:"id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	UserID        uuid.UUID      `json:"user_id"`
+	Title         string         `json:"title,omitempty"`
+	Context       map[string]any `json:"context,omitempty"`
+	IsActive      bool           `json:"is_active"`
+	MessageCount  int            `json:"message_count"`
+	LastMessageAt *time.Time     `json:"last_message_at,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 // Message is one turn in a copilot session.
@@ -90,11 +90,11 @@ type HuntJob struct {
 
 // CopilotStats is the usage summary.
 type CopilotStats struct {
-	TotalSessions   int `json:"total_sessions"`
-	ActiveSessions  int `json:"active_sessions"`
-	TotalMessages   int `json:"total_messages"`
-	TotalHuntJobs   int `json:"total_hunt_jobs"`
-	PendingJobs     int `json:"pending_jobs"`
+	TotalSessions     int `json:"total_sessions"`
+	ActiveSessions    int `json:"active_sessions"`
+	TotalMessages     int `json:"total_messages"`
+	TotalHuntJobs     int `json:"total_hunt_jobs"`
+	PendingJobs       int `json:"pending_jobs"`
 	TotalInputTokens  int `json:"total_input_tokens"`
 	TotalOutputTokens int `json:"total_output_tokens"`
 }
@@ -107,16 +107,28 @@ type AnthropicMessage struct {
 	Content []AnthropicContent `json:"content"`
 }
 
-// AnthropicContent is a content block (text or tool_use/tool_result).
+// AnthropicContent is a content block: text, tool_use, tool_result, or one of
+// the thinking blocks the model emits when extended thinking is on.
+//
+// The thinking fields are not decoration. The agentic loop sends the
+// assistant's content back verbatim on the next turn, and a thinking block
+// returned without its signature is rejected — so a type that dropped these
+// fields on the way through would turn every tool call into a 400 as soon as
+// thinking was enabled.
 type AnthropicContent struct {
-	Type       string         `json:"type"`
-	Text       string         `json:"text,omitempty"`
-	ID         string         `json:"id,omitempty"`    // tool_use block id
-	Name       string         `json:"name,omitempty"`  // tool name
-	Input      map[string]any `json:"input,omitempty"` // tool input
-	ToolUseID  string         `json:"tool_use_id,omitempty"` // for tool_result
-	Content    string         `json:"content,omitempty"`     // for tool_result
-	IsError    bool           `json:"is_error,omitempty"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`          // tool_use block id
+	Name      string         `json:"name,omitempty"`        // tool name
+	Input     map[string]any `json:"input,omitempty"`       // tool input
+	ToolUseID string         `json:"tool_use_id,omitempty"` // for tool_result
+	Content   string         `json:"content,omitempty"`     // for tool_result
+	IsError   bool           `json:"is_error,omitempty"`
+
+	// Thinking blocks, returned and sent back untouched.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"` // redacted_thinking
 }
 
 // AnthropicTool defines a tool for Claude tool use.
@@ -126,23 +138,31 @@ type AnthropicTool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// AnthropicOutputConfig carries the knobs that shape the answer rather than
+// its content. On the current models the depth of thinking is set here, not
+// through a token budget.
+type AnthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
+}
+
 // AnthropicRequest is the full payload for POST /v1/messages.
 type AnthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system"`
-	Messages  []AnthropicMessage `json:"messages"`
-	Tools     []AnthropicTool    `json:"tools,omitempty"`
+	Model        string                 `json:"model"`
+	MaxTokens    int                    `json:"max_tokens"`
+	System       string                 `json:"system"`
+	Messages     []AnthropicMessage     `json:"messages"`
+	Tools        []AnthropicTool        `json:"tools,omitempty"`
+	OutputConfig *AnthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 // AnthropicResponse is the response from the Claude Messages API.
 type AnthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Content      []AnthropicContent `json:"content"`
-	StopReason   string             `json:"stop_reason"`
-	Usage        AnthropicUsage     `json:"usage"`
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
+	Role       string             `json:"role"`
+	Content    []AnthropicContent `json:"content"`
+	StopReason string             `json:"stop_reason"`
+	Usage      AnthropicUsage     `json:"usage"`
 }
 
 // AnthropicUsage holds token counts.
