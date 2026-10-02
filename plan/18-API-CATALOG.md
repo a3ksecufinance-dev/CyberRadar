@@ -1,5 +1,14 @@
 # Catalogue API — Cyber Radar Platform
 
+> **⚠️ Document historique.** Ce catalogue décrit les 183 routes **prévues** en
+> 2026-05. La référence de ce qui est **réellement servi** est
+> [`../docs/07-reference-api.md`](../docs/07-reference-api.md) : 477 routes,
+> générée depuis le code et vérifiée en CI.
+>
+> L'écart entre les deux — huit familles annoncées ici n'existent sous aucun
+> nom — est analysé dans [`22-ECART-PREVU-MESURE.md`](22-ECART-PREVU-MESURE.md).
+> À lire comme une intention d'origine, jamais comme un engagement.
+
 > Standard : REST JSON | Auth : JWT Bearer | Version : /api/v1/
 
 ---
