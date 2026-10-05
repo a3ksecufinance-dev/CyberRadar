@@ -443,14 +443,21 @@ dépende d'une déclaration.
 
 > **Avancement au 2026-10-05.** B7 est fait : les cinq tables sont supprimées
 > par la migration `000048`. B1 est fait : `internal/pkg/testinfra` donne à un
-> test une base migrée, un ClickHouse migré et un courtier Kafka, et le service
-> `tenant` a ses six premiers tests de dépôt. B2 et B3 restent.
+> test une base migrée, un ClickHouse migré et un courtier Kafka. **B2 est
+> fait** : `tenant` passe de 2,4 % à **72,6 %** et `collector` de 0 % à
+> **83,2 %**, tous deux au-dessus de la cible de 60 %. Le travail a trouvé
+> trois défauts que ni la compilation ni `vet` ne voyaient — les lettres mortes
+> du collecteur publiées sur le sujet des événements, tout syslog RFC 3164
+> horodaté en l'an 0000, et les extensions CEF découpées sur les espaces (voir
+> [`docs/19`](../docs/19-developpement.md#ce-qui-est-le-plus-couvert)). C'est
+> l'argument du lot : la couverture ne protège pas du futur, elle révèle le
+> présent. B3 à B6 restent.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|
 | US faites | **101 / 346** | 346 | relevé par lot |
-| Services sans test | ~~17~~ → **16 / 32** | 0 | `find … -name '*_test.go'` par service |
-| Couverture, services critiques | non mesurée | ≥ 60 % | `go test -cover` |
+| Services sans test | ~~17~~ → ~~16~~ → **15 / 32** | 0 | `find … -name '*_test.go'` par service |
+| Couverture, services critiques | ~~non mesurée~~ → **tenant 73 %, collector 83 %** ✓ | ≥ 60 % | `go test -cover` |
 | KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
 | NFR vérifiées | **0 / 14** | 14 | bancs L2 |
 | Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |
