@@ -49,6 +49,36 @@ jobs:
         options: >-
           --health-cmd "wget -qO- http://localhost:7474 || exit 1"
           --health-interval 10s --health-timeout 5s --health-retries 20
+      kafka:
+        # The collector's ingestion path. What its tests prove is where a
+        # message lands — a normalized event on one topic, a dead letter on
+        # another — and no fake producer can prove that: the service published
+        # its dead letters onto the normalized topic until a test against a
+        # real broker said so.
+        #
+        # Same image and same KRaft settings as deployments/docker-compose.yml,
+        # which is the configuration a developer already runs, with one change:
+        # the quorum voter is localhost rather than the compose service name,
+        # because a single-node controller talks to itself and must not depend
+        # on resolving its own hostname.
+        image: confluentinc/cp-kafka:7.6.0
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          CLUSTER_ID: crp-kafka-cluster-ci
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 10s --health-timeout 10s --health-retries 30
       postgres:
         # pgvector, not plain postgres: migration 000034 creates the extension
         # and the copilot knowledge tests search a real HNSW index.
@@ -81,13 +111,14 @@ jobs:
       # from a migrated template on this server. It never touches
       # crp_foundation, which the migration and content steps above use.
       #
-      # The require list names postgres and clickhouse and not kafka, because
-      # that is what this job provides. A test that needs Kafka skips here and
-      # is covered by the testinfra-containers job below, which provides
-      # everything by starting it.
+      # The require list names all three, because this job now provides all
+      # three. Naming a dependency it does not provide would fail the suite for
+      # the pipeline's omission rather than for a defect; leaving one out that
+      # it does provide would let those tests go green by skipping.
       CRP_TEST_POSTGRES_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       CRP_TEST_CLICKHOUSE_DSN: clickhouse://default:@localhost:9000/default
-      CRP_TEST_REQUIRE_INFRA: postgres,clickhouse
+      CRP_TEST_KAFKA_BROKERS: localhost:9092
+      CRP_TEST_REQUIRE_INFRA: postgres,clickhouse,kafka
     steps:
       - uses: actions/checkout@v4
 

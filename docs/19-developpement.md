@@ -153,9 +153,11 @@ CRP_TEST_REQUIRE_INFRA=all
 ```
 
 La liste est par dépendance parce qu'une chaîne exige exactement ce qu'elle
-fournit : la nôtre déclare PostgreSQL et ClickHouse et aucun courtier Kafka.
-Un drapeau global ferait échouer les tests Kafka pour une omission de la
-chaîne, et non pour un défaut.
+fournit. La nôtre déclare les trois — `postgres,clickhouse,kafka` — parce que
+le travail `backend` démarre les trois. Un drapeau global ferait échouer un
+test pour une omission de la chaîne et non pour un défaut ; une dépendance
+omise de la liste alors qu'elle est fournie laisserait au contraire ses tests
+passer au vert en étant ignorés.
 
 Le travail `testinfra — the container path` ne déclare aucun service et exige
 `all` : il démarre les trois lui-même, pour que la moitié conteneur du code ne
@@ -167,9 +169,63 @@ qu'aucune compilation ne voit.
 
 ### Ce qui est le plus couvert
 
-Les parsers syslog et le moteur SIEM. C'est délibéré : ce sont les chemins où
-une erreur est silencieuse — un message mal analysé n'échoue pas, il produit un
-événement faux.
+| Module | Couverture | Ce qui est tenu |
+|---|---|---|
+| `services/collector` | **83 %** | Les six analyseurs de format, et le sujet sur lequel chaque message atterrit |
+| `services/tenant` | **73 %** | La fusion partielle des politiques, les règles d'autorisation, la surface HTTP |
+| `services/syslog` | — | Les analyseurs RFC 3164 / 5424 de l'écouteur TCP/UDP |
+| `services/siem` | — | Le moteur de corrélation |
+
+C'est délibéré : ce sont les chemins où une erreur est silencieuse. Un message
+mal analysé n'échoue pas, il produit un événement faux ; une politique mal
+fusionnée ne lève rien, elle déplace un chiffre ; une règle d'autorisation qui
+ne s'applique pas n'a aucun effet visible tant que personne ne lit le tenant du
+voisin.
+
+Trois défauts ont été trouvés par ce travail de couverture, dans du code qui
+compilait, passait `vet` et tournait :
+
+1. **Les lettres mortes du collecteur partaient sur le sujet des événements.**
+   `cmd/server` construisait un producteur dédié au sujet de rebut et ne le
+   passait jamais au service, qui publiait donc ses `DLQMessage` sur
+   `crp.events.normalized` — là où la chaîne de traitement lit des
+   `NormalizedEvent`. `json.Unmarshal` accepte les champs inconnus, donc chaque
+   ligne malformée devenait un événement sans identifiant, sans tenant et sans
+   catégorie. Aucun test à producteur factice n'aurait pu le voir : ce qui est
+   en cause est le sujet, pas l'appel.
+
+2. **Tout événement syslog RFC 3164 était horodaté en l'an 0000.** Le format ne
+   porte pas d'année et `time.Parse` en rend zéro ; l'année vient maintenant de
+   l'heure de réception, avec le recul d'un an au passage du 31 décembre, comme
+   le fait déjà l'écouteur du service `syslog`. Les deux analyseurs du même
+   format s'accordent désormais.
+
+3. **Les extensions CEF étaient découpées sur les espaces.** Une valeur CEF peut
+   en contenir — `rt=Mar 14 2026 08:00:00` et `msg=…` sont du CEF ordinaire — et
+   seul le premier mot de chaque valeur était conservé. L'horodatage propre de
+   l'événement et son message étaient donc perdus en silence. Le découpage se
+   fait maintenant devant la clé suivante, et `rt` est accepté sous ses deux
+   formes (textuelle et millisecondes depuis l'époque).
+
+### Tester une chaîne d'ingestion : `testinfra.Kafka`
+
+```go
+f := testinfra.Kafka(t)              // courtiers + un sujet à ce test seul
+dlqTopic := f.NewTopic("dlq")        // un second sujet, dérivé du même préfixe
+```
+
+Un test d'ingestion a besoin de **deux** sujets, parce que ce qu'il prouve est
+qu'un message est parti sur le bon. Les deux assertions se valent :
+
+```go
+i.read(t, i.dead, 1, "le sujet de rebut")      // la lettre morte est arrivée
+i.empty(t, i.events, "le sujet des événements") // et n'est pas allée ailleurs
+```
+
+La seconde est celle qui a trouvé le défaut 1 ci-dessus. Elle attend trois
+secondes puis conclut que rien n'arrive : c'est le seul moyen d'affirmer une
+absence sur un courtier, et c'est pour cela que la suite du collecteur dure une
+vingtaine de secondes.
 
 ### Prouver qu'un test a des dents
 

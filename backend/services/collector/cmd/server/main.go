@@ -59,7 +59,7 @@ func main() {
 	}, logger)
 	defer dlqProducer.Close()
 
-	collectorSvc := service.NewCollectorService(producer, logger)
+	collectorSvc := service.NewCollectorService(producer, dlqProducer, logger)
 	collectorHandler := handler.NewCollectorHandler(collectorSvc)
 
 	r := chi.NewRouter()
