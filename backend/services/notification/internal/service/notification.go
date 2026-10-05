@@ -28,7 +28,20 @@ func NewNotificationService(logger zerolog.Logger) *NotificationService {
 }
 
 // Send dispatches a notification to all configured channels.
+//
+// A notification with no channel is refused. It used to panic: "every channel
+// failed" was written as len(errs) == len(req.Channels), which is 0 == 0 for an
+// empty list, and the line after it read errs[0]. The handler's validator
+// demands at least one channel, so this was unreachable over HTTP and reachable
+// from every internal caller — a rule whose channel list was emptied, or a
+// pipeline publishing an event with none — and it took the service down rather
+// than dropping one alert.
 func (s *NotificationService) Send(ctx context.Context, req *model.SendNotificationRequest) error {
+	if len(req.Channels) == 0 {
+		return apierrors.New(apierrors.KindBadInput,
+			"the notification names no channel, so there is nowhere to send it")
+	}
+
 	var errs []error
 
 	for _, ch := range req.Channels {
