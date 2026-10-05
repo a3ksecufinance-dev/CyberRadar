@@ -93,13 +93,73 @@ go test ./services/siem/... -v          # un service
 go test ./internal/pkg/content/ -run TestASignedPackRoundTrips
 ```
 
-### Les trois sortes
+### Les quatre sortes
 
 | | Ce que ça couvre |
 |---|---|
 | **Unitaires** | Les parsers syslog, le moteur SIEM, les calculs de politique, le contenu signé |
+| **De dépôt** | Le SQL, contre une vraie base — via `internal/pkg/testinfra` |
 | **`internal/pkg/apicheck`** | **Toutes** les lectures de **tous** les services, contre une plateforme qui tourne |
 | **Playwright** | Les parcours d'interface |
+
+### Tester le SQL : `internal/pkg/testinfra`
+
+Dans un service construit en handler → service → dépôt, le code facile à rater
+est le SQL. Il n'y avait aucun moyen d'en exécuter dans un test, donc personne
+n'en écrivait, et la classe de défaut que seul le SQL produit — une colonne
+nullable lue dans une chaîne Go — est passée deux fois.
+
+```go
+func TestSomething(t *testing.T) {
+    pool := testinfra.Postgres(t)      // base migrée, à ce test seul
+    conn := testinfra.ClickHouse(t)    // schéma migré
+    k    := testinfra.Kafka(t)         // courtiers + un sujet à ce test seul
+}
+```
+
+**Chaque appel à `Postgres` rend une base à lui.** Elle est taillée dans un
+gabarit migré une seule fois, par `CREATE DATABASE … TEMPLATE`, que PostgreSQL
+fait en copie de fichiers : le schéma complet arrive en moins de temps qu'une
+migration n'en met à être analysée. Deux tests ne se voient donc jamais, et
+aucun n'a à nettoyer derrière lui.
+
+**Le gabarit porte l'empreinte des migrations qui l'ont produit.** Si un
+fichier de `migrations/postgres/` bouge, l'empreinte change et le gabarit est
+reconstruit. Sans ça, un gabarit d'avant la migration 000048 servirait à chaque
+test un schéma avec cinq tables qui n'existent plus.
+
+#### D'où vient l'infrastructure
+
+Dans cet ordre :
+
+1. **Une instance déjà là**, nommée par `CRP_TEST_POSTGRES_DSN`,
+   `CRP_TEST_CLICKHOUSE_DSN`, `CRP_TEST_KAFKA_BROKERS`. C'est ce qu'utilise la
+   CI (ses conteneurs de service) et ce qu'a tout développeur ayant lancé
+   `scripts/dev-local.sh infra`.
+2. **Un conteneur démarré à la demande**, si un démon Docker répond.
+3. **Ni l'un ni l'autre** : le test est **ignoré**, avec un message nommant les
+   trois sorties.
+
+> **Pourquoi la réutilisation passe avant les conteneurs.** `go test ./...`
+> lance un processus par paquet. Un assistant qui démarrerait toujours des
+> conteneurs en démarrerait un jeu par paquet — une trentaine dans cet espace
+> de travail — et la suite durerait plus longtemps que personne n'attend.
+
+#### Un test ignoré ne doit pas passer pour un test vert
+
+```
+CRP_TEST_REQUIRE_INFRA=postgres,clickhouse   # échoue au lieu d'ignorer
+CRP_TEST_REQUIRE_INFRA=all
+```
+
+La liste est par dépendance parce qu'une chaîne exige exactement ce qu'elle
+fournit : la nôtre déclare PostgreSQL et ClickHouse et aucun courtier Kafka.
+Un drapeau global ferait échouer les tests Kafka pour une omission de la
+chaîne, et non pour un défaut.
+
+Le travail `testinfra — the container path` ne déclare aucun service et exige
+`all` : il démarre les trois lui-même, pour que la moitié conteneur du code ne
+pourrisse pas sans que personne le voie.
 
 `apicheck` exige une plateforme démarrée ; il échoue autrement en nommant les
 services qui n'écoutent pas. C'est voulu : il attrape une classe de défaut

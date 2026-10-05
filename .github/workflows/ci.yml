@@ -77,6 +77,17 @@ jobs:
       SIEM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: crp_password_dev
+      # internal/pkg/testinfra: repository tests cut a database of their own
+      # from a migrated template on this server. It never touches
+      # crp_foundation, which the migration and content steps above use.
+      #
+      # The require list names postgres and clickhouse and not kafka, because
+      # that is what this job provides. A test that needs Kafka skips here and
+      # is covered by the testinfra-containers job below, which provides
+      # everything by starting it.
+      CRP_TEST_POSTGRES_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      CRP_TEST_CLICKHOUSE_DSN: clickhouse://default:@localhost:9000/default
+      CRP_TEST_REQUIRE_INFRA: postgres,clickhouse
     steps:
       - uses: actions/checkout@v4
 
@@ -211,6 +222,31 @@ jobs:
       - name: Test
         working-directory: backend
         run: make test
+
+  testinfra-containers:
+    name: testinfra — the container path
+    runs-on: ubuntu-latest
+    # The backend job points the helper at service containers, which is the
+    # fast path and the one every repository test takes. That leaves the other
+    # half of the helper — the one that starts containers itself, for a
+    # developer who has Docker and has started nothing — exercised by nobody.
+    #
+    # This job declares no service and no CRP_TEST_*_DSN, so the helper has to
+    # start PostgreSQL, ClickHouse and Kafka on its own, and requires all three
+    # so that a Docker failure is red rather than three skips.
+    env:
+      CRP_TEST_REQUIRE_INFRA: all
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Start every dependency from the test helper itself
+        working-directory: backend
+        run: go test ./internal/pkg/testinfra/ -count=1 -v
 
   migrations:
     name: Migrations — apply to a clean database

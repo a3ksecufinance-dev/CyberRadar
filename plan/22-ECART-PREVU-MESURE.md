@@ -93,6 +93,18 @@ Les cinq que rien ne nomme dans le code Go :
 > une revue de schéma que la fonction existe. Les cinq doivent être soit
 > implémentées, soit supprimées par une migration qui dit pourquoi.
 
+**Traité le 2026-10-05** : les cinq sont supprimées par la migration
+`000048_drop_unwired_tables.sql`, qui dit pour chacune ce qui n'est pas perdu.
+Elles seront recréées par le lot L12 de [`23`](23-PLAN-EXECUTION.md), avec le
+code qui les lit, dans le même commit. Le schéma compte désormais **137 tables,
+dont zéro que rien ne lit**.
+
+> Pour recompter : le script doit **soustraire les suppressions**. Compter les
+> `CREATE TABLE` seuls rend encore 142 et rapporte les cinq comme mortes, parce
+> que leur création est toujours dans les migrations 000002 à 000004 — une
+> migration n'est pas réécrite après coup. Le compte juste est
+> `CREATE TABLE` moins `DROP TABLE`.
+
 ---
 
 ## 4. Le catalogue d'API : 183 annoncées, 8 familles entièrement absentes

@@ -15,7 +15,7 @@
 
 ## 0. Le chiffre d'abord
 
-**2 235 jours-homme**, soit **un peu plus de 10 années-homme**.
+**2 229 jours-homme**, soit **un peu plus de 10 années-homme**.
 
 Il est en tête parce qu'un chiffre de cette taille doit être connu au premier
 jour, pas découvert au dix-huitième mois. Il recouvre :
@@ -23,9 +23,9 @@ jour, pas découvert au dix-huitième mois. Il recouvre :
 | | Lots | Charge |
 |---|---|---:|
 | Les 245 user stories restantes (180 absentes + 65 partielles) | L3 → L12 | 1 850 j |
-| Le socle, le déploiement et la mesure (ex-`plan/21`) | L0, L1, L2 | 325 j |
+| Le socle, le déploiement et la mesure (ex-`plan/21`) | L0, L1, L2 | 319 j |
 | La validation externe (charge interne ; les prestataires s'ajoutent) | L13 | 60 j |
-| **Total** | | **2 235 j** |
+| **Total** | | **2 229 j** |
 
 ### Ce que ça donne selon l'équipe
 
@@ -109,7 +109,7 @@ que L0 est fait. Ce sont eux qui absorbent une équipe plus large.
 
 ## 3. Les quatorze lots
 
-### L0 — Dette et socle d'exécution · ~90 j
+### L0 — Dette et socle d'exécution · ~84 j
 
 **Prérequis à tout le reste.** On ne construit pas 245 user stories sur un
 socle où 17 services sur 32 n'ont aucun test : chaque lot suivant y ajouterait
@@ -123,7 +123,7 @@ de la dette plus vite qu'il n'ajoute de la valeur.
 | Parcours de bout en bout scripté et chronométré, en CI | 10 j |
 | Migrations à état (`golang-migrate` sur les 47 existantes) | 12 j |
 | Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants | 5 j |
-| Les 5 tables mortes : implémenter ou supprimer par migration motivée | 8 j |
+| Les 5 tables mortes : **supprimées** par la migration `000048` — arbitrage tranché, L12 les recréera en les implémentant | 2 j |
 
 **Sortie** : aucun service à 0 test, `make e2e-chain` vert en CI, deux
 applications de migrations de suite sans erreur.
@@ -386,7 +386,7 @@ revérifiés, rapports signés.
 
 | Lot | US | Charge | Dépend de |
 |---|---:|---:|---|
-| L0 Dette et socle d'exécution | — | 90 j | — |
+| L0 Dette et socle d'exécution | — | 84 j | — |
 | L1 Déploiement et exploitation | — | 190 j | L0 |
 | L2 Mesure | 1 | 45 j | L1 |
 | **L3 Découverte** | 27 | **240 j** | L0 |
@@ -400,7 +400,7 @@ revérifiés, rapports signés.
 | L11 Plateforme d'intégration | 14 | 120 j | L1 |
 | L12 Socle avancé | 27 | 190 j | L0 |
 | L13 Validation externe | — | 60 j | tous |
-| **Total** | **245** | **2 235 j** | |
+| **Total** | **245** | **2 229 j** | |
 
 La répartition des 245 US entre les lots est **exacte** : elle a été vérifiée
 contre le décompte par domaine de [`22`](22-ECART-PREVU-MESURE.md), domaine par
@@ -441,14 +441,19 @@ charge dérape.
 Huit indicateurs. Ils sont tous calculables par une commande, pour qu'aucun ne
 dépende d'une déclaration.
 
+> **Avancement au 2026-10-05.** B7 est fait : les cinq tables sont supprimées
+> par la migration `000048`. B1 est fait : `internal/pkg/testinfra` donne à un
+> test une base migrée, un ClickHouse migré et un courtier Kafka, et le service
+> `tenant` a ses six premiers tests de dépôt. B2 et B3 restent.
+
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|
 | US faites | **101 / 346** | 346 | relevé par lot |
-| Services sans test | **17 / 32** | 0 | `find … -name '*_test.go'` par service |
+| Services sans test | ~~17~~ → **16 / 32** | 0 | `find … -name '*_test.go'` par service |
 | Couverture, services critiques | non mesurée | ≥ 60 % | `go test -cover` |
 | KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
 | NFR vérifiées | **0 / 14** | 14 | bancs L2 |
-| Tables sans code | **5 / 142** | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |
+| Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |
 | Unités déployables | **32** | 8–10 | `ls bin` |
 | Secrets dans le dépôt | **oui** | 0 | `git ls-files \| grep -E '\.pem$\|\.key$'` |
 
