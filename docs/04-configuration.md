@@ -22,6 +22,29 @@ qu'elles ne divergent pas sur la liste des services.
 | `OIDC_AUDIENCE` | **oui** | — | `cyberradar-frontend` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | non | — | Vide : aucune trace n'est exportée, le service démarre quand même |
 | `LOG_LEVEL` | non | `info` | `debug`, `info`, `warn`, `error` |
+| `CRP_TRUSTED_PROXY_CIDRS` | non | les plages privées et la boucle locale | Les plages des reverses proxies devant le service, séparées par des virgules. Voir ci-dessous |
+
+### `CRP_TRUSTED_PROXY_CIDRS` — à qui appartient l'adresse du client
+
+Un service lit l'adresse du client dans `X-Forwarded-For`, et cet en-tête est
+écrit par qui veut. La question n'est donc pas « que dit l'en-tête » mais
+« jusqu'où puis-je le croire » : la chaîne est parcourue de droite à gauche et
+s'arrête à la première adresse qui n'est pas l'une des nôtres. Celle-là a été
+ajoutée par notre propre proxy et personne en aval ne peut la forger ; tout ce
+qui est à sa gauche est la déclaration du client.
+
+Le défaut — `127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,::1/128,fc00::/7`
+— convient à un déploiement derrière son propre ingress dans un réseau privé.
+Derrière un répartiteur de charge dont l'adresse est publique, il faut nommer
+sa plage, sinon le parcours s'arrête sur le répartiteur et c'est **son** adresse
+qui est journalisée : faux, mais faux du bon côté — la valeur ne peut pas être
+choisie par l'appelant.
+
+Une connexion qui n'arrive pas d'une de ces plages n'a pas de chaîne digne
+d'être lue : son adresse de pair est alors la seule donnée disponible, et c'est
+celle qui est retenue. Le journal de requêtes porte les deux champs,
+`remote_addr` (le pair) et `client_ip` (le client), parce qu'ils ne disent pas
+la même chose.
 
 ---
 

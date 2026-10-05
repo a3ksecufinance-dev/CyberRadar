@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
 	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
@@ -85,7 +86,9 @@ func main() {
 		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
 	r.Use(observe.Middleware("easm-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 

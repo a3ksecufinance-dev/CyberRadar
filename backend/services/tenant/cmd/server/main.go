@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
 	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	internaldb "github.com/cyberradar/platform/internal/pkg/db"
 	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
@@ -105,7 +106,9 @@ func main() {
 	// Global middleware
 	r.Use(observe.Middleware("tenant-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 	r.Use(chimiddleware.Compress(5))

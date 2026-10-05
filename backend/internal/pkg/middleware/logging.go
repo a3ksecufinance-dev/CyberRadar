@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/clientip"
 	"github.com/rs/zerolog"
 )
 
@@ -49,7 +50,14 @@ func Logging(logger zerolog.Logger) func(http.Handler) http.Handler {
 				Str("path", r.URL.Path).
 				Int("status", wrapped.status).
 				Dur("duration_ms", duration).
+				// Both, and they are not the same thing: remote_addr is the
+				// peer that opened the connection — the ingress, in a
+				// deployment that has one — and client_ip is the address at
+				// the far end of the forwarded chain, as far as the chain can
+				// be trusted. RealIP used to overwrite the first with a value
+				// the caller chose, which left neither.
 				Str("remote_addr", r.RemoteAddr).
+				Str("client_ip", clientip.Of(r)).
 				Str("user_agent", r.UserAgent()).
 				Str("request_id", r.Header.Get("X-Request-ID")).
 				Msg("http_request")
