@@ -23,6 +23,44 @@ func NewNetSecRepository(db *pgxpool.Pool) *NetSecRepository {
 	return &NetSecRepository{db: db}
 }
 
+// zoneBelongsTo refuses a zone identifier the caller's tenant does not own.
+//
+// Every write in this service names a zone the caller chose — a policy from one
+// to another, a device sitting in one, an anomaly observed between two — and
+// the row written carries the caller's own tenant_id, so the tenant filter on
+// the write proves nothing about the zone it points at. The foreign keys behind
+// src_zone_id, dst_zone_id and zone_id reference netsec_zones(id) with no
+// tenant of their own, so PostgreSQL accepts a zone from any customer. Without
+// this check a caller who learns a zone identifier could write a rule between
+// two of a neighbour's zones — and the names of those zones ("SWIFT",
+// "ATM-PROD") came back in the answer, which is a map of somebody else's
+// network.
+func (r *NetSecRepository) zoneBelongsTo(ctx context.Context, tenantID, zoneID uuid.UUID) error {
+	var exists bool
+	if err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM netsec_zones WHERE tenant_id=$1 AND id=$2)`,
+		tenantID, zoneID).Scan(&exists); err != nil {
+		return fmt.Errorf("check zone: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("zone not found")
+	}
+	return nil
+}
+
+// zonesBelongTo is the same question for the optional pair most writes carry.
+func (r *NetSecRepository) zonesBelongTo(ctx context.Context, tenantID uuid.UUID, ids ...*uuid.UUID) error {
+	for _, id := range ids {
+		if id == nil {
+			continue
+		}
+		if err := r.zoneBelongsTo(ctx, tenantID, *id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ─── Zones ────────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) CreateZone(ctx context.Context, tenantID uuid.UUID, req *model.CreateZoneRequest) (*model.NetSecZone, error) {
@@ -157,6 +195,9 @@ func (r *NetSecRepository) UpdateZone(ctx context.Context, tenantID, zoneID uuid
 // ─── Policies ─────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, req *model.CreatePolicyRequest, createdBy uuid.UUID) (*model.NetSecPolicy, error) {
+	if err := r.zonesBelongTo(ctx, tenantID, req.SrcZoneID, req.DstZoneID); err != nil {
+		return nil, err
+	}
 	if req.Protocol == "" {
 		req.Protocol = "any"
 	}
@@ -171,8 +212,12 @@ func (r *NetSecRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID,
 		INSERT INTO netsec_policies
 		  (tenant_id, name, description, src_zone_id, dst_zone_id, src_cidr, dst_cidr, protocol, ports, action, priority, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		RETURNING id, tenant_id, name, COALESCE(description,''), src_zone_id, NULL::TEXT,
-		          dst_zone_id, NULL::TEXT, COALESCE(src_cidr,''), COALESCE(dst_cidr,''),
+		RETURNING id, tenant_id, name, COALESCE(description,''),
+		          src_zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=src_zone_id AND tenant_id=$1),''),
+		          dst_zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=dst_zone_id AND tenant_id=$1),''),
+		          COALESCE(src_cidr,''), COALESCE(dst_cidr,''),
 		          protocol, COALESCE(ports,'{}'), action, priority, is_active, hit_count, last_hit_at, created_by, created_at, updated_at`,
 		tenantID, req.Name, req.Description, req.SrcZoneID, req.DstZoneID,
 		req.SrcCIDR, req.DstCIDR, req.Protocol, req.Ports, req.Action, req.Priority, createdBy,
@@ -217,8 +262,8 @@ func (r *NetSecRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID,
 		       COALESCE(p.ports,'{}'), p.action, p.priority, p.is_active, p.hit_count, p.last_hit_at,
 		       p.created_by, p.created_at, p.updated_at
 		FROM netsec_policies p
-		LEFT JOIN netsec_zones sz ON sz.id=p.src_zone_id
-		LEFT JOIN netsec_zones dz ON dz.id=p.dst_zone_id
+		LEFT JOIN netsec_zones sz ON sz.id=p.src_zone_id AND sz.tenant_id=p.tenant_id
+		LEFT JOIN netsec_zones dz ON dz.id=p.dst_zone_id AND dz.tenant_id=p.tenant_id
 		WHERE %s ORDER BY p.priority ASC, p.hit_count DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
 	if err != nil {
 		return nil, 0, err
@@ -248,8 +293,8 @@ func (r *NetSecRepository) GetPolicy(ctx context.Context, tenantID, policyID uui
 		       COALESCE(p.ports,'{}'), p.action, p.priority, p.is_active, p.hit_count, p.last_hit_at,
 		       p.created_by, p.created_at, p.updated_at
 		FROM netsec_policies p
-		LEFT JOIN netsec_zones sz ON sz.id=p.src_zone_id
-		LEFT JOIN netsec_zones dz ON dz.id=p.dst_zone_id
+		LEFT JOIN netsec_zones sz ON sz.id=p.src_zone_id AND sz.tenant_id=p.tenant_id
+		LEFT JOIN netsec_zones dz ON dz.id=p.dst_zone_id AND dz.tenant_id=p.tenant_id
 		WHERE p.id=$1 AND p.tenant_id=$2`, policyID, tenantID,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description,
 		&p.SrcZoneID, &p.SrcZoneName, &p.DstZoneID, &p.DstZoneName,
@@ -310,14 +355,18 @@ func (r *NetSecRepository) UpdatePolicy(ctx context.Context, tenantID, policyID 
 	return r.GetPolicy(ctx, tenantID, policyID)
 }
 
-func (r *NetSecRepository) IncrementPolicyHit(ctx context.Context, policyID uuid.UUID) {
+func (r *NetSecRepository) IncrementPolicyHit(ctx context.Context, tenantID, policyID uuid.UUID) {
 	_, _ = r.db.Exec(ctx,
-		"UPDATE netsec_policies SET hit_count=hit_count+1, last_hit_at=NOW() WHERE id=$1", policyID)
+		"UPDATE netsec_policies SET hit_count=hit_count+1, last_hit_at=NOW() WHERE id=$1 AND tenant_id=$2",
+		policyID, tenantID)
 }
 
 // ─── Flows ────────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) IngestFlow(ctx context.Context, tenantID uuid.UUID, req *model.IngestFlowRequest, srcZoneID, dstZoneID *uuid.UUID) (*model.NetSecFlow, error) {
+	if err := r.zonesBelongTo(ctx, tenantID, srcZoneID, dstZoneID); err != nil {
+		return nil, err
+	}
 	action := req.Action
 	if action == "" {
 		action = "allowed"
@@ -329,9 +378,12 @@ func (r *NetSecRepository) IngestFlow(ctx context.Context, tenantID uuid.UUID, r
 		   bytes_sent, bytes_recv, packets, duration_ms,
 		   src_zone_id, dst_zone_id, action, flow_start, flow_end)
 		VALUES ($1,$2::INET,$3::INET,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		RETURNING id, tenant_id, src_ip::TEXT, dst_ip::TEXT, src_port, dst_port,
+		RETURNING id, tenant_id, host(src_ip), host(dst_ip), src_port, dst_port,
 		          COALESCE(protocol,''), bytes_sent, bytes_recv, packets, duration_ms,
-		          src_zone_id, NULL::TEXT, dst_zone_id, NULL::TEXT,
+		          src_zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=src_zone_id AND tenant_id=$1),''),
+		          dst_zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=dst_zone_id AND tenant_id=$1),''),
 		          action, anomaly_score, COALESCE(flags,'{}'), flow_start, flow_end, created_at`,
 		tenantID, req.SrcIP, req.DstIP, req.SrcPort, req.DstPort, req.Protocol,
 		req.BytesSent, req.BytesRecv, req.Packets, req.DurationMs,
@@ -353,13 +405,22 @@ func (r *NetSecRepository) ListFlows(ctx context.Context, tenantID uuid.UUID, f 
 	conds := []string{"fl.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
+	// Compared as addresses, not as text.
+	//
+	// src_ip is INET, and casting it to text brings the prefix length with it:
+	// the stored value renders as "10.1.0.9/32", so an equality against the
+	// "10.1.0.9" a caller types was false for every row, and both of these
+	// filters returned an empty list whatever was asked for. Casting the
+	// parameter instead compares two inet values, uses the index the schema
+	// puts on (tenant_id, src_ip), and turns a malformed address into a 400
+	// rather than a silently empty answer.
 	if f.SrcIP != "" {
-		conds = append(conds, fmt.Sprintf("fl.src_ip::TEXT=$%d", n))
+		conds = append(conds, fmt.Sprintf("fl.src_ip=$%d::INET", n))
 		args = append(args, f.SrcIP)
 		n++
 	}
 	if f.DstIP != "" {
-		conds = append(conds, fmt.Sprintf("fl.dst_ip::TEXT=$%d", n))
+		conds = append(conds, fmt.Sprintf("fl.dst_ip=$%d::INET", n))
 		args = append(args, f.DstIP)
 		n++
 	}
@@ -388,7 +449,7 @@ func (r *NetSecRepository) ListFlows(ctx context.Context, tenantID uuid.UUID, f 
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_flows fl WHERE "+where, args...).Scan(&total)
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT fl.id, fl.tenant_id, fl.src_ip::TEXT, fl.dst_ip::TEXT, fl.src_port, fl.dst_port,
+		SELECT fl.id, fl.tenant_id, host(fl.src_ip), host(fl.dst_ip), fl.src_port, fl.dst_port,
 		       COALESCE(fl.protocol,''), fl.bytes_sent, fl.bytes_recv, fl.packets, fl.duration_ms,
 		       fl.src_zone_id, COALESCE(sz.name,''), fl.dst_zone_id, COALESCE(dz.name,''),
 		       fl.action, fl.anomaly_score, COALESCE(fl.flags,'{}'), fl.flow_start, fl.flow_end, fl.created_at
@@ -414,15 +475,25 @@ func (r *NetSecRepository) ListFlows(ctx context.Context, tenantID uuid.UUID, f 
 	return flows, total, nil
 }
 
-func (r *NetSecRepository) UpdateFlowAnomaly(ctx context.Context, flowID uuid.UUID, score int, flags []string) error {
-	_, err := r.db.Exec(ctx,
-		"UPDATE netsec_flows SET anomaly_score=$2, flags=$3 WHERE id=$1", flowID, score, flags)
-	return err
+func (r *NetSecRepository) UpdateFlowAnomaly(ctx context.Context, tenantID, flowID uuid.UUID, score int, flags []string) error {
+	tag, err := r.db.Exec(ctx,
+		"UPDATE netsec_flows SET anomaly_score=$3, flags=$4 WHERE id=$1 AND tenant_id=$2",
+		flowID, tenantID, score, flags)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("flow not found")
+	}
+	return nil
 }
 
 // ─── Anomalies ────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) CreateAnomaly(ctx context.Context, tenantID uuid.UUID, req *model.CreateAnomalyRequest) (*model.NetSecAnomaly, error) {
+	if err := r.zonesBelongTo(ctx, tenantID, req.SrcZoneID, req.DstZoneID); err != nil {
+		return nil, err
+	}
 	ev, _ := json.Marshal(req.Evidence)
 	if req.FlowIDs == nil {
 		req.FlowIDs = []uuid.UUID{}
@@ -434,7 +505,7 @@ func (r *NetSecRepository) CreateAnomaly(ctx context.Context, tenantID uuid.UUID
 		  (tenant_id, anomaly_type, severity, src_ip, dst_ip, src_zone_id, dst_zone_id, flow_ids, description, evidence)
 		VALUES ($1,$2,$3,$4::INET,$5::INET,$6,$7,$8,$9,$10)
 		RETURNING id, tenant_id, anomaly_type, severity,
-		          src_ip::TEXT, dst_ip::TEXT, src_zone_id, dst_zone_id,
+		          COALESCE(host(src_ip),''), COALESCE(host(dst_ip),''), src_zone_id, dst_zone_id,
 		          COALESCE(flow_ids,'{}'), description, evidence,
 		          status, resolved_at, detected_at, created_at`,
 		tenantID, req.AnomalyType, req.Severity, nullInet(req.SrcIP), nullInet(req.DstIP),
@@ -481,7 +552,7 @@ func (r *NetSecRepository) ListAnomalies(ctx context.Context, tenantID uuid.UUID
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT id, tenant_id, anomaly_type, severity,
-		       COALESCE(src_ip::TEXT,''), COALESCE(dst_ip::TEXT,''), src_zone_id, dst_zone_id,
+		       COALESCE(host(src_ip),''), COALESCE(host(dst_ip),''), src_zone_id, dst_zone_id,
 		       COALESCE(flow_ids,'{}'), description, evidence,
 		       status, resolved_at, detected_at, created_at
 		FROM netsec_anomalies WHERE %s ORDER BY detected_at DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
@@ -506,6 +577,12 @@ func (r *NetSecRepository) ListAnomalies(ctx context.Context, tenantID uuid.UUID
 }
 
 func (r *NetSecRepository) UpdateAnomaly(ctx context.Context, tenantID, anomalyID uuid.UUID, status string) (*model.NetSecAnomaly, error) {
+	// The column carries a CHECK, and the empty string is not one of the four
+	// values it allows: without this the call fails inside PostgreSQL and the
+	// caller reads a 500 rather than being told what is missing.
+	if status == "" {
+		return nil, fmt.Errorf("an update to an anomaly names no status")
+	}
 	var resolvedAt *time.Time
 	if status == "resolved" || status == "false_positive" {
 		t := time.Now()
@@ -517,7 +594,7 @@ func (r *NetSecRepository) UpdateAnomaly(ctx context.Context, tenantID, anomalyI
 		UPDATE netsec_anomalies SET status=$3, resolved_at=$4
 		WHERE id=$1 AND tenant_id=$2
 		RETURNING id, tenant_id, anomaly_type, severity,
-		          COALESCE(src_ip::TEXT,''), COALESCE(dst_ip::TEXT,''), src_zone_id, dst_zone_id,
+		          COALESCE(host(src_ip),''), COALESCE(host(dst_ip),''), src_zone_id, dst_zone_id,
 		          COALESCE(flow_ids,'{}'), description, evidence,
 		          status, resolved_at, detected_at, created_at`,
 		anomalyID, tenantID, status, resolvedAt,
@@ -538,6 +615,9 @@ func (r *NetSecRepository) UpdateAnomaly(ctx context.Context, tenantID, anomalyI
 // ─── Devices ──────────────────────────────────────────────────────────────────
 
 func (r *NetSecRepository) RegisterDevice(ctx context.Context, tenantID uuid.UUID, req *model.RegisterDeviceRequest) (*model.NetSecDevice, error) {
+	if err := r.zonesBelongTo(ctx, tenantID, req.ZoneID); err != nil {
+		return nil, err
+	}
 	managed := true
 	if req.IsManaged != nil {
 		managed = *req.IsManaged
@@ -552,7 +632,8 @@ func (r *NetSecRepository) RegisterDevice(ctx context.Context, tenantID uuid.UUI
 		  SET name=EXCLUDED.name, device_type=EXCLUDED.device_type, zone_id=EXCLUDED.zone_id,
 		      vendor=EXCLUDED.vendor, model=EXCLUDED.model, firmware=EXCLUDED.firmware,
 		      last_seen_at=NOW(), updated_at=NOW()
-		RETURNING id, tenant_id, name, device_type, ip_address::TEXT, zone_id, NULL::TEXT,
+		RETURNING id, tenant_id, name, device_type, host(ip_address), zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=zone_id AND tenant_id=$1),''),
 		          COALESCE(vendor,''), COALESCE(model,''), COALESCE(firmware,''),
 		          is_managed, last_seen_at, status, metadata, created_at, updated_at`,
 		tenantID, req.Name, req.DeviceType, req.IPAddress, req.ZoneID,
@@ -591,11 +672,11 @@ func (r *NetSecRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM netsec_devices d WHERE "+where, args...).Scan(&total)
 	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT d.id, d.tenant_id, d.name, d.device_type, d.ip_address::TEXT, d.zone_id, COALESCE(z.name,''),
+		SELECT d.id, d.tenant_id, d.name, d.device_type, host(d.ip_address), d.zone_id, COALESCE(z.name,''),
 		       COALESCE(d.vendor,''), COALESCE(d.model,''), COALESCE(d.firmware,''),
 		       d.is_managed, d.last_seen_at, d.status, d.metadata, d.created_at, d.updated_at
 		FROM netsec_devices d
-		LEFT JOIN netsec_zones z ON z.id=d.zone_id
+		LEFT JOIN netsec_zones z ON z.id=d.zone_id AND z.tenant_id=d.tenant_id
 		WHERE %s ORDER BY d.device_type, d.name LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
 	if err != nil {
 		return nil, 0, err
@@ -616,6 +697,9 @@ func (r *NetSecRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 }
 
 func (r *NetSecRepository) UpdateDevice(ctx context.Context, tenantID, deviceID uuid.UUID, req *model.UpdateDeviceRequest) (*model.NetSecDevice, error) {
+	if err := r.zonesBelongTo(ctx, tenantID, req.ZoneID); err != nil {
+		return nil, err
+	}
 	sets := []string{"updated_at=NOW()", "last_seen_at=NOW()"}
 	args := []any{}
 	n := 1
@@ -655,10 +739,11 @@ func (r *NetSecRepository) UpdateDevice(ctx context.Context, tenantID, deviceID 
 	var metaRaw []byte
 	err := r.db.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE netsec_devices SET %s WHERE id=$%d AND tenant_id=$%d
-		RETURNING id, tenant_id, name, device_type, ip_address::TEXT, zone_id, NULL::TEXT,
+		RETURNING id, tenant_id, name, device_type, host(ip_address), zone_id,
+		          COALESCE((SELECT name FROM netsec_zones WHERE id=zone_id AND tenant_id=$%d),''),
 		          COALESCE(vendor,''), COALESCE(model,''), COALESCE(firmware,''),
 		          is_managed, last_seen_at, status, metadata, created_at, updated_at`,
-		strings.Join(sets, ","), n, n+1), args...,
+		strings.Join(sets, ","), n, n+1, n+1), args...,
 	).Scan(&d.ID, &d.TenantID, &d.Name, &d.DeviceType, &d.IPAddress, &d.ZoneID, &d.ZoneName,
 		&d.Vendor, &d.Model, &d.Firmware, &d.IsManaged, &d.LastSeenAt, &d.Status, &metaRaw, &d.CreatedAt, &d.UpdatedAt)
 	if err == pgx.ErrNoRows {
@@ -729,7 +814,7 @@ func (r *NetSecRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*mode
 	}
 
 	rows3, _ := r.db.Query(ctx, `
-		SELECT src_ip::TEXT, COUNT(*), SUM(bytes_sent)
+		SELECT host(src_ip), COUNT(*), SUM(bytes_sent)
 		FROM netsec_flows WHERE tenant_id=$1 AND flow_start > NOW()-INTERVAL '24 hours'
 		GROUP BY src_ip ORDER BY COUNT(*) DESC LIMIT 5`, tenantID)
 	if rows3 != nil {

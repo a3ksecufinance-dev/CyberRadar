@@ -170,7 +170,7 @@ func (s *NetSecService) detectFlowAnomalies(tenantID uuid.UUID, flow *model.NetS
 		return
 	}
 
-	_ = s.repo.UpdateFlowAnomaly(ctx, flow.ID, score, flags)
+	_ = s.repo.UpdateFlowAnomaly(ctx, tenantID, flow.ID, score, flags)
 
 	for _, a := range anomalies {
 		anomaly, err := s.repo.CreateAnomaly(ctx, tenantID, &model.CreateAnomalyRequest{
