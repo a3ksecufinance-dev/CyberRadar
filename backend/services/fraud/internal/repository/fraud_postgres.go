@@ -544,6 +544,20 @@ func (r *FraudRepository) UpdateCase(ctx context.Context, tenantID, caseID uuid.
 
 // ─── Watchlist ────────────────────────────────────────────────────────────────
 
+// nullIfEmpty turns an absent optional string into a NULL.
+//
+// A column whose CHECK lists the values it accepts rejects the empty string:
+// NULL passes a CHECK, "" does not. So an optional field held as a Go string
+// has to be sent as NULL when it is unset, or the whole insert is refused —
+// which is what happened to every watchlist entry added without a severity,
+// and the severity is optional in the request.
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func (r *FraudRepository) AddWatchlistEntry(ctx context.Context, tenantID uuid.UUID, req *model.AddWatchlistRequest, addedBy uuid.UUID) (*model.FraudWatchlistEntry, error) {
 	var e model.FraudWatchlistEntry
 	err := r.db.QueryRow(ctx, `
@@ -553,7 +567,8 @@ func (r *FraudRepository) AddWatchlistEntry(ctx context.Context, tenantID uuid.U
 		  SET reason=EXCLUDED.reason, severity=EXCLUDED.severity, is_active=TRUE, expires_at=EXCLUDED.expires_at
 		RETURNING id, tenant_id, entity_type, entity_value, reason, list_type,
 		          COALESCE(severity,''), is_active, expires_at, added_by, created_at`,
-		tenantID, req.EntityType, req.EntityValue, req.Reason, req.ListType, req.Severity, req.ExpiresAt, addedBy,
+		tenantID, req.EntityType, req.EntityValue, req.Reason, req.ListType,
+		nullIfEmpty(req.Severity), req.ExpiresAt, addedBy,
 	).Scan(
 		&e.ID, &e.TenantID, &e.EntityType, &e.EntityValue, &e.Reason, &e.ListType,
 		&e.Severity, &e.IsActive, &e.ExpiresAt, &e.AddedBy, &e.CreatedAt,
