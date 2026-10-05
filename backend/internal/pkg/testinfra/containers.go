@@ -27,7 +27,7 @@ import (
 const (
 	postgresImage   = "pgvector/pgvector:pg16"
 	clickhouseImage = "clickhouse/clickhouse-server:24.3-alpine"
-	kafkaImage      = "confluentinc/confluent-local:7.6.0"
+	kafkaImage      = "confluentinc/cp-kafka:7.6.0"
 
 	containerUser = "crp_test"
 	containerPass = "crp_test"
@@ -110,9 +110,16 @@ func startClickHouseContainer() (string, error) {
 			Image:        clickhouseImage,
 			ExposedPorts: []string{"9000/tcp"},
 			Env: map[string]string{
-				"CLICKHOUSE_USER":                      "default",
-				"CLICKHOUSE_PASSWORD":                  "",
-				"CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT": "1",
+				// Leave the default user usable without a password.
+				//
+				// With neither CLICKHOUSE_USER nor CLICKHOUSE_PASSWORD set, the
+				// image's entrypoint disables network access for 'default', and
+				// every connection from outside the container is refused with
+				// "Authentication failed" — while a health check run inside it,
+				// over localhost, still passes. Passing an empty password is not
+				// the same as skipping the setup, so this is the variable that
+				// does it.
+				"CLICKHOUSE_SKIP_USER_SETUP": "1",
 			},
 			// The port, and only the port.
 			//
@@ -162,12 +169,29 @@ func startKafkaContainer() (string, error) {
 			// test does: the broker is shared per process and the topics are
 			// what isolate tests from each other.
 			ExposedPorts: []string{"9092:9092/tcp"},
+			// The same image and the same KRaft settings as the CI service
+			// and deployments/docker-compose.yml.
+			//
+			// confluent-local was here before, and it runs a readiness check of
+			// its own that expects the listener layout it configures itself —
+			// an explicit one makes that check fail and the container exits.
+			// cp-kafka takes the configuration it is given, and this is the
+			// configuration a developer already runs.
 			Env: map[string]string{
-				"KAFKA_LISTENERS":                        "PLAINTEXT://0.0.0.0:9092,BROKER://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094",
-				"KAFKA_ADVERTISED_LISTENERS":             "PLAINTEXT://localhost:9092,BROKER://localhost:9093",
-				"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":   "PLAINTEXT:PLAINTEXT,BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT",
-				"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
-				"KAFKA_AUTO_CREATE_TOPICS_ENABLE":        "true",
+				"KAFKA_NODE_ID":                                  "1",
+				"KAFKA_PROCESS_ROLES":                            "broker,controller",
+				"KAFKA_LISTENERS":                                "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093",
+				"KAFKA_ADVERTISED_LISTENERS":                     "PLAINTEXT://localhost:9092",
+				"KAFKA_CONTROLLER_LISTENER_NAMES":                "CONTROLLER",
+				"KAFKA_LISTENER_SECURITY_PROTOCOL_MAP":           "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT",
+				"KAFKA_CONTROLLER_QUORUM_VOTERS":                 "1@localhost:9093",
+				"KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR":         "1",
+				"KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+				"KAFKA_TRANSACTION_STATE_LOG_MIN_ISR":            "1",
+				"KAFKA_AUTO_CREATE_TOPICS_ENABLE":                "true",
+				// 16 bytes in base64, which is what KRaft decodes. A readable
+				// label is refused outright.
+				"CLUSTER_ID": "abJmc64xRMOGJdyAgr4muQ",
 			},
 			WaitingFor: wait.ForListeningPort("9092/tcp").WithStartupTimeout(startupTimeout),
 		},

@@ -34,6 +34,15 @@ jobs:
         # a real server, and every read in it was broken by a driver binding
         # rule no unit test could have caught.
         image: clickhouse/clickhouse-server:24.3-alpine
+        env:
+          # Without this the entrypoint reports "neither CLICKHOUSE_USER nor
+          # CLICKHOUSE_PASSWORD is set, disabling network access for user
+          # 'default'" and every connection from outside the container is
+          # refused with "Authentication failed". The health check below ran
+          # inside the container, over localhost, so it passed — the service
+          # reported healthy while being unusable, and the migration step
+          # failed on its first file with code 516.
+          CLICKHOUSE_SKIP_USER_SETUP: 1
         ports: ["9000:9000", "8123:8123"]
         options: >-
           --health-cmd "clickhouse-client --query 'SELECT 1'"
