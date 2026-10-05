@@ -456,14 +456,31 @@ dépende d'une déclaration.
 > `golang-jwt/jwt/v5`, `ClickHouse/ch-go` avec `clickhouse-go` et le SDK
 > OpenTelemetry — et le contrôle est devenu bloquant. `npm audit` reste en
 > rapport : son critique et ses neuf majeures ne se résolvent que par une
-> migration Next 16 et next-intl 4, qui est un lot en soi. B3 (6 services sur
-> 15 restants), B4 et B5 restent.
+> migration Next 16 et next-intl 4, qui est un lot en soi. **B3 est fait** :
+> les 15 services qui n'avaient aucun test en ont un, écrit contre une vraie
+> base PostgreSQL via `internal/pkg/testinfra`, et plus aucun des 32 services
+> du dépôt n'est sans test. Le lot a trouvé **une cinquantaine de défauts** que
+> ni la compilation ni `vet` ne voyaient, et six services ne fonctionnaient pas
+> du tout : `dspm` entièrement, puis le POST des findings de `cspm`, des
+> violations de `dlp`, des alertes et des évaluations de `scs`, des correctifs
+> de `ot`, la liste des revues d'accès de `iga` et les quatre écritures de
+> `netsec` répondaient tous 500 sur la même cause — une colonne nullable lue
+> dans un `string` Go. S'y ajoutent onze écritures inter-clients (un voisin
+> pouvait déclencher un effacement à distance sur le téléphone d'un autre
+> client, révoquer l'accès d'un de ses collaborateurs, pousser son actif
+> industriel en « violations_found », ou faire monter le compteur d'une de ses
+> politiques), deux scores de risque qui ne pouvaient que monter, un filtre par
+> adresse IP qui ne pouvait rien trouver, et un SBOM qui perdait silencieusement
+> des composants. C'est la même leçon que B2, à l'échelle du dépôt : la
+> couverture ne protège pas du futur, elle révèle le présent. B4 et B5
+> restent.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|
 | US faites | **101 / 346** | 346 | relevé par lot |
-| Services sans test | ~~17~~ → ~~16~~ → **15 / 32** | 0 | `find … -name '*_test.go'` par service |
+| Services sans test | ~~17~~ → ~~16~~ → ~~15~~ → **0 / 32** ✓ | 0 | `find … -name '*_test.go'` par service |
 | Couverture, services critiques | ~~non mesurée~~ → **tenant 73 %, collector 83 %** ✓ | ≥ 60 % | `go test -cover` |
+| Couverture des dépôts de B3 | ~~0 %~~ → **71 à 83 %** sur les 15 | ≥ 60 % | `go test -cover ./internal/repository/` |
 | KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
 | NFR vérifiées | **0 / 14** | 14 | bancs L2 |
 | Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |

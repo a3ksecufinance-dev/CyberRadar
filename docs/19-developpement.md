@@ -173,6 +173,13 @@ qu'aucune compilation ne voit.
 |---|---|---|
 | `services/collector` | **83 %** | Les six analyseurs de format, et le sujet sur lequel chaque message atterrit |
 | `services/tenant` | **73 %** | La fusion partielle des politiques, les règles d'autorisation, la surface HTTP |
+| `services/cspm` | **83 %** | Dépôt : la posture par compte, et le compte auquel on peut rattacher quelque chose |
+| `services/iga` | **78 %** | Dépôt : la campagne de revue d'accès, les conflits de séparation des tâches |
+| `services/dlp` | **77 %** | Dépôt : la violation, l'étiquette d'un actif, le scan qui note un actif |
+| `services/netsec` | **75 %** | Dépôt : la politique entre deux zones, les flux, les adresses INET |
+| `services/scs` | **73 %** | Dépôt : le SBOM, le dossier fournisseur, l'évaluation |
+| `services/ot` | **71 %** | Dépôt : le score de risque d'un automate, les correctifs, les événements |
+| Les neuf autres de B3 | 60 à 80 % | Dépôt : la même paire de questions pour chacun (voir plus bas) |
 | `services/syslog` | — | Les analyseurs RFC 3164 / 5424 de l'écouteur TCP/UDP |
 | `services/siem` | — | Le moteur de corrélation |
 
@@ -206,6 +213,62 @@ compilait, passait `vet` et tournait :
    l'événement et son message étaient donc perdus en silence. Le découpage se
    fait maintenant devant la clé suivante, et `rt` est accepté sous ses deux
    formes (textuelle et millisecondes depuis l'époque).
+
+### Les deux questions que pose un test de dépôt
+
+Les 15 services qui n'avaient aucun test en ont un, et c'est le même test à
+chaque fois : un fichier `internal/repository/<service>_postgres_test.go` qui
+tourne contre une vraie base. Il ne cherche pas la couverture, il pose deux
+questions qu'une doublure de base ne peut pas entendre.
+
+**1. Une colonne nullable lue dans un `string` Go.** Une colonne sans valeur par
+défaut, remplie seulement plus tard — `resolved_by` quand l'alerte est fermée,
+`decision` quand la revue est tranchée, `applied_by` quand le correctif est
+posé — rend `NULL` à la création. `pgx` refuse de l'écrire dans un `string` :
+`cannot scan NULL into *string`. Le code compile, `vet` est muet, et **chaque**
+appel répond 500. Six services étaient dans cet état sur leur écriture
+principale, et `dspm` sur la totalité de ses lectures. La correction est un
+`COALESCE(colonne,'')` dans la projection ; la détection, un test qui crée
+l'objet **sans rien d'optionnel** — ce que fait un vrai agent, et ce que ne
+fait jamais un test écrit depuis la structure Go.
+
+Variante de la même classe : une colonne qui porte un `CHECK (col IN (…))` et
+reçoit `''` d'un champ Go optionnel. `NULL` passe un `CHECK`, `''` non. Dans
+`scs`, `assessment_type` avait un `DEFAULT` *et* un `CHECK`, mais l'`INSERT`
+nommait la colonne : le défaut ne s'appliquait donc jamais et toute évaluation
+ouverte sans type était refusée par la base.
+
+**2. Un identifiant venu de la requête, dont on ne vérifie pas le propriétaire.**
+Le filtre de tenant sur une écriture ne prouve rien quand c'est la *cible* qui
+vient du client : la ligne écrite porte le tenant de l'appelant, donc elle est
+« la sienne » quel que soit l'appareil, le compte, la zone ou le fournisseur
+qu'elle désigne. Les clés étrangères ne portent pas de tenant ; PostgreSQL
+accepte l'identifiant de n'importe quel client. Onze écritures étaient dans ce
+cas, et ce qu'elles permettaient n'est pas théorique :
+
+- déclencher un effacement à distance sur le téléphone d'un autre client, ou y
+  installer une application (`mobile`) ;
+- révoquer l'accès d'un collaborateur d'un autre client, en lisant au passage
+  son nom, son courriel et son rôle (`iga`) ;
+- pousser l'automate d'une autre usine en « violations_found » et son score de
+  risque à 100 (`dlp`, `ot`) ;
+- écrire une règle de pare-feu entre deux zones d'un autre réseau, et lire le
+  nom de ces zones dans la réponse (`netsec`) ;
+- faire monter le compteur d'infractions d'une politique voisine, c'est-à-dire
+  le classement de son tableau de bord (`dlp`, `netsec`) ;
+- déposer une alerte « vendor_breach » dans le dossier fournisseur d'un autre
+  client, où elle s'affiche comme son propre constat (`scs`).
+
+La forme de la correction est la même partout : une fonction
+`<objet>BelongsTo(ctx, tenantID, id)` appelée **avant** l'écriture, et un
+prédicat de tenant sur les jointures qui remplissent un nom ou comptent des
+lignes à côté d'un objet.
+
+Deux classes de moindre portée reviennent aussi : un compteur ou un score
+recalculé dans un seul sens (le risque d'un actif qui ne pouvait que monter,
+dans `ot` et `scs`), et une écriture qui ne trouve rien et le rapporte comme un
+succès — un `RowsAffected()` jeté. Le test les attrape de la même façon : il
+affirme des **nombres**, jamais l'absence d'erreur.
 
 ### Tester une chaîne d'ingestion : `testinfra.Kafka`
 
