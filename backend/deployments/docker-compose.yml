@@ -191,7 +191,9 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      CLUSTER_ID: crp-kafka-cluster-dev
+      # 16 bytes in base64, which is what KRaft decodes — a readable label
+      # is refused outright. The previous value decoded to 15 bytes.
+      CLUSTER_ID: abJmc64xRMOGJdyAgr4muQ
     ports:
       - "9092:9092"
     volumes:

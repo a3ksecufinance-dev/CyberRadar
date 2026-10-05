@@ -1,37 +1,37 @@
-go 1.22
+go 1.25.3
 
 use (
 	./internal
-	./services/tenant
-	./services/identity
-	./services/audit
-	./services/notification
-	./services/collector
-	./services/pipeline
-	./services/asset
-	./services/pam
-	./services/siem
-	./services/ueba
-	./services/ti
-	./services/vuln
-	./services/attackpath
-	./services/knowledgegraph
-	./services/soar
-	./services/dashboard
-	./services/copilot
 	./services/apifw
+	./services/asset
+	./services/attackpath
+	./services/audit
+	./services/collector
 	./services/compliance
+	./services/copilot
+	./services/cspm
+	./services/dashboard
+	./services/dlp
+	./services/dspm
 	./services/easm
 	./services/fraud
-	./services/dlp
-	./services/netsec
-	./services/risk
+	./services/identity
 	./services/iga
-	./services/cspm
 	./services/ir
-	./services/scs
-	./services/ot
+	./services/knowledgegraph
 	./services/mobile
-	./services/dspm
+	./services/netsec
+	./services/notification
+	./services/ot
+	./services/pam
+	./services/pipeline
+	./services/risk
+	./services/scs
+	./services/siem
+	./services/soar
 	./services/syslog
+	./services/tenant
+	./services/ti
+	./services/ueba
+	./services/vuln
 )

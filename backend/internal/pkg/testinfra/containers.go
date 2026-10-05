@@ -114,10 +114,16 @@ func startClickHouseContainer() (string, error) {
 				"CLICKHOUSE_PASSWORD":                  "",
 				"CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT": "1",
 			},
-			WaitingFor: wait.ForAll(
-				wait.ForLog("Ready for connections"),
-				wait.ForListeningPort("9000/tcp"),
-			).WithDeadline(startupTimeout),
+			// The port, and only the port.
+			//
+			// Waiting for a log line does not work here: this image logs to
+			// /var/log/clickhouse-server/ rather than to standard output, so
+			// "Ready for connections" never appears on the stream
+			// testcontainers reads, and every start failed after the strategy's
+			// own sixty-second timeout — whatever deadline the set carried.
+			// The caller pings the server afterwards, which is the real check.
+			WaitingFor: wait.ForListeningPort("9000/tcp").
+				WithStartupTimeout(startupTimeout),
 		},
 		Started: true,
 	})
@@ -141,8 +147,21 @@ func startKafkaContainer() (string, error) {
 
 	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        kafkaImage,
-			ExposedPorts: []string{"9092/tcp"},
+			Image: kafkaImage,
+			// A fixed host port, not a mapped one.
+			//
+			// A Kafka client connects once to bootstrap and is then redirected
+			// to whatever the broker advertises. The broker has to advertise an
+			// address the client can reach, and it is configured before the
+			// container starts — so it cannot know a randomly mapped port. With
+			// one, the first connection succeeded and the second was reset by
+			// the broker on a port nothing listened to.
+			//
+			// Binding 9092 to 9092 makes the advertised address true. It costs
+			// the ability to run two brokers at once on one machine, which no
+			// test does: the broker is shared per process and the topics are
+			// what isolate tests from each other.
+			ExposedPorts: []string{"9092:9092/tcp"},
 			Env: map[string]string{
 				"KAFKA_LISTENERS":                        "PLAINTEXT://0.0.0.0:9092,BROKER://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094",
 				"KAFKA_ADVERTISED_LISTENERS":             "PLAINTEXT://localhost:9092,BROKER://localhost:9093",

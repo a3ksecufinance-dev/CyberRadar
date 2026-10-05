@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.22"
+  GO_VERSION: "1.25"
   NODE_VERSION: "20"
 
 jobs:
@@ -74,7 +74,11 @@ jobs:
           KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
           KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
           KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-          CLUSTER_ID: crp-kafka-cluster-ci
+          # A KRaft cluster id is a 16-byte UUID in base64, not a label:
+          # cp-kafka decodes it and refuses to start on anything else.
+          # "crp-kafka-cluster-ci" decoded to 15 bytes, so the broker
+          # never came up and the whole job failed on its health check.
+          CLUSTER_ID: abJmc64xRMOGJdyAgr4muQ
         ports: ["9092:9092"]
         options: >-
           --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
@@ -363,15 +367,6 @@ jobs:
   vulnerabilities:
     name: Dependency vulnerabilities
     runs-on: ubuntu-latest
-    # Reports rather than gates, for two reasons, and should be made blocking
-    # once both are cleared:
-    #   - npm audit still reports 1 critical and 4 high, all of which only a
-    #     Next 16 migration resolves. The critical one is a DoS in the Image
-    #     Optimizer, which this app disables (images.unoptimized in
-    #     next.config.mjs), so it is not reachable here.
-    #   - govulncheck could not be run before this landed: the development
-    #     environment cannot reach vuln.go.dev. Its first run needs triage.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -380,6 +375,13 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.work.sum
 
+      # Blocking, as of the first run that was triaged.
+      #
+      # Its first run reported 49 reachable vulnerabilities: the Go standard
+      # library at 1.22.12, golang.org/x/net, golang-jwt/jwt/v5,
+      # ClickHouse/ch-go and the OpenTelemetry SDK. All five are now at a fixed
+      # version, so a new one is a regression and has to fail rather than be
+      # read in a log nobody opens.
       - name: govulncheck
         working-directory: backend
         run: |
@@ -397,6 +399,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Reports rather than gates, and it is the one half of this job that
+      # still does.
+      #
+      # npm audit reports 1 critical and 9 high, every one of which only a
+      # Next 16 and next-intl 4 migration resolves — both breaking changes, and
+      # a piece of work of their own. The critical one is a denial of service in
+      # the Image Optimizer, which this application disables
+      # (images.unoptimized in next.config.mjs), so it is not reachable here.
+      #
+      # Gating on it today would mean a red pipeline on every commit until that
+      # migration lands, which teaches everyone to ignore the pipeline. It
+      # becomes blocking with the migration, not before.
       - name: npm audit
         working-directory: frontend
+        continue-on-error: true
         run: npm audit --audit-level=high

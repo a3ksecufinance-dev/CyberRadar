@@ -122,7 +122,7 @@ de la dette plus vite qu'il n'ajoute de la valeur.
 | Au moins un test sur chacun des 15 autres services sans test | 25 j |
 | Parcours de bout en bout scripté et chronométré, en CI | 10 j |
 | Migrations à état (`golang-migrate` sur les 47 existantes) | 12 j |
-| Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants | 5 j |
+| Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants — **`govulncheck` est fait et bloquant** ✓ ; `npm audit` attend la migration Next 16 | 5 j |
 | Les 5 tables mortes : **supprimées** par la migration `000048` — arbitrage tranché, L12 les recréera en les implémentant | 2 j |
 
 **Sortie** : aucun service à 0 test, `make e2e-chain` vert en CI, deux
@@ -451,7 +451,13 @@ dépende d'une déclaration.
 > horodaté en l'an 0000, et les extensions CEF découpées sur les espaces (voir
 > [`docs/19`](../docs/19-developpement.md#ce-qui-est-le-plus-couvert)). C'est
 > l'argument du lot : la couverture ne protège pas du futur, elle révèle le
-> présent. B3 à B6 restent.
+> présent. **B6 est partiellement fait** : les 49 vulnérabilités que
+> `govulncheck` signalait sont corrigées — Go 1.22 → 1.25, `golang.org/x/net`,
+> `golang-jwt/jwt/v5`, `ClickHouse/ch-go` avec `clickhouse-go` et le SDK
+> OpenTelemetry — et le contrôle est devenu bloquant. `npm audit` reste en
+> rapport : son critique et ses neuf majeures ne se résolvent que par une
+> migration Next 16 et next-intl 4, qui est un lot en soi. B3 (6 services sur
+> 15 restants), B4 et B5 restent.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|

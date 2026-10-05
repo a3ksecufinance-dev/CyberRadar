@@ -28,7 +28,7 @@ incident. Backend Go en microservices, frontend Next.js.
 
 ### Prérequis
 
-Go 1.22+, Node 20+, Docker et Docker Compose, `psql`, `openssl`.
+Go 1.25+, Node 20+, Docker et Docker Compose, `psql`, `openssl`.
 
 ### Backend
 

@@ -14,7 +14,7 @@ les mêmes ports.
 
 | | Version | Pourquoi |
 |---|---|---|
-| Go | 1.22+ | L'espace de travail `go.work` l'exige |
+| Go | 1.25+ | L'espace de travail `go.work` l'exige. La version est un minimum de sécurité et non de confort : les correctifs de `net/url`, `crypto/tls` et `crypto/x509` que `govulncheck` exige n'existent qu'à partir de 1.25 |
 | Node | 20+ | Next.js 14 |
 | `psql` | 14+ | Les migrations sont appliquées par `psql` |
 | `openssl` | — | Génère la paire RSA des jetons |
