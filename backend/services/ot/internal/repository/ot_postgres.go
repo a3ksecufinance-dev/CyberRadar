@@ -62,6 +62,64 @@ func riskLevelFromScore(score int) string {
 	}
 }
 
+// ─── Ownership ────────────────────────────────────────────────────────────────
+
+// assetBelongsTo and zoneBelongsTo refuse an identifier the caller's tenant
+// does not own.
+//
+// A vulnerability, a patch, an event and a communication all name an asset or a
+// zone taken from the request body, and the row written carries the caller's
+// own tenant_id — so the tenant filter on the insert proves nothing about what
+// the row points at. The foreign keys reference ot_assets(id) and ot_zones(id)
+// with no tenant of their own, so PostgreSQL accepts an identifier from any
+// customer. In a plant that matters more than elsewhere: a vulnerability or an
+// event attached to a controller is counted on it, and a patch queued against
+// it claims a maintenance window on somebody else's production line.
+func (r *OTRepository) assetBelongsTo(ctx context.Context, tenantID, assetID uuid.UUID) error {
+	return r.ownsRow(ctx, "ot_assets", "asset", tenantID, assetID)
+}
+
+func (r *OTRepository) zoneBelongsTo(ctx context.Context, tenantID, zoneID uuid.UUID) error {
+	return r.ownsRow(ctx, "ot_zones", "zone", tenantID, zoneID)
+}
+
+// ownsAll is the same question for the optional identifiers a request carries.
+func (r *OTRepository) ownsAll(ctx context.Context, tenantID uuid.UUID,
+	assets []*uuid.UUID, zones []*uuid.UUID) error {
+	for _, id := range assets {
+		if id == nil {
+			continue
+		}
+		if err := r.assetBelongsTo(ctx, tenantID, *id); err != nil {
+			return err
+		}
+	}
+	for _, id := range zones {
+		if id == nil {
+			continue
+		}
+		if err := r.zoneBelongsTo(ctx, tenantID, *id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ownsRow asks the question for one table. The table name is a constant from
+// the callers above, never anything that came from a request.
+func (r *OTRepository) ownsRow(ctx context.Context, table, what string, tenantID, id uuid.UUID) error {
+	var exists bool
+	if err := r.db.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM "+table+" WHERE tenant_id=$1 AND id=$2)",
+		tenantID, id).Scan(&exists); err != nil {
+		return fmt.Errorf("check %s: %w", what, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s not found", what)
+	}
+	return nil
+}
+
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreateAsset(ctx context.Context, tenantID uuid.UUID, req *model.CreateAssetRequest, createdBy *uuid.UUID) (*model.OTAsset, error) {
@@ -89,8 +147,11 @@ func (r *OTRepository) CreateAsset(ctx context.Context, tenantID uuid.UUID, req 
 		  ip_address,mac_address,protocol,site,zone,purdue_level,risk_score,risk_level,
 		  is_internet_facing,criticality,install_date,end_of_life_date,tags,metadata,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
-		 RETURNING id,tenant_id,name,description,asset_type,vendor,model,firmware_version,serial_number,
-		           ip_address,mac_address,protocol,site,zone,purdue_level,risk_score,risk_level,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),asset_type,
+		           COALESCE(vendor,''),COALESCE(model,''),COALESCE(firmware_version,''),
+		           COALESCE(serial_number,''),COALESCE(ip_address,''),COALESCE(mac_address,''),
+		           protocol,COALESCE(site,''),COALESCE(zone,''),
+		           COALESCE(purdue_level,0),risk_score,risk_level,
 		           is_internet_facing,is_patched,last_patched_at,is_active,criticality,
 		           install_date,end_of_life_date,tags,metadata,created_by,created_at,updated_at`,
 		tenantID, req.Name, req.Description, req.AssetType,
@@ -117,16 +178,18 @@ func (r *OTRepository) GetAsset(ctx context.Context, tenantID, id uuid.UUID) (*m
 	var a model.OTAsset
 	var metaRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT a.id,a.tenant_id,a.name,a.description,a.asset_type,a.vendor,a.model,
-		        a.firmware_version,a.serial_number,a.ip_address,a.mac_address,a.protocol,
-		        a.site,a.zone,a.purdue_level,a.risk_score,a.risk_level,
+		`SELECT a.id,a.tenant_id,a.name,COALESCE(a.description,''),a.asset_type,
+		        COALESCE(a.vendor,''),COALESCE(a.model,''),COALESCE(a.firmware_version,''),
+		        COALESCE(a.serial_number,''),COALESCE(a.ip_address,''),COALESCE(a.mac_address,''),
+		        a.protocol,COALESCE(a.site,''),COALESCE(a.zone,''),
+		        COALESCE(a.purdue_level,0),a.risk_score,a.risk_level,
 		        a.is_internet_facing,a.is_patched,a.last_patched_at,a.is_active,a.criticality,
 		        a.install_date,a.end_of_life_date,a.tags,a.metadata,a.created_by,a.created_at,a.updated_at,
 		        COUNT(DISTINCT v.id) FILTER (WHERE v.id IS NOT NULL AND v.status='open') AS vuln_count,
 		        COUNT(DISTINCT e.id) FILTER (WHERE e.id IS NOT NULL AND e.status='open') AS event_count
 		 FROM ot_assets a
-		 LEFT JOIN ot_vulnerabilities v ON v.asset_id=a.id
-		 LEFT JOIN ot_events e ON e.asset_id=a.id
+		 LEFT JOIN ot_vulnerabilities v ON v.asset_id=a.id AND v.tenant_id=a.tenant_id
+		 LEFT JOIN ot_events e ON e.asset_id=a.id AND e.tenant_id=a.tenant_id
 		 WHERE a.tenant_id=$1 AND a.id=$2
 		 GROUP BY a.id`,
 		tenantID, id,
@@ -187,9 +250,11 @@ func (r *OTRepository) ListAssets(ctx context.Context, tenantID uuid.UUID, f mod
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,asset_type,vendor,model,
-		        firmware_version,serial_number,ip_address,mac_address,protocol,
-		        site,zone,purdue_level,risk_score,risk_level,
+		`SELECT id,tenant_id,name,COALESCE(description,''),asset_type,
+		        COALESCE(vendor,''),COALESCE(model,''),COALESCE(firmware_version,''),
+		        COALESCE(serial_number,''),COALESCE(ip_address,''),COALESCE(mac_address,''),
+		        protocol,COALESCE(site,''),COALESCE(zone,''),
+		        COALESCE(purdue_level,0),risk_score,risk_level,
 		        is_internet_facing,is_patched,last_patched_at,is_active,criticality,
 		        install_date,end_of_life_date,tags,metadata,created_by,created_at,updated_at
 		 FROM ot_assets WHERE `+where+
@@ -315,9 +380,11 @@ func (r *OTRepository) UpdateAsset(ctx context.Context, tenantID, id uuid.UUID, 
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_assets SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,description,asset_type,vendor,model,
-		           firmware_version,serial_number,ip_address,mac_address,protocol,
-		           site,zone,purdue_level,risk_score,risk_level,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),asset_type,
+		           COALESCE(vendor,''),COALESCE(model,''),COALESCE(firmware_version,''),
+		           COALESCE(serial_number,''),COALESCE(ip_address,''),COALESCE(mac_address,''),
+		           protocol,COALESCE(site,''),COALESCE(zone,''),
+		           COALESCE(purdue_level,0),risk_score,risk_level,
 		           is_internet_facing,is_patched,last_patched_at,is_active,criticality,
 		           install_date,end_of_life_date,tags,metadata,created_by,created_at,updated_at`,
 		args...,
@@ -348,7 +415,7 @@ func (r *OTRepository) CreateZone(ctx context.Context, tenantID uuid.UUID, req *
 		 (tenant_id,name,description,zone_type,purdue_level,site,
 		  is_air_gapped,firewall_present,ids_present,network_ranges,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 RETURNING id,tenant_id,name,description,zone_type,purdue_level,site,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),zone_type,COALESCE(purdue_level,0),COALESCE(site,''),
 		           is_air_gapped,firewall_present,ids_present,risk_score,asset_count,
 		           network_ranges,created_by,created_at,updated_at`,
 		tenantID, req.Name, req.Description, req.ZoneType, req.PurdueLevel, req.Site,
@@ -356,7 +423,10 @@ func (r *OTRepository) CreateZone(ctx context.Context, tenantID uuid.UUID, req *
 	).Scan(&z.ID, &z.TenantID, &z.Name, &z.Description, &z.ZoneType, &z.PurdueLevel, &z.Site,
 		&z.IsAirGapped, &z.FirewallPresent, &z.IDSPresent, &z.RiskScore, &z.AssetCount,
 		&z.NetworkRanges, &z.CreatedBy, &z.CreatedAt, &z.UpdatedAt)
-	return &z, err
+	if err != nil {
+		return nil, err
+	}
+	return &z, nil
 }
 
 func (r *OTRepository) ListZones(ctx context.Context, tenantID uuid.UUID, site string) ([]model.OTZone, error) {
@@ -369,7 +439,7 @@ func (r *OTRepository) ListZones(ctx context.Context, tenantID uuid.UUID, site s
 		n++
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,zone_type,purdue_level,site,
+		`SELECT id,tenant_id,name,COALESCE(description,''),zone_type,COALESCE(purdue_level,0),COALESCE(site,''),
 		        is_air_gapped,firewall_present,ids_present,risk_score,asset_count,
 		        network_ranges,created_by,created_at,updated_at
 		 FROM ot_zones WHERE `+strings.Join(cond, " AND ")+
@@ -437,19 +507,27 @@ func (r *OTRepository) UpdateZone(ctx context.Context, tenantID, id uuid.UUID, r
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_zones SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,description,zone_type,purdue_level,site,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),zone_type,COALESCE(purdue_level,0),COALESCE(site,''),
 		           is_air_gapped,firewall_present,ids_present,risk_score,asset_count,
 		           network_ranges,created_by,created_at,updated_at`,
 		args...,
 	).Scan(&z.ID, &z.TenantID, &z.Name, &z.Description, &z.ZoneType, &z.PurdueLevel, &z.Site,
 		&z.IsAirGapped, &z.FirewallPresent, &z.IDSPresent, &z.RiskScore, &z.AssetCount,
 		&z.NetworkRanges, &z.CreatedBy, &z.CreatedAt, &z.UpdatedAt)
-	return &z, err
+	if err != nil {
+		return nil, err
+	}
+	return &z, nil
 }
 
 // ─── Communications ───────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreateCommunication(ctx context.Context, tenantID uuid.UUID, req *model.CreateCommunicationRequest) (*model.OTCommunication, error) {
+	if err := r.ownsAll(ctx, tenantID,
+		[]*uuid.UUID{req.SrcAssetID, req.DstAssetID},
+		[]*uuid.UUID{req.SrcZoneID, req.DstZoneID}); err != nil {
+		return nil, err
+	}
 	dir := req.Direction
 	if dir == "" {
 		dir = "bidirectional"
@@ -461,14 +539,17 @@ func (r *OTRepository) CreateCommunication(ctx context.Context, tenantID uuid.UU
 		  protocol,port,direction,is_authorized,is_anomalous)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		 RETURNING id,tenant_id,src_asset_id,dst_asset_id,src_zone_id,dst_zone_id,
-		           protocol,port,direction,is_authorized,is_anomalous,
+		           COALESCE(protocol,''),COALESCE(port,0),direction,is_authorized,is_anomalous,
 		           first_seen_at,last_seen_at,packet_count,created_at`,
 		tenantID, req.SrcAssetID, req.DstAssetID, req.SrcZoneID, req.DstZoneID,
 		req.Protocol, req.Port, dir, req.IsAuthorized, req.IsAnomalous,
 	).Scan(&c.ID, &c.TenantID, &c.SrcAssetID, &c.DstAssetID, &c.SrcZoneID, &c.DstZoneID,
 		&c.Protocol, &c.Port, &c.Direction, &c.IsAuthorized, &c.IsAnomalous,
 		&c.FirstSeenAt, &c.LastSeenAt, &c.PacketCount, &c.CreatedAt)
-	return &c, err
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func (r *OTRepository) ListCommunications(ctx context.Context, tenantID uuid.UUID, anomalousOnly bool) ([]model.OTCommunication, error) {
@@ -482,7 +563,7 @@ func (r *OTRepository) ListCommunications(ctx context.Context, tenantID uuid.UUI
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,src_asset_id,dst_asset_id,src_zone_id,dst_zone_id,
-		        protocol,port,direction,is_authorized,is_anomalous,
+		        COALESCE(protocol,''),COALESCE(port,0),direction,is_authorized,is_anomalous,
 		        first_seen_at,last_seen_at,packet_count,created_at
 		 FROM ot_communications WHERE `+strings.Join(cond, " AND ")+
 			` ORDER BY last_seen_at DESC LIMIT 200`,
@@ -507,6 +588,9 @@ func (r *OTRepository) ListCommunications(ctx context.Context, tenantID uuid.UUI
 // ─── Vulnerabilities ──────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreateVulnerability(ctx context.Context, tenantID uuid.UUID, req *model.CreateVulnerabilityRequest) (*model.OTVulnerability, error) {
+	if err := r.assetBelongsTo(ctx, tenantID, req.AssetID); err != nil {
+		return nil, err
+	}
 	tags := req.Tags
 	if tags == nil {
 		tags = []string{}
@@ -518,9 +602,11 @@ func (r *OTRepository) CreateVulnerability(ctx context.Context, tenantID uuid.UU
 		  affects_availability,affects_safety,potential_impact,
 		  patch_available,patch_notes,workaround,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		 RETURNING id,tenant_id,asset_id,cve_id,ics_cert_id,title,description,severity,cvss_score,
-		           affects_availability,affects_safety,potential_impact,status,
-		           patch_available,patch_notes,workaround,discovered_at,remediated_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,asset_id,COALESCE(cve_id,''),COALESCE(ics_cert_id,''),title,
+		           COALESCE(description,''),severity,cvss_score,
+		           affects_availability,affects_safety,COALESCE(potential_impact,''),status,
+		           patch_available,COALESCE(patch_notes,''),COALESCE(workaround,''),
+		           discovered_at,remediated_at,tags,created_at,updated_at`,
 		tenantID, req.AssetID, req.CVEID, req.ICSCertID, req.Title, req.Description,
 		req.Severity, req.CVSSScore, req.AffectsAvailability, req.AffectsSafety,
 		req.PotentialImpact, req.PatchAvailable, req.PatchNotes, req.Workaround, tags,
@@ -531,8 +617,14 @@ func (r *OTRepository) CreateVulnerability(ctx context.Context, tenantID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	// Update asset risk score
-	go r.refreshAssetRisk(context.Background(), tenantID, req.AssetID)
+	// Recomputed here, not in a goroutine.
+	//
+	// It was "go r.refreshAssetRisk(context.Background(), …)", so the answer to
+	// the call that raised the vulnerability carried the score from before it,
+	// and a screen refreshed quickly enough showed the old number. It is two
+	// indexed reads and one update on a single row; there is nothing to gain by
+	// racing the caller with it.
+	r.refreshAssetRisk(ctx, tenantID, req.AssetID)
 	return &v, nil
 }
 
@@ -565,9 +657,11 @@ func (r *OTRepository) ListVulnerabilities(ctx context.Context, tenantID uuid.UU
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,cve_id,ics_cert_id,title,description,severity,cvss_score,
-		        affects_availability,affects_safety,potential_impact,status,
-		        patch_available,patch_notes,workaround,discovered_at,remediated_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,asset_id,COALESCE(cve_id,''),COALESCE(ics_cert_id,''),title,
+		           COALESCE(description,''),severity,cvss_score,
+		        affects_availability,affects_safety,COALESCE(potential_impact,''),status,
+		        patch_available,COALESCE(patch_notes,''),COALESCE(workaround,''),
+		        discovered_at,remediated_at,tags,created_at,updated_at
 		 FROM ot_vulnerabilities WHERE `+where+
 			fmt.Sprintf(` ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, discovered_at DESC LIMIT $%d OFFSET $%d`, n, n+1),
 		args...)
@@ -624,15 +718,28 @@ func (r *OTRepository) UpdateVulnerability(ctx context.Context, tenantID, id uui
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_vulnerabilities SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,asset_id,cve_id,ics_cert_id,title,description,severity,cvss_score,
-		           affects_availability,affects_safety,potential_impact,status,
-		           patch_available,patch_notes,workaround,discovered_at,remediated_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,asset_id,COALESCE(cve_id,''),COALESCE(ics_cert_id,''),title,
+		           COALESCE(description,''),severity,cvss_score,
+		           affects_availability,affects_safety,COALESCE(potential_impact,''),status,
+		           patch_available,COALESCE(patch_notes,''),COALESCE(workaround,''),
+		           discovered_at,remediated_at,tags,created_at,updated_at`,
 		args...,
 	).Scan(&v.ID, &v.TenantID, &v.AssetID, &v.CVEID, &v.ICSCertID, &v.Title, &v.Description,
 		&v.Severity, &v.CVSSScore, &v.AffectsAvailability, &v.AffectsSafety, &v.PotentialImpact,
 		&v.Status, &v.PatchAvailable, &v.PatchNotes, &v.Workaround,
 		&v.DiscoveredAt, &v.RemediatedAt, &v.Tags, &v.CreatedAt, &v.UpdatedAt)
-	return &v, err
+	if err != nil {
+		return nil, err
+	}
+	// A status change moves the open count, so the asset's score moves with it.
+	//
+	// Only the creation refreshed it before, which meant the score could rise
+	// and never fall: patching every vulnerability on a controller left it at
+	// the number it reached when the last one was found.
+	if req.Status != nil {
+		r.refreshAssetRisk(ctx, tenantID, v.AssetID)
+	}
+	return &v, nil
 }
 
 // refreshAssetRisk recomputes risk_score/risk_level for an asset based on open vuln count
@@ -657,6 +764,10 @@ func (r *OTRepository) refreshAssetRisk(ctx context.Context, tenantID, assetID u
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreateEvent(ctx context.Context, tenantID uuid.UUID, req *model.CreateEventRequest) (*model.OTEvent, error) {
+	if err := r.ownsAll(ctx, tenantID,
+		[]*uuid.UUID{req.AssetID}, []*uuid.UUID{req.ZoneID}); err != nil {
+		return nil, err
+	}
 	tags := req.Tags
 	if tags == nil {
 		tags = []string{}
@@ -685,7 +796,10 @@ func (r *OTRepository) CreateEvent(ctx context.Context, tenantID uuid.UUID, req 
 		&e.Title, &e.Description, &e.SourceIP, &e.DestIP, &e.Protocol, &e.RawPayload,
 		&e.DetectedBy, &e.DetectionRule, &e.AcknowledgedBy, &e.AcknowledgedAt,
 		&e.ResolvedBy, &e.ResolvedAt, &e.EventTime, &e.Tags, &e.CreatedAt, &e.UpdatedAt)
-	return &e, err
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 func (r *OTRepository) ListEvents(ctx context.Context, tenantID uuid.UUID, f model.ListEventsFilter) ([]model.OTEvent, int, error) {
@@ -794,12 +908,24 @@ func (r *OTRepository) UpdateEvent(ctx context.Context, tenantID, id uuid.UUID, 
 		&e.Title, &e.Description, &e.SourceIP, &e.DestIP, &e.Protocol, &e.RawPayload,
 		&e.DetectedBy, &e.DetectionRule, &e.AcknowledgedBy, &e.AcknowledgedAt,
 		&e.ResolvedBy, &e.ResolvedAt, &e.EventTime, &e.Tags, &e.CreatedAt, &e.UpdatedAt)
-	return &e, err
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }
 
 // ─── Policies ─────────────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, req *model.CreatePolicyRequest, createdBy *uuid.UUID) (*model.OTPolicy, error) {
+	// An empty rule is an empty object, not JSON null.
+	//
+	// json.Marshal of a nil map writes "null", which PostgreSQL stores happily
+	// as a JSONB null and which unmarshals back into a nil map — so a policy
+	// created without a rule came back as "rule": null, where the schema's own
+	// default for the column is '{}'.
+	if req.Rule == nil {
+		req.Rule = map[string]any{}
+	}
 	rule, _ := json.Marshal(req.Rule)
 	scope := req.Scope
 	if scope == "" {
@@ -815,7 +941,7 @@ func (r *OTRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, req
 		`INSERT INTO ot_policies
 		 (tenant_id,name,description,policy_type,scope,scope_ref,rule,action,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		 RETURNING id,tenant_id,name,description,policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at`,
 		tenantID, req.Name, req.Description, req.PolicyType, scope, req.ScopeRef, rule, action, createdBy,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType,
 		&p.Scope, &p.ScopeRef, &ruleRaw, &p.Action, &p.IsActive, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
@@ -836,7 +962,7 @@ func (r *OTRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, pol
 		n++
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at
+		`SELECT id,tenant_id,name,COALESCE(description,''),policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at
 		 FROM ot_policies WHERE `+strings.Join(cond, " AND ")+` ORDER BY policy_type,name`,
 		args...)
 	if err != nil {
@@ -894,7 +1020,7 @@ func (r *OTRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.UUID,
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_policies SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,description,policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,scope,scope_ref,rule,action,is_active,created_by,created_at,updated_at`,
 		args...,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType,
 		&p.Scope, &p.ScopeRef, &ruleRaw, &p.Action, &p.IsActive, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
@@ -908,6 +1034,9 @@ func (r *OTRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.UUID,
 // ─── Patches ──────────────────────────────────────────────────────────────────
 
 func (r *OTRepository) CreatePatch(ctx context.Context, tenantID uuid.UUID, req *model.CreatePatchRequest, createdBy *uuid.UUID) (*model.OTPatch, error) {
+	if err := r.assetBelongsTo(ctx, tenantID, req.AssetID); err != nil {
+		return nil, err
+	}
 	cveIDs := req.CVEIDs
 	if cveIDs == nil {
 		cveIDs = []string{}
@@ -926,9 +1055,11 @@ func (r *OTRepository) CreatePatch(ctx context.Context, tenantID uuid.UUID, req 
 		 (tenant_id,asset_id,patch_type,title,description,version_before,version_after,
 		  cve_ids,risk_level,requires_downtime,scheduled_at,maintenance_window,rollback_plan,notes,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		 RETURNING id,tenant_id,asset_id,patch_type,title,description,version_before,version_after,
-		           cve_ids,status,risk_level,requires_downtime,scheduled_at,maintenance_window,
-		           applied_at,applied_by,rollback_plan,notes,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,asset_id,patch_type,title,COALESCE(description,''),
+		           COALESCE(version_before,''),COALESCE(version_after,''),
+		           cve_ids,status,risk_level,requires_downtime,scheduled_at,
+		           COALESCE(maintenance_window,''),applied_at,COALESCE(applied_by,''),
+		           COALESCE(rollback_plan,''),COALESCE(notes,''),created_by,created_at,updated_at`,
 		tenantID, req.AssetID, patchType, req.Title, req.Description,
 		req.VersionBefore, req.VersionAfter, cveIDs, riskLevel,
 		req.RequiresDowntime, req.ScheduledAt, req.MaintenanceWindow,
@@ -937,7 +1068,10 @@ func (r *OTRepository) CreatePatch(ctx context.Context, tenantID uuid.UUID, req 
 		&p.VersionBefore, &p.VersionAfter, &p.CVEIDs, &p.Status, &p.RiskLevel,
 		&p.RequiresDowntime, &p.ScheduledAt, &p.MaintenanceWindow,
 		&p.AppliedAt, &p.AppliedBy, &p.RollbackPlan, &p.Notes, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
-	return &p, err
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 func (r *OTRepository) ListPatches(ctx context.Context, tenantID uuid.UUID, assetID *uuid.UUID, status string) ([]model.OTPatch, error) {
@@ -955,9 +1089,11 @@ func (r *OTRepository) ListPatches(ctx context.Context, tenantID uuid.UUID, asse
 		n++
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,asset_id,patch_type,title,description,version_before,version_after,
-		        cve_ids,status,risk_level,requires_downtime,scheduled_at,maintenance_window,
-		        applied_at,applied_by,rollback_plan,notes,created_by,created_at,updated_at
+		`SELECT id,tenant_id,asset_id,patch_type,title,COALESCE(description,''),
+		        COALESCE(version_before,''),COALESCE(version_after,''),
+		        cve_ids,status,risk_level,requires_downtime,scheduled_at,
+		        COALESCE(maintenance_window,''),applied_at,COALESCE(applied_by,''),
+		        COALESCE(rollback_plan,''),COALESCE(notes,''),created_by,created_at,updated_at
 		 FROM ot_patches WHERE `+strings.Join(cond, " AND ")+
 			` ORDER BY scheduled_at ASC NULLS LAST, created_at DESC`,
 		args...)
@@ -1014,15 +1150,20 @@ func (r *OTRepository) UpdatePatch(ctx context.Context, tenantID, id uuid.UUID, 
 	err := r.db.QueryRow(ctx,
 		`UPDATE ot_patches SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,asset_id,patch_type,title,description,version_before,version_after,
-		           cve_ids,status,risk_level,requires_downtime,scheduled_at,maintenance_window,
-		           applied_at,applied_by,rollback_plan,notes,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,asset_id,patch_type,title,COALESCE(description,''),
+		           COALESCE(version_before,''),COALESCE(version_after,''),
+		           cve_ids,status,risk_level,requires_downtime,scheduled_at,
+		           COALESCE(maintenance_window,''),applied_at,COALESCE(applied_by,''),
+		           COALESCE(rollback_plan,''),COALESCE(notes,''),created_by,created_at,updated_at`,
 		args...,
 	).Scan(&p.ID, &p.TenantID, &p.AssetID, &p.PatchType, &p.Title, &p.Description,
 		&p.VersionBefore, &p.VersionAfter, &p.CVEIDs, &p.Status, &p.RiskLevel,
 		&p.RequiresDowntime, &p.ScheduledAt, &p.MaintenanceWindow,
 		&p.AppliedAt, &p.AppliedBy, &p.RollbackPlan, &p.Notes, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
-	return &p, err
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -1123,9 +1264,11 @@ func (r *OTRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 
 	// Top risky assets
 	rrows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,asset_type,vendor,model,
-		        firmware_version,serial_number,ip_address,mac_address,protocol,
-		        site,zone,purdue_level,risk_score,risk_level,
+		`SELECT id,tenant_id,name,COALESCE(description,''),asset_type,
+		        COALESCE(vendor,''),COALESCE(model,''),COALESCE(firmware_version,''),
+		        COALESCE(serial_number,''),COALESCE(ip_address,''),COALESCE(mac_address,''),
+		        protocol,COALESCE(site,''),COALESCE(zone,''),
+		        COALESCE(purdue_level,0),risk_score,risk_level,
 		        is_internet_facing,is_patched,last_patched_at,is_active,criticality,
 		        install_date,end_of_life_date,tags,metadata,created_by,created_at,updated_at
 		 FROM ot_assets WHERE tenant_id=$1 AND is_active=true
