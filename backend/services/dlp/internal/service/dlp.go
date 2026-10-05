@@ -218,11 +218,11 @@ func (s *DLPService) runScan(tenantID uuid.UUID, scan *model.DLPScan, assetID *u
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger.Error().Interface("panic", r).Str("scan_id", scan.ID.String()).Msg("dlp_scan_panic")
-			_ = s.repo.UpdateScanStatus(context.Background(), scan.ID, "failed", 0, 0, []string{}, "internal panic")
+			_ = s.repo.UpdateScanStatus(context.Background(), tenantID, scan.ID, "failed", 0, 0, []string{}, "internal panic")
 		}
 	}()
 
-	_ = s.repo.UpdateScanStatus(context.Background(), scan.ID, "running", 0, 0, []string{}, "")
+	_ = s.repo.UpdateScanStatus(context.Background(), tenantID, scan.ID, "running", 0, 0, []string{}, "")
 
 	// Simulate scan: 2-6s
 	time.Sleep(time.Duration(2+rand.Intn(5)) * time.Second)
@@ -233,9 +233,9 @@ func (s *DLPService) runScan(tenantID uuid.UUID, scan *model.DLPScan, assetID *u
 
 	// Update asset scan status if specific asset
 	if assetID != nil {
-		_ = s.repo.UpdateAssetScanStatus(context.Background(), *assetID,
+		_ = s.repo.UpdateAssetScanStatus(context.Background(), tenantID, *assetID,
 			map[bool]string{true: "violations_found", false: "clean"}[violationsFound > 0],
-			violationsFound, labelsDetected)
+			violationsFound)
 	}
 
 	// Publish scan result
@@ -252,7 +252,7 @@ func (s *DLPService) runScan(tenantID uuid.UUID, scan *model.DLPScan, assetID *u
 	_ = s.producer.Publish(context.Background(), scan.ID.String(), data)
 
 	status := "completed"
-	_ = s.repo.UpdateScanStatus(context.Background(), scan.ID, status, itemsScanned, violationsFound, labelsDetected, "")
+	_ = s.repo.UpdateScanStatus(context.Background(), tenantID, scan.ID, status, itemsScanned, violationsFound, labelsDetected, "")
 	s.logger.Info().Str("scan_id", scan.ID.String()).Int64("items", itemsScanned).Int("violations", violationsFound).Msg("dlp_scan_completed")
 }
 
