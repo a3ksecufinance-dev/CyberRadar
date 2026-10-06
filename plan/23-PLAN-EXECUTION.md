@@ -472,8 +472,20 @@ dépende d'une déclaration.
 > politiques), deux scores de risque qui ne pouvaient que monter, un filtre par
 > adresse IP qui ne pouvait rien trouver, et un SBOM qui perdait silencieusement
 > des composants. C'est la même leçon que B2, à l'échelle du dépôt : la
-> couverture ne protège pas du futur, elle révèle le présent. B4 et B5
-> restent.
+> couverture ne protège pas du futur, elle révèle le présent. **B4 est
+> fait** : `make e2e-chain` conduit une attaque d'un bout à l'autre —
+> ingestion, alerte, cas, playbook, blocage réseau, journal d'audit — en
+> chronométrant chaque étape, et la CI l'exécute contre une plateforme
+> éphémère sans Keycloak. Sa première exécution complète a trouvé quatre
+> défauts qu'aucun test unitaire ne pouvait voir, parce qu'ils sont tous
+> dans le passage d'une étape à la suivante : le compte de service du SOAR
+> n'était créé nulle part, donc toute action atteignant un autre service
+> répondait 401 et la moitié « réponse » du produit ne pouvait pas agir ;
+> aucune action de playbook n'était journalisée, donc un pare-feu changé
+> par automate ne laissait aucune trace ; le moteur de règles s'arrêtait
+> définitivement sur une coupure du courtier, sans alerte ; et
+> `POST /playbooks/{id}/run` ne rend pas l'identifiant de l'exécution
+> qu'il démarre. B5 reste.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|
@@ -481,6 +493,7 @@ dépende d'une déclaration.
 | Services sans test | ~~17~~ → ~~16~~ → ~~15~~ → **0 / 32** ✓ | 0 | `find … -name '*_test.go'` par service |
 | Couverture, services critiques | ~~non mesurée~~ → **tenant 73 %, collector 83 %** ✓ | ≥ 60 % | `go test -cover` |
 | Couverture des dépôts de B3 | ~~0 %~~ → **71 à 83 %** sur les 15 | ≥ 60 % | `go test -cover ./internal/repository/` |
+| Chaîne de bout en bout | ~~aucune~~ → **verte, 5 à 65 s** ✓ | verte en CI | `make e2e-chain` |
 | KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
 | NFR vérifiées | **0 / 14** | 14 | bancs L2 |
 | Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |

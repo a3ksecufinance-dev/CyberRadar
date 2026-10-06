@@ -290,6 +290,59 @@ secondes puis conclut que rien n'arrive : c'est le seul moyen d'affirmer une
 absence sur un courtier, et c'est pour cela que la suite du collecteur dure une
 vingtaine de secondes.
 
+### La chaîne de bout en bout : `make e2e-chain`
+
+```
+./scripts/dev-local.sh up        # ou infra + migrate + seed + services
+./scripts/dev-local.sh accounts  # le compte de service du SOAR
+make e2e-chain
+```
+
+Une attaque, d'un bout à l'autre, chronométrée :
+
+```
+  step                                     took     budget
+  1. a detection rule is authored          208ms         —
+  2. a connector is onboarded              170ms         —
+  3. the attack begins: six failed logins   50ms       20s
+  4. the rule engine raises an alert      1m2.7s     2m30s
+  5. an analyst promotes it to a case        9ms       15s
+  6. a containment playbook is written       9ms         —
+  7. the playbook runs to completion          2s      1m0s
+  8. the address is blocked at the network    5ms      1m0s
+  9. the audit trail names the playbook      15ms       30s
+  total                                   1m5.1s
+```
+
+Ce que cette table apporte et qu'aucun test unitaire n'apporte : **le passage
+d'une étape à la suivante**. Chacune des neuf avait un test ; aucune n'avait de
+test que la suivante arrive. Les quatre défauts trouvés à la première exécution
+complète étaient tous là :
+
+1. le compte de service du SOAR n'était créé nulle part, donc toute action
+   atteignant un autre service répondait 401 — la moitié « réponse » du produit
+   ne pouvait pas agir, dans **toute** installation ;
+2. aucune action de playbook n'était journalisée : un pare-feu changé par
+   automate ne laissait aucune trace d'audit ;
+3. le moteur de règles s'arrêtait définitivement sur une coupure du courtier
+   Kafka, avec une ligne de journal et aucune alerte ;
+4. `POST /playbooks/{id}/run` ne rend pas l'identifiant de l'exécution qu'il
+   démarre, donc suivre un travail asynchrone demande de lister et de trier.
+
+Le budget de l'étape 4 est large (2 min 30) pour une raison qui se lit dans la
+table : le moteur rafraîchit son cache de règles toutes les 60 secondes, donc
+une règle écrite à l'instant ne s'applique pas aux événements qui arrivent
+ensuite. La chaîne rejoue la rafale toutes les 20 secondes jusqu'à l'alerte —
+ce que fait un attaquant de toute façon — ce qui rend le chiffre honnête :
+c'est le temps entre la première tentative et l'alerte, latence de cache
+comprise.
+
+En CI, le travail `e2e-chain` démarre la plateforme **sans Keycloak** :
+`CRP_OIDC_ISSUER` est explicitement vide, donc les services n'acceptent que les
+jetons signés par la plateforme, ce que la chaîne émet avec
+`internal/pkg/devtoken`. C'est aussi la configuration à utiliser pour déboguer
+localement sans fournisseur d'identité.
+
 ### Prouver qu'un test a des dents
 
 La discipline suivie dans tout ce dépôt : après avoir écrit un test, **casser

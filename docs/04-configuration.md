@@ -96,10 +96,16 @@ restent sur PostgreSQL jusqu'à ce qu'une réconciliation rapporte l'égalité
 ### `soar` — appelle les autres
 
 `IDENTITY_URL`, `SIEM_URL`, `TI_URL`, `VULN_URL`, `ASSET_URL`,
-`ATTACKPATH_URL`, `NETSEC_URL`, `IR_URL`, `NOTIFICATION_URL`, plus
+`ATTACKPATH_URL`, `NETSEC_URL`, `IR_URL`, `NOTIFICATION_URL`, `AUDIT_URL`, plus
 `SOAR_CLIENT_ID` et `SOAR_CLIENT_SECRET` : **le compte de service du
 playbook**. Un playbook agit sous sa propre identité, pas sous celle de
 l'analyste — voir [05 — Sécurité](05-securite.md).
+
+Le compte ne s'invente pas : il faut le créer, sinon chaque action répondant à
+un autre service échoue en 401 et le SOAR ne peut rien faire. Voir
+[14 — SOAR et réponse à incident](14-soar-ir.md#sous-quelle-identité).
+`AUDIT_URL` est ce qui permet au playbook de consigner ce qu'il a fait ; sans
+elle les actions s'exécutent et journalisent qu'elles n'ont pas été consignées.
 
 ### `copilot` — exige une clé
 

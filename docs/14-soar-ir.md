@@ -53,6 +53,42 @@ SOAR_CLIENT_ID=soar-executor
 SOAR_CLIENT_SECRET=…
 ```
 
+**Le compte doit exister.** Pendant un temps, rien ne le créait : toute
+installation démarrait avec `change-me-create-the-account-first`, et chaque
+action atteignant un autre service répondait 401 — le SOAR ne pouvait rien
+faire, dans aucune installation. Le parcours de bout en bout l'a trouvé.
+La création se fait une fois :
+
+```
+go run ./internal/cmd/svcaccount \
+  -client-id soar-executor -role soar_executor \
+  -out /chemin/sûr/soar-executor.json
+```
+
+En local, `./scripts/dev-local.sh accounts` s'en charge et redémarre le service
+avec son identifiant. Le `docker-compose` refuse maintenant de démarrer sans la
+variable, plutôt que de livrer un marque-page.
+
+### Ce que le playbook laisse derrière lui
+
+Chaque écriture qu'une action fait chez un autre service produit une entrée
+d'audit, écrite par le SOAR en son nom :
+
+| Champ | Valeur |
+|---|---|
+| `actor_type` | `service` |
+| `actor_id` | `SOAR_CLIENT_ID` |
+| `action` | `playbook_execute` |
+| `resource_type` | le service et la collection, p. ex. `netsec_policies` |
+| `resource_id` | la ligne créée ou modifiée |
+| `result` | `success` ou `failure` — un containment refusé est ce qu'un auditeur veut voir |
+
+Cela demande `AUDIT_URL` et la permission `audit:write` sur le rôle
+`soar_executor` (migration `000049`). Sans `AUDIT_URL` les actions s'exécutent
+quand même et chacune journalise qu'elle n'a pas pu être consignée : un
+containment effectué et non écrit vaut mieux qu'un containment annulé parce que
+son journal était injoignable.
+
 Deux raisons, et chacune suffit : l'analyste n'a pas forcément `netsec:write`,
 et le journal d'audit doit dire que c'est le playbook qui a agi. « L'analyste a
 bloqué 10.0.0.5 » est faux s'il a seulement cliqué sur « exécuter ».
