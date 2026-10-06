@@ -405,7 +405,14 @@ instrumentée a donné la réponse immédiatement :
    une ligne par événement, donc une reprise réussie et une reprise perdue sont
    indiscernables dans leurs journaux — c'est pourquoi la chaîne interroge
    maintenant le courtier elle-même (`BrokerState`) et le dit en une phrase
-   dans son échec. Diagnostic en cours ;
+   dans son échec. **Cause** : un consommateur construit au moment où son sujet
+   est créé rejoint son groupe sans partition et ne lit plus rien, sans erreur
+   ni retard apparent ; sur un courtier sans sujets — l'état de toute
+   installation neuve — c'est le cas de chaque consommateur. `NewConsumer`
+   prépare donc son sujet et attend un chef de partition avant de lire. Ne pas
+   dépendre de l'auto-création est de toute façon ce qu'il faut faire : une
+   grappe durcie l'a désactivée, ce qui transforme la même course en panne
+   permanente ;
 9. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
    défaut à une valeur explicitement vide. Pour un mot de passe, « ce serveur
    n'en a pas » est une configuration réelle — celle des conteneurs de la CI — et

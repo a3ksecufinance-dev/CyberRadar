@@ -505,8 +505,14 @@ dépende d'une déclaration.
 > commit l'ont démenti, deux vertes et deux rouges. L'instabilité est ailleurs,
 > et le courtier l'a située : `crp.events.normalized` écrit jusqu'à 48,
 > `crp.events.enriched` à 0 — le collecteur publie, le travailleur du pipeline
-> ne republie rien. **Ce point reste ouvert**, avec l'instrument en place pour
-> le trancher à la prochaine exécution rouge. **B5 est fait** : les 49 migrations PostgreSQL passent par
+> ne republie rien. **Corrigé** : sur un courtier sans sujets — l'état de toute
+> installation neuve, donc de chaque exécution de CI — un consommateur
+> construit au moment où son sujet est créé ne lit rien du tout, sans erreur ni
+> retard apparent. `NewConsumer` prépare désormais son sujet et attend un chef
+> de partition. L'écart est sans ambiguïté sur un courtier vierge : échec
+> déterministe à 2 min 31 avec `enriched` à 0, chaîne verte en 4,3 s ensuite ;
+> et quatre ré-exécutions du travail en CI sont vertes là où il l'était 3 fois
+> sur 7. **B5 est fait** : les 49 migrations PostgreSQL passent par
 > `golang-migrate` et une table `schema_migrations`, chaque fichier s'applique
 > une fois, et la CI applique l'ensemble deux fois de suite en exigeant que la
 > seconde n'applique rien. Ce qui change n'est pas la commodité : la boucle
