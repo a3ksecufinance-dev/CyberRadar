@@ -583,6 +583,31 @@ jobs:
             ls -la .dev-local 2>&1 || true
           fi
 
+      # Where the events actually got to, from the broker rather than from a
+      # log. Neither the pipeline worker nor the rule engine logs a line per
+      # event, so a successful handover and a lost one look identical in both
+      # journals — the only place that knows is Kafka. End offsets say how far
+      # each topic was written; the group lag says how much each consumer left
+      # unread. The chain reports that the engine produced nothing, and these
+      # two numbers say whether it was ever given anything to produce from.
+      - name: What the broker says about the handover
+        if: failure()
+        run: |
+          set -u
+          k() {
+            docker run --rm --network host confluentinc/cp-kafka:7.6.0 "$@" 2>&1 | tail -20
+          }
+          for t in crp.events.normalized crp.events.enriched crp.events.alerts; do
+            out=$(k kafka-get-offsets --bootstrap-server localhost:9092 --topic "$t" || true)
+            echo "offsets $t: $out"
+            echo "::error title=offsets $t::$(printf '%s' "$out" | tr '\n' '|' | cut -c1-300)"
+          done
+          for g in crp-pipeline crp-siem-rule-engine; do
+            out=$(k kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group "$g" || true)
+            echo "group $g:"; printf '%s\n' "$out"
+            echo "::error title=group $g::$(printf '%s' "$out" | tr '\n' '|' | cut -c1-600)"
+          done
+
   vulnerabilities:
     name: Dependency vulnerabilities
     runs-on: ubuntu-latest
