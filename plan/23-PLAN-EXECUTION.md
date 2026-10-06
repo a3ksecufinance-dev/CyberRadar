@@ -499,10 +499,14 @@ dépende d'une déclaration.
 > règles depuis la fin — le service qui ne fait que stocker les événements en
 > prenait soin, celui qui décide s'il faut lever une alerte non. Redémarrer le
 > SIEM pendant une attaque rendait cette attaque invisible, sans une ligne pour
-> le dire ; l'UEBA portait le même défaut. C'est aussi ce qui rendait l'étape de
-> l'alerte instable en CI, une exécution sur deux, parce que le groupe de
-> consommateurs y est neuf à chaque fois. Un test de source fixe désormais le
-> choix de chaque service. **B5 est fait** : les 49 migrations PostgreSQL passent par
+> le dire ; l'UEBA portait le même défaut. Un test de source fixe désormais le
+> choix de chaque service. Ce défaut a d'abord été pris pour la cause de
+> l'instabilité de l'étape de l'alerte en CI ; quatre ré-exécutions du même
+> commit l'ont démenti, deux vertes et deux rouges. L'instabilité est ailleurs,
+> et le courtier l'a située : `crp.events.normalized` écrit jusqu'à 48,
+> `crp.events.enriched` à 0 — le collecteur publie, le travailleur du pipeline
+> ne republie rien. **Ce point reste ouvert**, avec l'instrument en place pour
+> le trancher à la prochaine exécution rouge. **B5 est fait** : les 49 migrations PostgreSQL passent par
 > `golang-migrate` et une table `schema_migrations`, chaque fichier s'applique
 > une fois, et la CI applique l'ensemble deux fois de suite en exigeant que la
 > seconde n'applique rien. Ce qui change n'est pas la commodité : la boucle

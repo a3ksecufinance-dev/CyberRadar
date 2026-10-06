@@ -26,6 +26,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/segmentio/kafka-go"
+
+	"github.com/cyberradar/platform/internal/pkg/event"
 )
 
 // Client talks to one platform, as one identity.
@@ -240,4 +244,81 @@ var dsnPassword = regexp.MustCompile(`(://[^:/@\s]+):[^@/\s]*@`)
 
 func redactPasswords(s string) string {
 	return dsnPassword.ReplaceAllString(s, "$1:***@")
+}
+
+// BrokerState is where the events actually got to, asked of the broker.
+//
+// The chain can say "no alert" and the services can each say nothing, because
+// neither the pipeline worker nor the rule engine logs a line per event: a
+// handover that worked and one that was lost read identically in both
+// journals. The broker is the only party that knows, and it answers in two
+// numbers per topic — how far it was written, and how far each group has read.
+//
+// Asked here rather than from the workflow because this is where the failure
+// is known, and because an answer that depends on a container being present
+// and on the right annotation surviving is an answer that goes missing on the
+// day it matters.
+func BrokerState(ctx context.Context, brokers []string) string {
+	if len(brokers) == 0 {
+		return "    (no broker address to ask)\n"
+	}
+	addr := brokers[0]
+	var b strings.Builder
+	b.WriteString("  what the broker says:\n")
+
+	topics := []string{event.TopicNormalized, event.TopicEnriched, event.TopicAlerts}
+	ends := map[string]int64{}
+	for _, t := range topics {
+		conn, err := kafka.DialLeader(ctx, "tcp", addr, t, 0)
+		if err != nil {
+			fmt.Fprintf(&b, "    %s: no leader (%v)\n", t, err)
+			continue
+		}
+		_, last, err := conn.ReadOffsets()
+		_ = conn.Close()
+		if err != nil {
+			fmt.Fprintf(&b, "    %s: offsets unreadable (%v)\n", t, err)
+			continue
+		}
+		ends[t] = last
+		fmt.Fprintf(&b, "    %s: written up to %d\n", t, last)
+	}
+
+	client := &kafka.Client{Addr: kafka.TCP(addr)}
+	for _, g := range []struct{ group, topic string }{
+		{"crp-pipeline", event.TopicNormalized},
+		{"crp-siem-rule-engine", event.TopicEnriched},
+	} {
+		res, err := client.OffsetFetch(ctx, &kafka.OffsetFetchRequest{
+			GroupID: g.group,
+			Topics:  map[string][]int{g.topic: {0}},
+		})
+		if err != nil {
+			fmt.Fprintf(&b, "    %s: cannot be asked (%v)\n", g.group, err)
+			continue
+		}
+		committed := int64(-1)
+		for _, parts := range res.Topics {
+			for _, pt := range parts {
+				committed = pt.CommittedOffset
+			}
+		}
+		switch {
+		case committed < 0:
+			fmt.Fprintf(&b, "    %s: has committed nothing on %s, so it has read none of it\n",
+				g.group, g.topic)
+		default:
+			fmt.Fprintf(&b, "    %s: committed %d of %d on %s (%d unread)\n",
+				g.group, committed, ends[g.topic], g.topic, ends[g.topic]-committed)
+		}
+	}
+
+	// The reading that matters, spelled out, because the numbers above are
+	// only useful to somebody who already knows the shape of the chain.
+	if ends[event.TopicNormalized] > 0 && ends[event.TopicEnriched] == 0 {
+		b.WriteString("    → the collector published and the pipeline worker republished nothing: " +
+			"the break is between crp.events.normalized and crp.events.enriched, " +
+			"not in the rule engine\n")
+	}
+	return b.String()
 }

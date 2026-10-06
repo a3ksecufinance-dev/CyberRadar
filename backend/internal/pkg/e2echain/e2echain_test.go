@@ -298,8 +298,8 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			return false, nil
 		})
 	}); err != nil {
-		fatal(t, "the alert never appeared for %s: %v%s\n%s", attacker, err, tl,
-			whyNoAlert(ctx, analyst, rule.ID))
+		fatal(t, "the alert never appeared for %s: %v%s\n%s%s", attacker, err, tl,
+			whyNoAlert(ctx, analyst, rule.ID), BrokerState(ctx, brokers()))
 	}
 	if alert.Severity != "CRITICAL" {
 		t.Errorf("the alert is %q, want the rule's CRITICAL", alert.Severity)
@@ -615,4 +615,16 @@ func whyNoAlert(ctx context.Context, c *Client, ruleID uuid.UUID) string {
 	fmt.Fprintf(&b, "    the rule as the platform stored it: enabled=%v category=%v conditions=%s\n",
 		stored["enabled"], stored["category"], conditions)
 	return b.String()
+}
+
+// brokers is where to ask about the handover: the same address the services
+// were given.
+func brokers() []string {
+	if v := os.Getenv("CRP_TEST_KAFKA_BROKERS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	if v := os.Getenv("KAFKA_BROKERS"); v != "" {
+		return strings.Split(v, ",")
+	}
+	return []string{"localhost:9092"}
 }

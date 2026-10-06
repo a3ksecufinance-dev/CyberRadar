@@ -380,11 +380,12 @@ instrumentée a donné la réponse immédiatement :
    travailleur du pipeline lisait depuis le début (`FirstOffset`), le moteur de
    règles depuis la fin (`LastOffset`) : le service qui ne fait que stocker les
    événements en prenait soin, celui qui décide s'il faut lever une alerte non.
-   Conséquence hors CI : redémarrer le SIEM pendant une attaque rend cette
-   attaque invisible, sans une ligne de journal pour le dire. En CI, où le
-   groupe de consommateurs est neuf à chaque exécution, c'est ce qui rendait
-   l'étape 4 instable — une exécution sur deux selon que le groupe se stabilise
-   avant ou pendant les rafales. L'UEBA portait le même défaut : des lignes de
+   Conséquence : redémarrer le SIEM pendant une attaque rend cette attaque
+   invisible, sans une ligne de journal pour le dire. (Ce défaut a d'abord été
+   pris pour la cause de l'instabilité de l'étape 4 en CI ; quatre
+   ré-exécutions du même commit l'ont démenti — deux vertes, deux rouges. Il est
+   réel et corrigé pour ce qu'il est, pas pour ce qu'on lui a attribué.)
+   L'UEBA portait le même défaut : des lignes de
    base construites sur un trou sous-estiment l'activité. Les deux lisent
    désormais depuis le début, ce qui ne change que le cas d'un groupe sans
    position validée ; en régime établi le moteur reprend où il s'était arrêté,
@@ -396,7 +397,16 @@ instrumentée a donné la réponse immédiatement :
    `kafka.OnlyNewEvents` — et un test de source vérifie le choix de chaque
    service, parce qu'un `-1` à un appel ne dit rien et qu'un service copié sur
    son voisin hérite du choix de ce voisin ;
-8. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
+8. **et la rupture, elle, est entre le collecteur et le moteur.** Le courtier
+   a tranché ce que les deux journaux ne pouvaient pas dire :
+   `crp.events.normalized` écrit jusqu'à 48, `crp.events.enriched` à 0. Le
+   collecteur publie, le travailleur du pipeline ne republie rien, et le moteur
+   de règles attend correctement sur un sujet vide. Ni l'un ni l'autre n'écrit
+   une ligne par événement, donc une reprise réussie et une reprise perdue sont
+   indiscernables dans leurs journaux — c'est pourquoi la chaîne interroge
+   maintenant le courtier elle-même (`BrokerState`) et le dit en une phrase
+   dans son échec. Diagnostic en cours ;
+9. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
    défaut à une valeur explicitement vide. Pour un mot de passe, « ce serveur
    n'en a pas » est une configuration réelle — celle des conteneurs de la CI — et
    la seule façon de le dire est le vide. Avec le deux-points, chaque `AUTH`
