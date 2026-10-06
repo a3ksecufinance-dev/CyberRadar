@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,11 +102,33 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 	// `dev-local.sh up` runs, and failing there would teach everyone to stop
 	// running `make test`. In CI the variable is set, so the same situation is
 	// a failure.
-	if err := analyst.Do(ctx, "GET", "siem", "/health", nil, nil); err != nil {
-		if required {
-			fatal(t, "the platform is not answering: %v", err)
+	//
+	// Every service the chain calls is probed, not just the first one. A chain
+	// that stops at "the platform is not answering" after one request on one
+	// port says nothing about which of the six it needs is missing, and that is
+	// the only thing worth knowing at this point. The probe is given a few
+	// seconds because the step before this one talks to the platform too: a
+	// service restarting between the two would otherwise read as a defect.
+	needed := []string{"identity", "collector", "siem", "soar", "netsec", "audit"}
+	var missing []string
+	probe := Until(ctx, 20*time.Second, time.Second, func() (bool, error) {
+		missing = nil
+		var last error
+		for _, s := range needed {
+			if err := analyst.Do(ctx, "GET", s, "/health", nil, nil); err != nil {
+				missing = append(missing, s)
+				last = err
+			}
 		}
-		t.Skipf("the platform is not running (set E2ECHAIN_DSN to require it): %v", err)
+		return len(missing) == 0, last
+	})
+	if probe != nil {
+		if required {
+			fatal(t, "the chain needs six services; %s did not answer /health: %v",
+				strings.Join(missing, ", "), probe)
+		}
+		t.Skipf("the platform is not running, %s did not answer (set E2ECHAIN_DSN to require it): %v",
+			strings.Join(missing, ", "), probe)
 	}
 	t.Logf("acting as %s with %d permissions", grant.Email, len(grant.Permissions))
 
