@@ -930,8 +930,14 @@ services:
       # takes a token per tenant. Create it once with the soar_executor role
       # (see README) and put the secret in Vault for anything but dev.
       - IDENTITY_URL=http://identity-service:8002
-      - SOAR_CLIENT_ID=soar-executor
-      - SOAR_CLIENT_SECRET=change-me-create-the-account-first
+      # The account has to exist before the SOAR can act: without it every
+      # action that reaches another service answers 401. Create it once with
+      #   go run ./internal/cmd/svcaccount -client-id soar-executor \
+      #     -role soar_executor -out /secure/path/soar-executor.json
+      # and pass the secret here. See docs/14-soar-ir.md.
+      - SOAR_CLIENT_ID=${CRP_SOAR_CLIENT_ID:-soar-executor}
+      - SOAR_CLIENT_SECRET=${CRP_SOAR_CLIENT_SECRET:?create the soar-executor service account first — see docs/14-soar-ir.md}
+      - AUDIT_URL=http://audit-service:8003
       # Services the playbook actions reach. A service left out disables the
       # actions that need it, and they then fail saying so — rather than
       # reporting a containment that never happened.

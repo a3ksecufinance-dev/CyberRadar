@@ -10,6 +10,7 @@
 #
 #   ./scripts/dev-local.sh up         everything, in order
 #   ./scripts/dev-local.sh demo       fill the tenant with a demonstration estate
+#   ./scripts/dev-local.sh accounts   create the service accounts services need
 #   ./scripts/dev-local.sh smoke      read every service's lists, fail on any 5xx
 #   ./scripts/dev-local.sh e2e        drive the interface in a browser
 #   ./scripts/dev-local.sh status     what is listening and what is healthy
@@ -219,7 +220,13 @@ service_env() {
 		# The interface signs users in against Keycloak and sends Keycloak's
 		# token. Services verify it against the realm's published keys and then
 		# resolve what the person may do from this platform's own tables.
-		"OIDC_ISSUER=${CRP_OIDC_ISSUER:-http://localhost:8080/realms/cyberradar}"
+		# ${VAR-default}, not ${VAR:-default}: an explicitly empty
+		# CRP_OIDC_ISSUER has to mean "no identity provider", which is how the
+		# end-to-end chain runs in CI — it authenticates with the platform's
+		# own signed tokens and has no Keycloak to talk to. With the colon an
+		# empty value would silently take the default and every service would
+		# fail at start-up probing an issuer that is not there.
+		"OIDC_ISSUER=${CRP_OIDC_ISSUER-http://localhost:8080/realms/cyberradar}"
 		"OIDC_AUDIENCE=${CRP_OIDC_AUDIENCE:-cyberradar-frontend}"
 	)
 	case "$name" in
@@ -256,12 +263,13 @@ service_env() {
 		soar-service)
 			SVC_ENV+=(
 				"IDENTITY_URL=http://localhost:8002" "SIEM_URL=http://localhost:8008"
+				"AUDIT_URL=http://localhost:8003"
 				"TI_URL=http://localhost:8010" "VULN_URL=http://localhost:8011"
 				"ASSET_URL=http://localhost:8006" "ATTACKPATH_URL=http://localhost:8012"
 				"NETSEC_URL=http://localhost:8022" "IR_URL=http://localhost:8026"
 				"NOTIFICATION_URL=http://localhost:8004"
-				"SOAR_CLIENT_ID=${SOAR_CLIENT_ID:-soar-executor}"
-				"SOAR_CLIENT_SECRET=${SOAR_CLIENT_SECRET:-change-me-create-the-account-first}") ;;
+				"SOAR_CLIENT_ID=${SOAR_CLIENT_ID:-$(soar_client_id)}"
+				"SOAR_CLIENT_SECRET=${SOAR_CLIENT_SECRET:-$(soar_client_secret)}") ;;
 		copilot-service)
 			SVC_ENV+=(
 				"SIEM_SERVICE_URL=http://localhost:8008" "UEBA_SERVICE_URL=http://localhost:8009"
@@ -714,6 +722,43 @@ cmd_restart() {
 	if [[ $want_frontend -eq 1 ]]; then cmd_frontend; fi
 }
 
+SOAR_CREDENTIAL="${CRP_SOAR_CREDENTIAL:-$STATE_DIR/soar-executor.json}"
+
+# soar_client_id / soar_client_secret read the credential the accounts step
+# wrote. Empty when it has not run yet, which the SOAR reports at start-up
+# rather than failing silently at its first action.
+soar_client_id()     { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["client_id"])' "$SOAR_CREDENTIAL" 2>/dev/null || true; }
+soar_client_secret() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["client_secret"])' "$SOAR_CREDENTIAL" 2>/dev/null || true; }
+
+# cmd_accounts creates the service accounts a service needs to call the others.
+#
+# The SOAR acts under its own identity, by design and as documented: a playbook
+# that blocks an address must not do it as the analyst who pressed run. The
+# design was right and nothing created the account — every installation ran with
+# SOAR_CLIENT_SECRET=change-me-create-the-account-first, so every action that
+# reached another service answered 401. The end-to-end chain found it; this is
+# the step that was missing.
+#
+# It needs the identity service listening, so it runs after `services` and the
+# SOAR is restarted with the credential it just got.
+cmd_accounts() {
+	step "Service accounts"
+	local out
+	if ! out=$(cd "$BACKEND_DIR" && JWT_PRIVATE_KEY_PATH="$BACKEND_DIR/deployments/jwt/private.pem" \
+		DATABASE_URL="$DATABASE_URL" IDENTITY_URL="http://localhost:8002" \
+		go run ./internal/cmd/svcaccount \
+		-client-id soar-executor -role soar_executor -out "$SOAR_CREDENTIAL" 2>&1); then
+		fail "could not provision soar-executor:"
+		printf '%s\n' "$out" | sed 's/^/     /'
+		return 1
+	fi
+	ok "soar-executor (credential in $SOAR_CREDENTIAL)"
+	if [[ -f "$PID_DIR/soar-service.pid" ]]; then
+		cmd_restart soar-service >/dev/null 2>&1 || warn "restart soar-service by hand to pick the credential up"
+		ok "soar-service restarted with its credential"
+	fi
+}
+
 cmd_services() {
 	cmd_build
 	step "Services"
@@ -845,6 +890,7 @@ cmd_up() {
 	cmd_content
 	cmd_seed
 	cmd_services
+	cmd_accounts
 	cmd_frontend
 	cmd_status
 	printf '\n   Web interface  http://localhost:3000\n'
@@ -858,6 +904,7 @@ case "${1:-up}" in
 	reset) cmd_reset ;;
 	seed) cmd_seed ;;
 	demo) shift; cmd_demo "$@" ;;
+	accounts) cmd_accounts ;;
 	smoke) cmd_smoke ;;
 	e2e) shift; cmd_e2e "$@" ;;
 	infra) cmd_infra ;;

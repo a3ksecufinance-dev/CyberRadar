@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -27,27 +26,11 @@ const backendRoot = "../../.."
 // under one name here and another there.
 func deployedServices(t *testing.T) map[string]string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(backendRoot, "scripts", "dev-local.sh"))
+	ports, err := Ports(backendRoot)
 	if err != nil {
-		t.Fatalf("read the local runner: %v", err)
+		t.Fatalf("read the deployment's port table: %v", err)
 	}
-	script := string(raw)
-
-	start := strings.Index(script, "SERVICES=(")
-	end := strings.Index(script[start:], "\n)")
-	if start < 0 || end < 0 {
-		t.Fatal("scripts/dev-local.sh has no SERVICES table")
-	}
-
-	out := map[string]string{}
-	entry := regexp.MustCompile(`"([a-z0-9-]+):(\d+):([a-z]+)"`)
-	for _, m := range entry.FindAllStringSubmatch(script[start:start+end], -1) {
-		out[m[3]] = m[2]
-	}
-	if len(out) < 25 {
-		t.Fatalf("the SERVICES table parsed to %d entries; the regex has drifted", len(out))
-	}
-	return out
+	return ports
 }
 
 // A service with no probe is a service whose reads nobody has ever run — which

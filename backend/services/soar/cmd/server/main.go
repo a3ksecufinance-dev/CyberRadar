@@ -89,6 +89,10 @@ func main() {
 	// saying which service is unconfigured, rather than reporting a
 	// containment that never happened.
 	endpoints := service.Endpoints{
+		// Without it the actions still run and each one logs that it could not
+		// be recorded, which is the right order of priorities: a containment
+		// that happened and was not written down beats one that did not happen.
+		Audit:        os.Getenv("AUDIT_URL"),
 		Netsec:       os.Getenv("NETSEC_URL"),
 		Identity:     os.Getenv("IDENTITY_URL"),
 		Asset:        os.Getenv("ASSET_URL"),
@@ -99,7 +103,7 @@ func main() {
 		IR:           os.Getenv("IR_URL"),
 		AttackPath:   os.Getenv("ATTACKPATH_URL"),
 	}
-	dispatcher := service.NewHTTPDispatcher(endpoints, tokens, logger)
+	dispatcher := service.NewHTTPDispatcher(endpoints, tokens, mustEnv("SOAR_CLIENT_ID"), logger)
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	soarRepo := repository.NewSOARRepository(pool)

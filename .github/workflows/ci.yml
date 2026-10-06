@@ -373,6 +373,142 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:8001
         run: npm run build
 
+  e2e-chain:
+    name: e2e-chain — one attack, end to end
+    runs-on: ubuntu-latest
+    # The chain this job drives: an event is ingested, the rule engine raises an
+    # alert, an analyst promotes it to a case, a playbook runs, the address is
+    # blocked at the network, and the audit trail names the playbook.
+    #
+    # Every one of those steps had a unit test. None of them had a test that the
+    # next step happens, and that is where this platform's defects lived: the
+    # SOAR's block_ip action posts to netsec's policy endpoint, which answered
+    # 500 on every call for as long as it existed; and the SOAR's own service
+    # account was never created anywhere, so every action that reached another
+    # service answered 401. Both were found by running this chain for the first
+    # time, not by reading the code.
+    #
+    # No Keycloak: CRP_OIDC_ISSUER is explicitly empty, so the services accept
+    # only the platform's own signed tokens, which is what the chain mints.
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3-alpine
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        ports: ["9000:9000", "8123:8123"]
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      kafka:
+        image: confluentinc/cp-kafka:7.6.0
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          CLUSTER_ID: abJmc64xRMOGJdyAgr4muQ
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Apply migrations
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          for f in migrations/postgres/*.sql; do
+            psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      - name: Apply ClickHouse migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          for f in migrations/clickhouse/*.sql; do
+            docker run --rm --network host -i \
+              clickhouse/clickhouse-server:24.3-alpine \
+              clickhouse-client --host localhost --multiquery < "$f"
+          done
+
+      - name: Seed identities and detection content
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q \
+            -f migrations/seed/001_identities.sql
+          psql -h localhost -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' identities' FROM identities WHERE status='active'"
+
+      - name: Generate the signing key
+        working-directory: backend
+        run: ./scripts/gen-jwt-keys.sh
+
+      - name: Start the platform
+        working-directory: backend
+        env:
+          # Explicitly empty: no Keycloak in this job, so the services accept
+          # only platform-signed tokens — which is what the chain mints.
+          CRP_OIDC_ISSUER: ""
+          CRP_CORS_ALLOWED_ORIGINS: http://localhost:3000
+        run: ./scripts/dev-local.sh services
+
+      # The step that was missing from every installation. Without it the SOAR
+      # holds no credential and every containment answers 401.
+      - name: Provision the service accounts
+        working-directory: backend
+        run: ./scripts/dev-local.sh accounts
+
+      - name: One attack, end to end
+        working-directory: backend
+        run: make e2e-chain
+
+      # The chain reports which step failed; these say why.
+      - name: The logs of the services in the chain
+        if: failure()
+        working-directory: backend
+        run: |
+          for s in collector siem soar netsec audit identity pipeline-worker; do
+            f=".dev-local/logs/$s-service.log"
+            [ -f "$f" ] || f=".dev-local/logs/$s.log"
+            [ -f "$f" ] || continue
+            echo "──────── $f"
+            tail -40 "$f"
+          done
+
   vulnerabilities:
     name: Dependency vulnerabilities
     runs-on: ubuntu-latest
@@ -384,23 +520,30 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.work.sum
 
-      # Blocking, as of the first run that was triaged.
+      # Blocking, through a gate rather than directly.
       #
       # Its first run reported 49 reachable vulnerabilities: the Go standard
       # library at 1.22.12, golang.org/x/net, golang-jwt/jwt/v5,
-      # ClickHouse/ch-go and the OpenTelemetry SDK. All five are now at a fixed
-      # version, so a new one is a regression and has to fail rather than be
-      # read in a log nobody opens.
+      # ClickHouse/ch-go and the OpenTelemetry SDK. A second pass took eight
+      # more, including an SQL injection in pgx and chi's RealIP, which needed
+      # the call removed rather than the version bumped. All are at a fixed
+      # version or gone.
+      #
+      # What is left is the case plain govulncheck cannot express: two
+      # vulnerabilities in docker/docker with no fixed version, reached only
+      # from the package that starts PostgreSQL, ClickHouse and Kafka for
+      # tests. Blocking on them means the pipeline can never be green, and
+      # that teaches everyone to ignore it; not blocking means the next real
+      # one is read in a log nobody opens. So the gate holds the exceptions,
+      # each with a reason and a review date, fails on anything else, fails on
+      # an exception past its date, and fails if the claim an exception rests
+      # on stops being true. It also fails when the scan itself could not run,
+      # which plain govulncheck reports as success.
       - name: govulncheck
         working-directory: backend
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          fail=0
-          for m in internal services/*/; do
-            echo "→ $m"
-            (cd "$m" && govulncheck ./...) || fail=1
-          done
-          exit $fail
+          python3 scripts/govulncheck-gate.py
 
       - uses: actions/setup-node@v4
         with:

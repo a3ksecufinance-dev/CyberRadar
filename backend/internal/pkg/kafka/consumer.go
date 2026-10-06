@@ -120,8 +120,34 @@ func NewConsumer(cfg ConsumerConfig, logger zerolog.Logger) (*Consumer, error) {
 	return &Consumer{reader: r, dlq: dlq, cfg: cfg, logger: logger}, nil
 }
 
+// How long to wait before trying the broker again, and the ceiling on that
+// wait. Thirty seconds is short enough that a recovered broker is noticed
+// promptly and long enough that an outage does not fill the log.
+const (
+	fetchRetryMin = time.Second
+	fetchRetryMax = 30 * time.Second
+)
+
 // Run starts the consume loop. It blocks until ctx is cancelled, or until a
 // message can be neither handled nor parked in the DLQ.
+//
+// A broker that goes away does not end the loop.
+//
+// It used to: any fetch error returned, the caller logged it, and nothing
+// started the consumer again. So a broker restart — an upgrade, a rolling
+// deployment, a network blip — stopped detection permanently, with one line in
+// a log and no alert anywhere, until somebody restarted the service. The
+// end-to-end chain found it by accident: Kafka was bounced under a running
+// SIEM, the rule engine logged "rule_engine_error" once, and every event after
+// that was ingested, enriched, stored — and evaluated against nothing.
+//
+// Retrying forever is deliberate. A detection engine that gives up is worse
+// than one that keeps trying and says so, and the alternative — exiting so a
+// supervisor restarts the process — is not available to a consumer that runs
+// beside an HTTP server in the same binary. The backoff is capped so a long
+// outage does not turn into a long silence, and every attempt past the first
+// is logged at error level: an operator reading the log sees the platform is
+// not detecting.
 func (c *Consumer) Run(ctx context.Context, handler HandlerFunc) error {
 	c.logger.Info().
 		Str("topic", c.cfg.Topic).
@@ -130,14 +156,31 @@ func (c *Consumer) Run(ctx context.Context, handler HandlerFunc) error {
 		Int("max_attempts", c.cfg.MaxAttempts).
 		Msg("kafka_consumer_started")
 
+	backoff := fetchRetryMin
 	for {
 		km, err := c.reader.FetchMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil // clean shutdown
 			}
-			return fmt.Errorf("kafka fetch: %w", err)
+			c.logger.Error().Err(err).
+				Str("topic", c.cfg.Topic).
+				Dur("retry_in", backoff).
+				Msg("kafka_fetch_failed_not_consuming")
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(backoff):
+			}
+			if backoff < fetchRetryMax {
+				backoff *= 2
+				if backoff > fetchRetryMax {
+					backoff = fetchRetryMax
+				}
+			}
+			continue
 		}
+		backoff = fetchRetryMin
 
 		msg := Message{
 			Topic:     km.Topic,

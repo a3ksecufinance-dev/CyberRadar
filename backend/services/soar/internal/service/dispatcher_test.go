@@ -57,6 +57,30 @@ func target(t *testing.T, status int, reply string, log *[]seen) *httptest.Serve
 	return srv
 }
 
+// actions returns the calls the action itself made, leaving out the audit
+// entries each write now produces. The audit calls are asserted on their own,
+// by recorded.
+func actions(log []seen) []seen {
+	var out []seen
+	for _, c := range log {
+		if c.path != "/api/v1/audit/events" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// recorded returns the audit entries written during the action.
+func recorded(log []seen) []seen {
+	var out []seen
+	for _, c := range log {
+		if c.path == "/api/v1/audit/events" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // dispatcher points every service at one stub, so a test asserts the path the
 // action chose rather than which stub it happened to hit.
 func dispatcher(t *testing.T, url string) *HTTPDispatcher {
@@ -68,9 +92,13 @@ func dispatcher(t *testing.T, url string) *HTTPDispatcher {
 		t.Fatalf("NewPool: %v", err)
 	}
 	return NewHTTPDispatcher(Endpoints{
+		// The audit endpoint points at the same stub: every write is recorded,
+		// so the stub sees the audit call too and a test that counted calls
+		// would otherwise drift.
+		Audit:  url,
 		Netsec: url, Identity: url, Asset: url, ThreatIntel: url, Vuln: url,
 		Notification: url, SIEM: url, IR: url, AttackPath: url,
-	}, tokens, zerolog.Nop())
+	}, tokens, "soar-executor", zerolog.Nop())
 }
 
 func step(action string, params map[string]any) model.PlaybookStep {
@@ -121,7 +149,7 @@ func TestAnUnconfiguredServiceFailsLoudly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
-	d := NewHTTPDispatcher(Endpoints{}, tokens, zerolog.Nop())
+	d := NewHTTPDispatcher(Endpoints{}, tokens, "soar-executor", zerolog.Nop())
 
 	_, err = do(t, d, step(model.ActionBlockIP, map[string]any{"ip": "203.0.113.5"}), nil)
 	if err == nil {
@@ -143,12 +171,35 @@ func TestBlockIPInstallsADenyPolicy(t *testing.T) {
 		t.Fatalf("block_ip: %v", err)
 	}
 
-	if len(log) != 1 {
-		t.Fatalf("%d calls, want 1", len(log))
+	acts := actions(log)
+	if len(acts) != 1 {
+		t.Fatalf("%d calls, want 1", len(acts))
 	}
-	got := log[0]
+	got := acts[0]
 	if got.method != http.MethodPost || got.path != "/api/v1/netsec/policies" {
 		t.Errorf("called %s %s", got.method, got.path)
+	}
+
+	// And the containment is in the trail, under the SOAR's own account.
+	trail := recorded(log)
+	if len(trail) != 1 {
+		t.Fatalf("%d audit entries for one write, want 1", len(trail))
+	}
+	entry := trail[0].body
+	if entry["actor_type"] != "service" {
+		t.Errorf("the entry attributes the block to a %v", entry["actor_type"])
+	}
+	if entry["actor_id"] != "soar-executor" {
+		t.Errorf("actor_id = %v, want the SOAR's own account", entry["actor_id"])
+	}
+	if entry["resource_type"] != "netsec_policies" {
+		t.Errorf("resource_type = %v", entry["resource_type"])
+	}
+	if entry["resource_id"] != "p-1" {
+		t.Errorf("resource_id = %v, want the policy the action created", entry["resource_id"])
+	}
+	if entry["result"] != "success" {
+		t.Errorf("result = %v", entry["result"])
 	}
 	if got.body["action"] != "deny" {
 		t.Errorf("policy action = %v, want deny", got.body["action"])
@@ -188,8 +239,9 @@ func TestIsolateHostResolvesAnAssetToItsAddress(t *testing.T) {
 		t.Fatalf("isolate_host: %v", err)
 	}
 
-	if len(log) != 2 {
-		t.Fatalf("%d calls, want 2 (asset lookup then policy)", len(log))
+	acts := actions(log)
+	if len(acts) != 2 {
+		t.Fatalf("%d calls, want 2 (asset lookup then policy)", len(acts))
 	}
 	if log[0].method != http.MethodGet || log[0].path != "/api/v1/assets/a-1" {
 		t.Errorf("first call was %s %s, want the asset lookup", log[0].method, log[0].path)
@@ -248,8 +300,9 @@ func TestTagEntityKeepsTheTagsTheAssetAlreadyHas(t *testing.T) {
 		t.Fatalf("tag_entity: %v", err)
 	}
 
-	if len(log) != 2 {
-		t.Fatalf("%d calls, want 2 (read then write)", len(log))
+	acts := actions(log)
+	if len(acts) != 2 {
+		t.Fatalf("%d calls, want 2 (read then write)", len(acts))
 	}
 	tags, _ := log[1].body["tags"].([]any)
 	if len(tags) != 3 {

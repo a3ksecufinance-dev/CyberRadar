@@ -1,7 +1,7 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e e2e-chain fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
 
@@ -222,6 +222,10 @@ seed: ## Give the realm's users an identity on the platform (nobody can sign in 
 smoke: ## Read every service's list endpoints against a running platform and fail on any 5xx
 	APICHECK_DSN=postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable \
 		go test ./internal/pkg/apicheck/ -run TestEveryReadRouteAnswers -v -count=1
+
+e2e-chain: ## Drive one attack end to end — event, alert, case, playbook, containment, audit — and time each step
+	E2ECHAIN_DSN=postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable \
+		go test ./internal/pkg/e2echain/ -run TestTheChainFromEventToContainment -v -count=1 -timeout 10m
 
 e2e: ## Drive the interface in a browser against a running, seeded platform
 	cd ../frontend && npx playwright test

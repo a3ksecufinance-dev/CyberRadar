@@ -231,3 +231,37 @@ func All(backendRoot string) ([]Probe, error) {
 	})
 	return probes, nil
 }
+
+// Ports reads the local runner's own table: service key → port.
+//
+// It is the same table deploycheck holds the compose file to, so a service
+// cannot be deployed under one name here and another there. Exported because
+// the end-to-end chain needs the same addresses, and two copies of this parser
+// would drift the first time a port moves.
+func Ports(backendRoot string) (map[string]string, error) {
+	raw, err := os.ReadFile(filepath.Join(backendRoot, "scripts", "dev-local.sh"))
+	if err != nil {
+		return nil, fmt.Errorf("read the local runner: %w", err)
+	}
+	script := string(raw)
+
+	start := strings.Index(script, "SERVICES=(")
+	if start < 0 {
+		return nil, fmt.Errorf("scripts/dev-local.sh has no SERVICES table")
+	}
+	end := strings.Index(script[start:], "\n)")
+	if end < 0 {
+		return nil, fmt.Errorf("the SERVICES table in scripts/dev-local.sh is not closed")
+	}
+
+	out := map[string]string{}
+	for _, m := range servicesEntry.FindAllStringSubmatch(script[start:start+end], -1) {
+		out[m[3]] = m[2]
+	}
+	if len(out) < 25 {
+		return nil, fmt.Errorf("the SERVICES table parsed to %d entries; the regex has drifted", len(out))
+	}
+	return out, nil
+}
+
+var servicesEntry = regexp.MustCompile(`"([a-z0-9-]+):(\d+):([a-z]+)"`)

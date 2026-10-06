@@ -35,6 +35,7 @@ type Dispatcher interface {
 // An empty URL disables the actions that need it, and they fail with a message
 // saying which service is unconfigured rather than pretending to have run.
 type Endpoints struct {
+	Audit        string
 	Netsec       string
 	Identity     string
 	Asset        string
@@ -55,15 +56,21 @@ type Endpoints struct {
 type HTTPDispatcher struct {
 	endpoints Endpoints
 	tokens    *svcauth.Pool
+	actorID   string
 	client    *http.Client
 	logger    zerolog.Logger
 }
 
 // NewHTTPDispatcher creates an HTTPDispatcher.
-func NewHTTPDispatcher(endpoints Endpoints, tokens *svcauth.Pool, logger zerolog.Logger) *HTTPDispatcher {
+//
+// actorID is the SOAR's own client id. It is what the audit trail names as the
+// actor, and the reason it is passed in rather than inferred: the trail has to
+// say which account acted, and only the configuration knows that.
+func NewHTTPDispatcher(endpoints Endpoints, tokens *svcauth.Pool, actorID string, logger zerolog.Logger) *HTTPDispatcher {
 	return &HTTPDispatcher{
 		endpoints: endpoints,
 		tokens:    tokens,
+		actorID:   actorID,
 		client:    &http.Client{Timeout: 30 * time.Second},
 		logger:    logger,
 	}
@@ -531,15 +538,19 @@ func (d *HTTPDispatcher) send(ctx context.Context, tenantID uuid.UUID, c call) (
 
 	resp, err := d.client.Do(req)
 	if err != nil {
+		d.recordAudit(ctx, tenantID, c, "", err)
 		return nil, fmt.Errorf("%s %s %s: %w", c.service, c.method, c.path, err)
 	}
 	defer resp.Body.Close()
 
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		refused := fmt.Errorf("%s: %s", resp.Status, truncate(string(raw), maxErrorBody))
+		d.recordAudit(ctx, tenantID, c, "", refused)
 		return nil, fmt.Errorf("%s %s %s: %s: %s",
 			c.service, c.method, c.path, resp.Status, truncate(string(raw), maxErrorBody))
 	}
+	d.recordAudit(ctx, tenantID, c, idOf(raw), nil)
 	if readErr != nil {
 		return nil, fmt.Errorf("%s: read response: %w", c.service, readErr)
 	}
@@ -586,6 +597,113 @@ func dig(m map[string]any, keys ...string) any {
 }
 
 // asCIDR turns a bare address into a single-host CIDR, leaving a range alone.
+// recordAudit writes the trail entry for one action.
+//
+// Nothing did this before: a playbook could block an address at the firewall,
+// isolate a host or disable an account, and the audit trail held nothing about
+// it — the only record was the SOAR's own execution row, which is not what an
+// auditor reads and not what a regulator asks for. The entry names the SOAR's
+// service account, because that is who acted: the analyst pressed run, and
+// "the analyst blocked 10.0.0.5" is false.
+//
+// A failed write does not undo the action. A successful containment reported as
+// a failure because its trail could not be written would be worse than a
+// missing line, so this logs at error level and carries on; the line it could
+// not write is in the log.
+func (d *HTTPDispatcher) recordAudit(ctx context.Context, tenantID uuid.UUID, c call, resourceID string, failure error) {
+	// Reads change nothing and would bury the writes.
+	if c.method == http.MethodGet || c.method == http.MethodHead {
+		return
+	}
+	if d.endpoints.Audit == "" {
+		d.logger.Error().
+			Str("service", c.service).Str("path", c.path).
+			Msg("audit_endpoint_not_configured_action_not_recorded")
+		return
+	}
+
+	result := "success"
+	details := map[string]any{"service": c.service, "method": c.method, "path": c.path}
+	if failure != nil {
+		result = "failure"
+		details["error"] = truncate(failure.Error(), maxErrorBody)
+	}
+	encodedDetails, _ := json.Marshal(details)
+
+	body, err := json.Marshal(map[string]any{
+		"tenant_id":     tenantID.String(),
+		"actor_id":      d.actorID,
+		"actor_type":    "service",
+		"action":        "playbook_execute",
+		"resource_type": resourceType(c),
+		"resource_id":   resourceID,
+		"result":        result,
+		"details":       string(encodedDetails),
+	})
+	if err != nil {
+		d.logger.Error().Err(err).Msg("audit_entry_not_encoded")
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimSuffix(d.endpoints.Audit, "/")+"/api/v1/audit/events", bytes.NewReader(body))
+	if err != nil {
+		d.logger.Error().Err(err).Msg("audit_request_not_built")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if err := d.tokens.Authorize(ctx, tenantID.String(), req); err != nil {
+		d.logger.Error().Err(err).Msg("audit_entry_not_authenticated")
+		return
+	}
+
+	resp, err := d.client.Do(req)
+	if err != nil {
+		d.logger.Error().Err(err).
+			Str("service", c.service).Str("path", c.path).
+			Msg("audit_entry_not_written")
+		return
+	}
+	defer resp.Body.Close() //nolint:errcheck // read-only
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		d.logger.Error().
+			Str("status", resp.Status).Str("body", truncate(string(raw), maxErrorBody)).
+			Str("service", c.service).Str("path", c.path).
+			Msg("audit_entry_refused")
+	}
+}
+
+// resourceType names what was acted on, as the service and the collection
+// within it: "netsec_policies", "asset_assets". An auditor filtering on
+// resource_type wants that, not the whole path.
+func resourceType(c call) string {
+	parts := strings.Split(strings.Trim(c.path, "/"), "/")
+	// /api/v1/<service>/<collection>/…
+	if len(parts) >= 4 && parts[0] == "api" {
+		return parts[2] + "_" + parts[3]
+	}
+	return c.service
+}
+
+// idOf pulls the identifier out of an answer, so the trail points at the row
+// that was created or changed rather than only at the collection.
+func idOf(raw []byte) string {
+	var env struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return ""
+	}
+	if env.Data.ID != "" {
+		return env.Data.ID
+	}
+	return env.ID
+}
+
 func asCIDR(ip string) string {
 	if strings.Contains(ip, "/") {
 		return ip
