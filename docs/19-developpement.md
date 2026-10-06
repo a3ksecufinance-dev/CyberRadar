@@ -346,6 +346,44 @@ jetons signés par la plateforme, ce que la chaîne émet avec
 `internal/pkg/devtoken`. C'est aussi la configuration à utiliser pour déboguer
 localement sans fournisseur d'identité.
 
+#### Et trois défauts de plus, que seule la CI pouvait montrer
+
+La chaîne passait en local en 4 s et échouait en CI. Trois exécutions, deux
+symptômes différents, et aucune des deux ne disait quoi : le journal d'un
+travail fait plusieurs mégaoctets et l'API ne le rend pas page par page. Les
+quatorze sorties du test écrivent donc aussi leur phrase en **annotation** de
+l'exécution, que l'API rend en un appel, et l'étape de vidage des journaux fait
+de même pour les lignes d'erreur de chaque service. La première exécution ainsi
+instrumentée a donné la réponse immédiatement :
+
+```
+[failure] soar: {"level":"fatal","service":"soar-service",
+  "error":"oidc discovery http://localhost:8080/realms/cyberradar/…:
+    dial tcp [::1]:8080: connect: connection refused"}
+```
+
+5. **la configuration était implicite dans le shell appelant.** `restart`
+   repasse par `services`, qui relit le shell — un autre shell. Le job posait
+   `CRP_OIDC_ISSUER` vide sur la seule étape qui démarre la plateforme ;
+   l'étape suivante provisionne le compte du SOAR et le redémarre, sans la
+   variable. Le service redémarré a sondé un Keycloak absent et s'est arrêté.
+   Les choix sont désormais écrits dans `$STATE_DIR/config.env` au premier
+   démarrage et relus ensuite, par `declare -p` pour que « défini mais vide »
+   survive — c'est la valeur qui porte le sens. Le même piège attendait un
+   développeur qui redémarre un service depuis un second terminal ;
+6. **`services` annonçait un démarrage réussi avec des services morts**, par
+   un avertissement et un code de retour nul. Trois exécutions de la chaîne ont
+   piloté une plateforme sans SOAR. Le code de retour est maintenant non nul, et
+   le redémarrage du SOAR, qui était muet et dont le résultat était ignoré, est
+   vérifié ;
+7. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
+   défaut à une valeur explicitement vide. Pour un mot de passe, « ce serveur
+   n'en a pas » est une configuration réelle — celle des conteneurs de la CI — et
+   la seule façon de le dire est le vide. Avec le deux-points, chaque `AUTH`
+   échouait et chaque service basculait sur son chemin de repli : la fenêtre
+   glissante du SIEM compte alors en mémoire, par conception, donc rien ne
+   paraissait cassé pendant que le compteur partagé n'était jamais exercé.
+
 ### Prouver qu'un test a des dents
 
 La discipline suivie dans tout ce dépôt : après avoir écrit un test, **casser

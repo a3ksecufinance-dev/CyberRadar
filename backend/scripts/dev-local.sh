@@ -84,9 +84,16 @@ load_config() {
 load_config
 
 PGUSER_NAME="${CRP_PG_USER:-crp_user}"
-PGPASS="${CRP_PG_PASSWORD:-crp_password_dev}"
 PGDB="${CRP_PG_DB:-crp_foundation}"
-REDIS_PASS="${CRP_REDIS_PASSWORD:-crp_redis_dev}"
+# ${VAR-default}, not ${VAR:-default}, for the two passwords: a server with no
+# password is a real configuration — it is how the containers in CI are set up —
+# and "set but empty" is the only way to say it. With the colon an explicitly
+# empty value takes the default, every AUTH fails, and each service quietly
+# falls back: the SIEM's sliding window then counts in-process, by design, so
+# nothing looks broken while the shared counter is never exercised. This is the
+# same trap CRP_OIDC_ISSUER already carries a note about, one variable over.
+PGPASS="${CRP_PG_PASSWORD-crp_password_dev}"
+REDIS_PASS="${CRP_REDIS_PASSWORD-crp_redis_dev}"
 NEO4J_PASS="${CRP_NEO4J_PASSWORD:-crp_password_dev}"
 
 DATABASE_URL="postgres://$PGUSER_NAME:$PGPASS@localhost:5432/$PGDB?sslmode=disable"

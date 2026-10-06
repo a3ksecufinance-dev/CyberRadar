@@ -426,6 +426,14 @@ jobs:
       # CRP_CORS_ORIGINS, which is the name the script reads. It was
       # CRP_CORS_ALLOWED_ORIGINS here, which nothing has ever read.
       CRP_CORS_ORIGINS: http://localhost:3000
+      # This job's Redis runs with no password, and the local runner otherwise
+      # sends crp_password_dev: every AUTH then fails, so every service that
+      # uses Redis runs on its fallback path. The SIEM's sliding window counts
+      # in-process when that happens — by design, because a detection engine
+      # that stops counting when its cache blinks misses the attack — so the
+      # chain still passes while nothing exercises the shared counter it is
+      # supposed to use.
+      CRP_REDIS_PASSWORD: ""
     # The chain this job drives: an event is ingested, the rule engine raises an
     # alert, an analyst promotes it to a case, a playbook runs, the address is
     # blocked at the network, and the audit trail names the playbook.

@@ -485,7 +485,15 @@ dépende d'une déclaration.
 > par automate ne laissait aucune trace ; le moteur de règles s'arrêtait
 > définitivement sur une coupure du courtier, sans alerte ; et
 > `POST /playbooks/{id}/run` ne rend pas l'identifiant de l'exécution
-> qu'il démarre. **B5 est fait** : les 49 migrations PostgreSQL passent par
+> qu'il démarre. La mise au vert de ce travail en CI en a donné **trois de
+> plus**, qu'aucune exécution locale ne pouvait montrer : la configuration
+> était implicite dans le shell appelant, donc un `restart` reconfigurait
+> silencieusement le service autrement — le SOAR sondait un Keycloak absent
+> et s'arrêtait, et trois exécutions de la chaîne ont piloté une plateforme
+> sans SOAR ; le démarrage des services annonçait sa réussite avec des
+> services morts ; et `${VAR:-default}` faisait prendre le défaut à un mot de
+> passe explicitement vide, si bien que chaque service basculait sur son
+> chemin de repli sans que rien ne paraisse cassé. **B5 est fait** : les 49 migrations PostgreSQL passent par
 > `golang-migrate` et une table `schema_migrations`, chaque fichier s'applique
 > une fois, et la CI applique l'ensemble deux fois de suite en exigeant que la
 > seconde n'applique rien. Ce qui change n'est pas la commodité : la boucle
