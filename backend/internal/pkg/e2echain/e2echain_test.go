@@ -36,6 +36,17 @@ const (
 	budgetAudit    = 30 * time.Second
 )
 
+// fatal fails the test and, in CI, leaves the reason as a run annotation.
+//
+// The chain's whole value is naming which handover broke. A failure buried in
+// a job log that cannot be read is a failure nobody acts on, so every exit
+// from this test goes through here.
+func fatal(t *testing.T, format string, args ...any) {
+	t.Helper()
+	Annotate(format, args...)
+	t.Fatalf(format, args...)
+}
+
 // TestTheChainFromEventToContainment is the whole product in one test.
 //
 // Skipping when no platform is reachable keeps the suite usable on a laptop,
@@ -56,7 +67,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 	}
 	if err != nil {
 		if required {
-			t.Fatalf("E2ECHAIN_DSN is set to %s but it is not reachable: %v", dsn, err)
+			fatal(t, "E2ECHAIN_DSN is set to %s but it is not reachable: %v", dsn, err)
 		}
 		t.Skipf("no database at %s (set E2ECHAIN_DSN to require one): %v", dsn, err)
 	}
@@ -64,7 +75,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 
 	ports, err := apicheck.Ports(backendRoot)
 	if err != nil {
-		t.Fatalf("read the deployment's port table: %v", err)
+		fatal(t, "read the deployment's port table: %v", err)
 	}
 
 	keyPath := os.Getenv("JWT_PRIVATE_KEY_PATH")
@@ -79,7 +90,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 	token, grant, err := devtoken.Mint(ctx, pool, keyPath, email)
 	if err != nil {
 		if required {
-			t.Fatalf("mint a token: %v", err)
+			fatal(t, "mint a token: %v", err)
 		}
 		t.Skipf("cannot mint a token (set E2ECHAIN_DSN to require this test): %v", err)
 	}
@@ -92,7 +103,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 	// a failure.
 	if err := analyst.Do(ctx, "GET", "siem", "/health", nil, nil); err != nil {
 		if required {
-			t.Fatalf("the platform is not answering: %v", err)
+			fatal(t, "the platform is not answering: %v", err)
 		}
 		t.Skipf("the platform is not running (set E2ECHAIN_DSN to require it): %v", err)
 	}
@@ -143,10 +154,10 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			"dedup_window_s":  60,
 		}, &rule)
 	}); err != nil {
-		t.Fatalf("author the rule: %v%s", err, tl)
+		fatal(t, "author the rule: %v%s", err, tl)
 	}
 	if rule.ID == uuid.Nil {
-		t.Fatalf("the rule was created without an id%s", tl)
+		fatal(t, "the rule was created without an id%s", tl)
 	}
 
 	// ─── The event ───────────────────────────────────────────────────────────
@@ -160,7 +171,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 		agent, err = onboardConnector(ctx, pool, analyst, stamp)
 		return err
 	}); err != nil {
-		t.Fatalf("onboard a connector: %v%s", err, tl)
+		fatal(t, "onboard a connector: %v%s", err, tl)
 	}
 
 	burst := func() error {
@@ -211,7 +222,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 	}
 
 	if err := tl.Measure("3. the attack begins: six failed logins", budgetIngest, burst); err != nil {
-		t.Fatalf("ingest the events: %v%s", err, tl)
+		fatal(t, "ingest the events: %v%s", err, tl)
 	}
 
 	// ─── The alert ───────────────────────────────────────────────────────────
@@ -264,7 +275,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			return false, nil
 		})
 	}); err != nil {
-		t.Fatalf("the alert never appeared for %s: %v%s", attacker, err, tl)
+		fatal(t, "the alert never appeared for %s: %v%s", attacker, err, tl)
 	}
 	if alert.Severity != "CRITICAL" {
 		t.Errorf("the alert is %q, want the rule's CRITICAL", alert.Severity)
@@ -286,10 +297,10 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 				"alert_ids":   []string{alert.AlertID.String()},
 			}, &investigation)
 	}); err != nil {
-		t.Fatalf("promote the alert: %v%s", err, tl)
+		fatal(t, "promote the alert: %v%s", err, tl)
 	}
 	if investigation.ID == uuid.Nil {
-		t.Fatalf("the case was created without an id%s", tl)
+		fatal(t, "the case was created without an id%s", tl)
 	}
 
 	// ─── The playbook ────────────────────────────────────────────────────────
@@ -313,7 +324,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			}},
 		}, &playbook)
 	}); err != nil {
-		t.Fatalf("write the playbook: %v%s", err, tl)
+		fatal(t, "write the playbook: %v%s", err, tl)
 	}
 
 	// Started, then followed through the listing.
@@ -388,7 +399,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			return false, nil
 		})
 	}); err != nil {
-		t.Fatalf("run the playbook: %v%s", err, tl)
+		fatal(t, "run the playbook: %v%s", err, tl)
 	}
 
 	// ─── The containment ─────────────────────────────────────────────────────
@@ -429,7 +440,7 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			return false, nil
 		})
 	}); err != nil {
-		t.Fatalf("no deny policy for %s: %v%s", attacker, err, tl)
+		fatal(t, "no deny policy for %s: %v%s", attacker, err, tl)
 	}
 	if policy.Action != "deny" {
 		t.Errorf("the containment policy says %q, not deny", policy.Action)

@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -204,4 +206,38 @@ func Until(ctx context.Context, deadline, every time.Duration, fn func() (bool, 
 		case <-time.After(every):
 		}
 	}
+}
+
+// Annotate writes a GitHub Actions error annotation when the chain runs in CI.
+//
+// Why this exists: a chain that fails in CI is only useful if the reason can be
+// read. The job's log holds it, but a log is megabytes of service output and
+// container teardown, and the reason sits in the middle of it. An annotation is
+// a single line attached to the run, so whoever looks — a person or a tool —
+// gets the failing step and its cause without reading the log at all.
+//
+// Outside Actions it writes nothing: the test already prints everything.
+func Annotate(format string, args ...any) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return
+	}
+	// A workflow command is one line, so newlines are escaped the way Actions
+	// expects or the annotation is truncated at the first one.
+	msg := redactPasswords(fmt.Sprintf(format, args...))
+	msg = strings.ReplaceAll(msg, "%", "%25")
+	msg = strings.ReplaceAll(msg, "\r", "%0D")
+	msg = strings.ReplaceAll(msg, "\n", "%0A")
+	fmt.Printf("::error title=e2e-chain::%s\n", msg)
+}
+
+// dsnPassword matches the password in a URL's userinfo.
+//
+// An annotation is the most visible line a run produces, and a connection
+// string reaches these messages whenever one cannot be reached. The value is a
+// development password today; that is a reason to redact it rather than a
+// reason not to.
+var dsnPassword = regexp.MustCompile(`(://[^:/@\s]+):[^@/\s]*@`)
+
+func redactPasswords(s string) string {
+	return dsnPassword.ReplaceAllString(s, "$1:***@")
 }

@@ -531,17 +531,36 @@ jobs:
         run: make e2e-chain
 
       # The chain reports which step failed; these say why.
+      #
+      # Both halves matter. The full tail goes to the log for reading in
+      # detail, and the error lines go out as annotations, because a job log
+      # is megabytes of service output and container teardown that the API
+      # will not hand over a page at a time — the reason ends up written down
+      # where nobody can get at it. An annotation is one line attached to the
+      # run.
       - name: The logs of the services in the chain
         if: failure()
         working-directory: backend
         run: |
+          found=0
           for s in collector siem soar netsec audit identity pipeline-worker; do
             f=".dev-local/logs/$s-service.log"
             [ -f "$f" ] || f=".dev-local/logs/$s.log"
-            [ -f "$f" ] || continue
+            if [ ! -f "$f" ]; then
+              echo "::error title=no log::$s wrote no log, so it never started"
+              continue
+            fi
+            found=$((found + 1))
             echo "──────── $f"
             tail -40 "$f"
+            grep -iE '"level":"(error|fatal)"' "$f" | tail -3 | while read -r line; do
+              echo "::error title=$s::$(printf '%s' "$line" | cut -c1-400)"
+            done
           done
+          if [ "$found" = 0 ]; then
+            echo "::error title=no logs at all::nothing under .dev-local/logs; the platform step wrote elsewhere"
+            ls -la .dev-local 2>&1 || true
+          fi
 
   vulnerabilities:
     name: Dependency vulnerabilities
