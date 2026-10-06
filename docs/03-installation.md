@@ -14,9 +14,9 @@ les mêmes ports.
 
 | | Version | Pourquoi |
 |---|---|---|
-| Go | 1.25+ | L'espace de travail `go.work` l'exige. La version est un minimum de sécurité et non de confort : les correctifs de `net/url`, `crypto/tls` et `crypto/x509` que `govulncheck` exige n'existent qu'à partir de 1.25 |
+| Go | 1.26+ | L'espace de travail `go.work` l'exige. La version est un minimum de sécurité et non de confort : les correctifs de `net/url`, `crypto/tls` et `crypto/x509` que `govulncheck` exige n'existent qu'à partir de 1.25, et `golang.org/x/crypto` 0.56 — la version qui corrige GO-2026-6355 et GO-2026-6354 — déclare `go 1.26` |
 | Node | 20+ | Next.js 14 |
-| `psql` | 14+ | Les migrations sont appliquées par `psql` |
+| `psql` | 14+ | L’amorçage des identités et l’inspection de la base ; le schéma PostgreSQL passe par `internal/cmd/migrate` |
 | `openssl` | — | Génère la paire RSA des jetons |
 | Docker + Compose | 24+ | Chemin Compose uniquement |
 
@@ -64,13 +64,63 @@ ceux-là. Un PostgreSQL déjà présent sur la machine n'est pas emporté par un
 
 ```bash
 ./scripts/dev-local.sh infra      # PostgreSQL, Redis, ClickHouse, Kafka, Keycloak
-./scripts/dev-local.sh migrate    # PostgreSQL + ClickHouse
+./scripts/dev-local.sh migrate    # PostgreSQL + ClickHouse ; rejouable
 ./scripts/dev-local.sh content    # le catalogue de détection
 ./scripts/dev-local.sh seed       # les identités, sans quoi personne ne peut se connecter
 ./scripts/dev-local.sh build      # 36 binaires
 ./scripts/dev-local.sh services   # les 30 services
 ./scripts/dev-local.sh frontend   # l'interface sur :3000
 ```
+
+### Les migrations
+
+PostgreSQL passe par une table de version (`schema_migrations`) : chaque
+fichier s'applique une fois, et une nouvelle migration s'applique par-dessus
+une installation en service. C'est ce qui rend l'étape rejouable.
+
+```bash
+make migrate          # applique ce qui ne l'est pas encore
+make migrate-status   # la version où la base se trouve
+```
+
+Un deuxième `make migrate` n'applique rien :
+
+```
+applied 0 → 49
+already at 49, nothing to apply
+```
+
+Il n'y a pas de migration descendante, par décision : la plupart de ces
+fichiers créent une table et l'essentiel du reste élargit une colonne.
+L'inverse de « la colonne contient désormais les données du client » n'est pas
+un `DROP`, c'est une restauration. `migrate down` est donc refusé, avec cette
+raison, plutôt que de faire quelque chose de destructeur sans le dire.
+
+#### Une installation antérieure à la table de version
+
+Les installations mises en place avant cette table ont le schéma et rien qui
+l'enregistre : `migrate` échouerait sur le premier `CREATE TABLE`. La version
+s'adopte une fois pour toutes :
+
+```bash
+make migrate-baseline               # adopted the existing schema at version 49
+make migrate                        # already at 49, nothing to apply
+./scripts/dev-local.sh migrate-baseline   # le même, par le lanceur local
+```
+
+`migrate up` ne touche à rien dans cet état : il refuse d'emblée, en nommant
+`baseline`. C'est voulu, et c'est le défaut que l'exécution a trouvé — une
+tentative d'application sur un schéma déjà posé échoue sur le premier index
+existant *et* inscrit une version 1 « sale », après quoi `up` refuse (sale) et
+`baseline` refuse (il y a une version) : l'installation est bloquée par la
+première commande qu'un exploitant aurait tapée. Le contrôle est donc fait
+avant d'appliquer quoi que ce soit.
+
+`migrate baseline` refuse une base vide (c'est `up` qu'il faut) et une base qui
+porte déjà une version (il n'y a rien à adopter).
+
+ClickHouse et Neo4j restent appliqués par une boucle : chaque instruction de
+ces fichiers est un `CREATE … IF NOT EXISTS`, ils sont rejouables tels quels.
 
 ### Et pour l'exploiter
 
@@ -197,7 +247,7 @@ est vide.
 
 | Symptôme | Cause | Remède |
 |---|---|---|
-| `crp_foundation already has the schema` | Les migrations PostgreSQL ne sont pas rejouables | `./scripts/dev-local.sh reset && ./scripts/dev-local.sh migrate` |
+| `already carries the schema but has no migration version` | Installation antérieure à la table de version | `make migrate-baseline`, puis `make migrate` |
 | Connexion acceptée, puis 403 partout | L'amorçage des identités n'a pas tourné | `make seed` |
 | Un service répond l'ancien comportement après rebuild | `services` ne démarre que ce qui ne tourne pas | `./scripts/dev-local.sh restart <service>` |
 | `copilot-service skipped` | Pas de clé API | `export ANTHROPIC_API_KEY=…` |

@@ -1,9 +1,10 @@
 # ============================================================
 # Cyber Radar Platform — Makefile
 # ============================================================
-.PHONY: help dev down build test lint migrate content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e e2e-chain fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
+.PHONY: help dev down build test lint migrate migrate-status migrate-baseline content content-check content-release content-trust docs-api docs-api-check seed demo smoke e2e e2e-chain fmt tidy graph-reconcile graph-backfill kg-reconcile kg-backfill
 
 DOCKER_COMPOSE = docker compose -f deployments/docker-compose.yml
+POSTGRES_DSN ?= postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -31,12 +32,14 @@ logs: ## Tail logs from all services
 
 # ─── Database migrations ──────────────────────────────────────────────────────
 
-migrate: ## Run all PostgreSQL migrations
+# PostgreSQL goes through the version table, so this target is replayable: a
+# second run applies nothing. ClickHouse and Neo4j are still a loop because
+# every statement in those files is CREATE ... IF NOT EXISTS — they are
+# replayable as they stand, and giving them a version table they do not need
+# would only be a second thing to baseline.
+migrate: ## Apply every migration not yet applied (replayable)
 	@echo "Running PostgreSQL migrations..."
-	@for f in migrations/postgres/*.sql; do \
-		echo "  → $$f"; \
-		PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation -f $$f; \
-	done
+	DATABASE_URL="$(POSTGRES_DSN)" go run ./internal/cmd/migrate up
 	@echo "Running ClickHouse migrations..."
 	@for f in migrations/clickhouse/*.sql; do \
 		echo "  → $$f"; \
@@ -121,9 +124,14 @@ kg-backfill: ## Copy the knowledge graph from PostgreSQL into Neo4j, then verify
 	NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME=neo4j NEO4J_PASSWORD=crp_password_dev \
 	go run ./services/knowledgegraph/cmd/reconcile/ -backfill
 
-migrate-status: ## Show migration status
-	PGPASSWORD=crp_password_dev psql -h localhost -U crp_user -d crp_foundation \
-		-c "SELECT schemaname, tablename, tableowner FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;"
+migrate-status: ## Show the version the database is at
+	DATABASE_URL="$(POSTGRES_DSN)" go run ./internal/cmd/migrate version
+
+# For an installation that predates the version table: the tables are there,
+# nothing records that they are, and `up` would fail on the first CREATE TABLE.
+# This records the version the loop already reached. See docs/03-installation.md.
+migrate-baseline: ## Adopt a schema that was applied before the version table existed
+	DATABASE_URL="$(POSTGRES_DSN)" go run ./internal/cmd/migrate baseline
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 

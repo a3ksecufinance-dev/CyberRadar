@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
   NODE_VERSION: "20"
 
 jobs:
@@ -142,13 +142,10 @@ jobs:
 
       - name: Apply migrations
         working-directory: backend
-        env:
-          PGPASSWORD: crp_password_dev
         run: |
           set -euo pipefail
-          for f in migrations/postgres/*.sql; do
-            psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
-          done
+          DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+            go run ./internal/cmd/migrate up
 
       # Six of these seven never applied — a TTL on a DateTime64 column and a
       # DESC in a sorting key — so the SIEM, UEBA, TI, vuln and audit schemas
@@ -309,26 +306,66 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U crp_user -d crp_foundation"
           --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://crp_user:crp_password_dev@127.0.0.1:5432/crp_foundation?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
       - name: Apply PostgreSQL migrations
+        working-directory: backend
+        run: go run ./internal/cmd/migrate up
+
+      # The reason this job exists twice over. Applying the files once proves
+      # they parse; applying them again proves the version table is doing its
+      # job, which is what makes a new migration deployable to a running
+      # installation instead of a reason to drop the database. The second run
+      # has to print "nothing to apply" — if it re-executed anything, the
+      # first CREATE TABLE without IF NOT EXISTS fails and so does this step.
+      - name: Apply them again — nothing may be applied twice
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          out=$(go run ./internal/cmd/migrate up)
+          echo "$out"
+          case "$out" in
+            *"nothing to apply"*) ;;
+            *) echo "::error::the second application was not a no-op: $out"; exit 1 ;;
+          esac
+
+      - name: Report schema and version
         working-directory: backend
         env:
           PGPASSWORD: crp_password_dev
         run: |
           set -euo pipefail
-          for f in migrations/postgres/*.sql; do
-            echo "→ $f"
-            psql -h 127.0.0.1 -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
-          done
+          echo "version: $(go run ./internal/cmd/migrate version)"
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' tables created' FROM information_schema.tables WHERE table_schema='public'"
 
-      - name: Report schema
+      # An installation that predates the version table has the schema and no
+      # version. `baseline` is the documented way in, and it is only a
+      # documented way in if it keeps working: drop the version table, adopt
+      # the schema that is still there, and check `up` then has nothing to do.
+      - name: Adopt a schema applied before the version table existed
+        working-directory: backend
         env:
           PGPASSWORD: crp_password_dev
         run: |
-          psql -h 127.0.0.1 -U crp_user -d crp_foundation -tAc \
-            "SELECT count(*) || ' tables created' FROM information_schema.tables WHERE table_schema='public'"
+          set -euo pipefail
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q \
+            -c "DROP TABLE schema_migrations"
+          go run ./internal/cmd/migrate baseline
+          out=$(go run ./internal/cmd/migrate up)
+          echo "$out"
+          case "$out" in
+            *"nothing to apply"*) ;;
+            *) echo "::error::up after baseline was not a no-op: $out"; exit 1 ;;
+          esac
 
   frontend:
     name: Frontend — typecheck, lint, build
@@ -444,13 +481,10 @@ jobs:
 
       - name: Apply migrations
         working-directory: backend
-        env:
-          PGPASSWORD: crp_password_dev
         run: |
           set -euo pipefail
-          for f in migrations/postgres/*.sql; do
-            psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q -f "$f"
-          done
+          DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+            go run ./internal/cmd/migrate up
 
       - name: Apply ClickHouse migrations
         working-directory: backend

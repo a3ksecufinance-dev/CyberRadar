@@ -79,7 +79,10 @@ tenantID := authctx.TenantID(r.Context())
 4. Le port, **aux trois endroits** : `scripts/dev-local.sh`,
    `deployments/docker-compose.yml`, `frontend/src/lib/api.ts`.
    `internal/pkg/deploycheck` vérifie que les deux premiers s'accordent.
-5. La migration du schéma.
+5. La migration du schéma : `migrations/postgres/0000NN_ce_qu_elle_fait.up.sql`,
+   le numéro suivant celui du dernier fichier. Le suffixe `.up.sql` n'est pas
+   décoratif — c'est ce que `golang-migrate` lit, un fichier nommé autrement
+   ne s'applique pas. Il n'y a pas de `.down.sql` : voir plus bas.
 6. Une sonde dans `internal/pkg/apicheck` — **le test de couverture échoue
    sans elle**.
 
@@ -365,12 +368,51 @@ raison**.
 
 ---
 
+## Les migrations
+
+PostgreSQL passe par `golang-migrate` et une table `schema_migrations` :
+chaque fichier s'applique une fois, et une nouvelle migration s'applique
+par-dessus une installation en service.
+
+```bash
+make migrate          # applique ce qui ne l'est pas encore
+make migrate-status   # la version où la base se trouve
+make migrate-baseline # adopter un schéma posé avant la table de version
+```
+
+Ce que ça remplace : une boucle sur `migrations/postgres/*.sql` à travers
+`psql`. Elle marche exactement une fois. Au deuxième passage elle rejoue tous
+les fichiers, et un fichier qui n'est pas idempotent — un `ALTER TABLE`, un
+`INSERT` de données d'amorçage, un `CREATE INDEX` sans `IF NOT EXISTS` —
+échoue ou duplique. Le lanceur local portait donc un garde-fou qui refusait de
+migrer une base ayant déjà le schéma, ce qui voulait dire qu'une nouvelle
+migration ne pouvait pas être appliquée à une installation en service : la
+seule voie documentée était de détruire la base et de repartir de zéro. Pour
+une plateforme destinée à une banque, ce n'est pas une histoire de migration.
+
+Et le garde-fou couvrait toute la fonction : une installation montée sans
+ClickHouse ne pouvait plus jamais recevoir son schéma ClickHouse non plus — le
+seul magasin qui manquait était celui que le garde-fou rendait inatteignable.
+
+**Pas de migration descendante, par décision.** La plupart de ces fichiers
+créent une table et l'essentiel du reste élargit une colonne ; l'inverse de
+« la colonne contient désormais les données du client » n'est pas un `DROP`,
+c'est une restauration. `migrate down` est refusé avec cette raison plutôt que
+de faire discrètement quelque chose de destructeur.
+
+ClickHouse et Neo4j restent une boucle : chaque instruction de ces fichiers est
+un `CREATE … IF NOT EXISTS`, ils sont rejouables tels quels, et leur donner une
+table de version dont ils n'ont pas besoin ne ferait qu'ajouter une deuxième
+chose à adopter.
+
+---
+
 ## La CI
 
 | Job | Ce qu'il fait |
 |---|---|
 | **Backend** | Format, build, vet, migrations PostgreSQL + ClickHouse, **publication et installation d'une livraison de contenu signée**, quatre refus asservis à leur motif, tests |
-| **Migrations** | Applique toutes les migrations à une base vierge et rapporte le schéma |
+| **Migrations** | Applique toutes les migrations à une base vierge, **les applique une seconde fois et exige que rien ne s'applique**, puis supprime la table de version, adopte le schéma et exige encore un `up` vide |
 | **Frontend** | `type-check`, `lint`, **`check:messages`**, `build` |
 | **Vulnérabilités** | `govulncheck`, `npm audit` |
 

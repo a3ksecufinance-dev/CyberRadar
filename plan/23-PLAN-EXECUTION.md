@@ -121,7 +121,7 @@ de la dette plus vite qu'il n'ajoute de la valeur.
 | Couverture ≥ 60 % sur `tenant` et `collector` — les deux dont un défaut est silencieux | 20 j |
 | Au moins un test sur chacun des 15 autres services sans test | 25 j |
 | Parcours de bout en bout scripté et chronométré, en CI | 10 j |
-| Migrations à état (`golang-migrate` sur les 47 existantes) | 12 j |
+| Migrations à état (`golang-migrate` sur les 49 existantes) — **fait** ✓ | 12 j |
 | Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants — **`govulncheck` est fait et bloquant** ✓ ; `npm audit` attend la migration Next 16 | 5 j |
 | Les 5 tables mortes : **supprimées** par la migration `000048` — arbitrage tranché, L12 les recréera en les implémentant | 2 j |
 
@@ -485,7 +485,28 @@ dépende d'une déclaration.
 > par automate ne laissait aucune trace ; le moteur de règles s'arrêtait
 > définitivement sur une coupure du courtier, sans alerte ; et
 > `POST /playbooks/{id}/run` ne rend pas l'identifiant de l'exécution
-> qu'il démarre. B5 reste.
+> qu'il démarre. **B5 est fait** : les 49 migrations PostgreSQL passent par
+> `golang-migrate` et une table `schema_migrations`, chaque fichier s'applique
+> une fois, et la CI applique l'ensemble deux fois de suite en exigeant que la
+> seconde n'applique rien. Ce qui change n'est pas la commodité : la boucle
+> `psql` ne marchait qu'une fois, et le lanceur local portait donc un garde-fou
+> qui refusait de migrer une base ayant déjà le schéma — autrement dit, une
+> nouvelle migration ne pouvait pas être appliquée à une installation en
+> service, la seule voie documentée étant de détruire la base. Ce garde-fou
+> couvrait toute la fonction, si bien qu'une installation montée sans
+> ClickHouse ne pouvait plus jamais recevoir son schéma ClickHouse. Les
+> installations antérieures s'adoptent avec `make migrate-baseline`, dont la CI
+> vérifie aussi le chemin — et c'est en l'exécutant contre la vraie base locale
+> que le lot a trouvé son propre défaut : une tentative d'application sur un
+> schéma déjà posé échoue sur le premier index existant *et* inscrit une
+> version 1 « sale », après quoi `up` refuse parce que c'est sale et `baseline`
+> refuse parce qu'il y a une version. L'installation se bloquait sur la
+> première commande qu'un exploitant aurait tapée. Le contrôle se fait
+> désormais avant d'appliquer quoi que ce soit. Il n'y a pas de migration descendante, par décision
+> et non par omission : l'inverse d'une migration qui porte désormais les
+> données du client est une restauration, pas un `DROP`, et `migrate down` le
+> dit au lieu de le faire. **L0 est donc complet**, à `npm audit` près, qui
+> attend la migration Next 16.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|
@@ -494,6 +515,7 @@ dépende d'une déclaration.
 | Couverture, services critiques | ~~non mesurée~~ → **tenant 73 %, collector 83 %** ✓ | ≥ 60 % | `go test -cover` |
 | Couverture des dépôts de B3 | ~~0 %~~ → **71 à 83 %** sur les 15 | ≥ 60 % | `go test -cover ./internal/repository/` |
 | Chaîne de bout en bout | ~~aucune~~ → **verte, 5 à 65 s** ✓ | verte en CI | `make e2e-chain` |
+| Migrations rejouables | ~~non~~ → **oui, 49 à état** ✓ | deux applications sans erreur | `make migrate && make migrate` |
 | KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
 | NFR vérifiées | **0 / 14** | 14 | bancs L2 |
 | Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |

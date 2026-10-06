@@ -440,11 +440,9 @@ cmd_infra() {
 
 # cmd_reset drops and recreates the platform database.
 #
-# The migrations are a numbered directory applied with psql, with no tracking
-# table — so they are not idempotent and cannot be replayed over a database
-# that already has them (000001 creates an index without IF NOT EXISTS, and
-# says so loudly). Until there is a migration tool, a local install starts from
-# an empty database, and this is how.
+# Since the migrations carry a version table, `migrate` is replayable and a
+# reset is no longer the way to pick up a new one — this is here for starting
+# from a clean slate on purpose, not as the only way forward.
 cmd_reset() {
 	step "Resetting $PGDB"
 	local psql="psql -v ON_ERROR_STOP=1 -q"
@@ -461,12 +459,6 @@ cmd_reset() {
 	fi
 }
 
-# migrated_already reports whether the database has been through the migrations.
-migrated_already() {
-	PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" -tAc \
-		"SELECT to_regclass('public.tenants') IS NOT NULL" 2>/dev/null | grep -q t
-}
-
 cmd_migrate() {
 	step "Keys"
 	if [[ -f "$BACKEND_DIR/deployments/jwt/private.pem" ]]; then
@@ -477,20 +469,25 @@ cmd_migrate() {
 
 	step "Migrations"
 	local n=0
-	# Only the PostgreSQL migrations are one-shot. The guard used to cover the
-	# whole function, so an install that first came up without ClickHouse could
-	# never be given its schema afterwards: the one store that was missing was
-	# the one the guard made unreachable.
-	if migrated_already; then
-		warn "$PGDB already has the schema; the PostgreSQL migrations are not replayable"
-		warn "start over with:  $0 reset && $0 migrate"
+	# PostgreSQL through the version table: the command applies what is not yet
+	# applied and says so, which is why this step can simply be run again after
+	# a new migration lands. What stood here before was a loop guarded by "the
+	# database already has the schema, start over with reset" — and that guard
+	# covered the whole function, so an install that first came up without
+	# ClickHouse could never be given its schema afterwards: the one store that
+	# was missing was the one the guard made unreachable.
+	local pg_out
+	if pg_out=$(cd "$BACKEND_DIR" && DATABASE_URL="$DATABASE_URL" \
+		go run ./internal/cmd/migrate up 2>&1); then
+		ok "PostgreSQL: ${pg_out//$'\n'/; }"
 	else
-		for f in "$BACKEND_DIR"/migrations/postgres/*.sql; do
-			PGPASSWORD="$PGPASS" psql -h localhost -U "$PGUSER_NAME" -d "$PGDB" \
-				-v ON_ERROR_STOP=1 -q -f "$f" || { fail "PostgreSQL: $(basename "$f")"; return 1; }
-			n=$((n + 1))
-		done
-		ok "$n PostgreSQL migrations"
+		printf '%s\n' "$pg_out" >&2
+		if printf '%s' "$pg_out" | grep -q "migrate baseline"; then
+			warn "adopt the schema this database already carries, then migrate again:"
+			warn "  $0 migrate-baseline && $0 migrate"
+		fi
+		fail "PostgreSQL migrations"
+		return 1
 	fi
 
 	if (exec 3<>/dev/tcp/127.0.0.1/9000) 2>/dev/null; then
@@ -516,6 +513,18 @@ cmd_migrate() {
 		done
 		ok "$n Neo4j migrations"
 	fi
+}
+
+# cmd_migrate_baseline adopts a schema applied before the version table existed.
+#
+# Every installation that predates `internal/cmd/migrate` is in that state: the
+# tables are there and nothing records that they are. The command refuses an
+# empty database and one that already has a version, so this is safe to run
+# when unsure.
+cmd_migrate_baseline() {
+	step "Adopting the existing schema"
+	(cd "$BACKEND_DIR" && DATABASE_URL="$DATABASE_URL" go run ./internal/cmd/migrate baseline) \
+		|| { fail "baseline"; return 1; }
 }
 
 # ─── Detection content ────────────────────────────────────────────────────────
@@ -909,6 +918,7 @@ case "${1:-up}" in
 	e2e) shift; cmd_e2e "$@" ;;
 	infra) cmd_infra ;;
 	migrate) cmd_migrate ;;
+	migrate-baseline) cmd_migrate_baseline ;;
 	content) cmd_content ;;
 	build) cmd_build ;;
 	services) cmd_services ;;
@@ -917,5 +927,5 @@ case "${1:-up}" in
 	status) cmd_status ;;
 	logs) shift; cmd_logs "$@" ;;
 	down) cmd_down ;;
-	*) echo "usage: $0 {up|infra|reset|migrate|content|seed|demo|smoke|e2e|build|services|frontend|restart [name…]|status|logs [name]|down}" >&2; exit 2 ;;
+	*) echo "usage: $0 {up|infra|reset|migrate|migrate-baseline|content|seed|demo|smoke|e2e|build|services|frontend|restart [name…]|status|logs [name]|down}" >&2; exit 2 ;;
 esac

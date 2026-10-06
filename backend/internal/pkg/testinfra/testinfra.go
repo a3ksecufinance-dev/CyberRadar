@@ -147,6 +147,11 @@ func RepoRoot() (string, error) {
 //
 // Sorted by name, which is what the numbering is for. A file that sorts out of
 // order would apply out of order, so the names are the contract.
+//
+// A `.down.sql` is skipped rather than applied. The repository has none today
+// — the schema rolls forward only, see internal/cmd/migrate — but the glob
+// would happily pick one up and undo the schema it had just built, and the
+// failure would land in whichever test ran next.
 func migrationFiles(engine string) ([]string, error) {
 	root, err := RepoRoot()
 	if err != nil {
@@ -160,8 +165,24 @@ func migrationFiles(engine string) ([]string, error) {
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("no migration found in %s", dir)
 	}
-	sort.Strings(matches)
-	return matches, nil
+	up := upOnly(matches)
+	if len(up) == 0 {
+		return nil, fmt.Errorf("no up migration found in %s", dir)
+	}
+	sort.Strings(up)
+	return up, nil
+}
+
+// upOnly drops the down migrations.
+func upOnly(paths []string) []string {
+	up := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasSuffix(p, ".down.sql") {
+			continue
+		}
+		up = append(up, p)
+	}
+	return up
 }
 
 // fingerprint is the digest of a set of migrations: their names and their

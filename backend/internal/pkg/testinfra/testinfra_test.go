@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -313,5 +315,34 @@ func TestRequireIsPerDependency(t *testing.T) {
 				t.Errorf("%s=%q: required(%s) = %v, want %v", EnvRequire, c.set, dep, got, want)
 			}
 		}
+	}
+}
+
+// The real migrations are named for golang-migrate, so the list has to pick
+// them up under that naming and has to leave a down migration alone. Nothing
+// in the repository ships one, which is exactly why the guard needs a test:
+// the day somebody adds one, the template would otherwise be built by applying
+// the schema and then undoing part of it.
+func TestTheListTakesTheUpMigrationsAndOnlyThose(t *testing.T) {
+	files, err := migrationFiles("postgres")
+	if err != nil {
+		t.Fatalf("migrationFiles: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no migration listed")
+	}
+	for _, f := range files {
+		if !strings.HasSuffix(f, ".up.sql") {
+			t.Errorf("%s is not an up migration; golang-migrate would not apply it either", f)
+		}
+	}
+	if !sort.StringsAreSorted(files) {
+		t.Error("the files came back out of order, so they would apply out of order")
+	}
+
+	// And the filter itself, since the repository has nothing for it to drop.
+	kept := upOnly([]string{"0001_a.up.sql", "0001_a.down.sql", "0002_b.up.sql"})
+	if want := []string{"0001_a.up.sql", "0002_b.up.sql"}; !slices.Equal(kept, want) {
+		t.Errorf("upOnly kept %v, want %v", kept, want)
 	}
 }
