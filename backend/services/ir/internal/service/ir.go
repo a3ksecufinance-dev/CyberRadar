@@ -97,11 +97,11 @@ func (s *IRService) UpdateIncident(ctx context.Context, tenantID, id uuid.UUID, 
 		go func() {
 			bgCtx := context.Background()
 			_, _ = s.repo.AddTimelineEvent(bgCtx, tenantID, inc.ID, &model.CreateTimelineEventRequest{
-				EventTime:   time.Now().UTC(),
-				EventType:   "action",
-				Title:       "Status changed to " + *req.Status,
-				ActorType:   "analyst",
-				IsVerified:  true,
+				EventTime:  time.Now().UTC(),
+				EventType:  "action",
+				Title:      "Status changed to " + *req.Status,
+				ActorType:  "analyst",
+				IsVerified: true,
 			}, updatedBy)
 		}()
 

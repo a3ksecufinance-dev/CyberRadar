@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/cyberradar/platform/services/dspm/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
 
@@ -121,10 +121,10 @@ func (r *DSPMRepository) CreateDataStore(ctx context.Context, tenantID uuid.UUID
 		  is_monitored,is_backup_enabled,owner,owner_id,department,
 		  risk_score,risk_level,tags,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
-		 RETURNING id,tenant_id,name,store_type,cloud_provider,region,endpoint,
+		 RETURNING id,tenant_id,name,store_type,COALESCE(cloud_provider,''),COALESCE(region,''),COALESCE(endpoint,''),
 		           sensitivity_level,data_categories,is_encrypted,is_access_controlled,
-		           is_monitored,is_backup_enabled,owner,owner_id,department,
-		           risk_score,risk_level,last_scanned_at,scan_status,tags,notes,
+		           is_monitored,is_backup_enabled,COALESCE(owner,''),owner_id,COALESCE(department,''),
+		           risk_score,risk_level,last_scanned_at,scan_status,tags,COALESCE(notes,''),
 		           created_by,created_at,updated_at`,
 		tenantID, req.Name, req.StoreType, req.CloudProvider, req.Region, req.Endpoint,
 		sensitivityLevel, req.DataCategories, req.IsEncrypted, req.IsAccessControlled,
@@ -152,10 +152,10 @@ func (r *DSPMRepository) CreateDataStore(ctx context.Context, tenantID uuid.UUID
 func (r *DSPMRepository) GetDataStore(ctx context.Context, tenantID, storeID uuid.UUID) (*model.DSPMDataStore, error) {
 	var ds model.DSPMDataStore
 	err := r.db.QueryRow(ctx,
-		`SELECT d.id,d.tenant_id,d.name,d.store_type,d.cloud_provider,d.region,d.endpoint,
+		`SELECT d.id,d.tenant_id,d.name,d.store_type,COALESCE(d.cloud_provider,''),COALESCE(d.region,''),COALESCE(d.endpoint,''),
 		        d.sensitivity_level,d.data_categories,d.is_encrypted,d.is_access_controlled,
-		        d.is_monitored,d.is_backup_enabled,d.owner,d.owner_id,d.department,
-		        d.risk_score,d.risk_level,d.last_scanned_at,d.scan_status,d.tags,d.notes,
+		        d.is_monitored,d.is_backup_enabled,COALESCE(d.owner,''),d.owner_id,COALESCE(d.department,''),
+		        d.risk_score,d.risk_level,d.last_scanned_at,d.scan_status,d.tags,COALESCE(d.notes,''),
 		        d.created_by,d.created_at,d.updated_at,
 		        COUNT(f.id) FILTER (WHERE f.status NOT IN ('remediated','false_positive')) AS open_finding_count,
 		        COUNT(f.id) AS finding_count
@@ -232,10 +232,10 @@ func (r *DSPMRepository) ListDataStores(ctx context.Context, tenantID uuid.UUID,
 	args = append(args, limit, f.Offset)
 
 	rows, err := r.db.Query(ctx,
-		`SELECT d.id,d.tenant_id,d.name,d.store_type,d.cloud_provider,d.region,d.endpoint,
+		`SELECT d.id,d.tenant_id,d.name,d.store_type,COALESCE(d.cloud_provider,''),COALESCE(d.region,''),COALESCE(d.endpoint,''),
 		        d.sensitivity_level,d.data_categories,d.is_encrypted,d.is_access_controlled,
-		        d.is_monitored,d.is_backup_enabled,d.owner,d.owner_id,d.department,
-		        d.risk_score,d.risk_level,d.last_scanned_at,d.scan_status,d.tags,d.notes,
+		        d.is_monitored,d.is_backup_enabled,COALESCE(d.owner,''),d.owner_id,COALESCE(d.department,''),
+		        d.risk_score,d.risk_level,d.last_scanned_at,d.scan_status,d.tags,COALESCE(d.notes,''),
 		        d.created_by,d.created_at,d.updated_at,
 		        COUNT(f.id) FILTER (WHERE f.status NOT IN ('remediated','false_positive')) AS open_finding_count,
 		        COUNT(f.id) AS finding_count
@@ -373,10 +373,10 @@ func (r *DSPMRepository) UpdateDataStore(ctx context.Context, tenantID, storeID 
 	err := r.db.QueryRow(ctx,
 		`UPDATE dspm_data_stores SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,store_type,cloud_provider,region,endpoint,
+		 RETURNING id,tenant_id,name,store_type,COALESCE(cloud_provider,''),COALESCE(region,''),COALESCE(endpoint,''),
 		           sensitivity_level,data_categories,is_encrypted,is_access_controlled,
-		           is_monitored,is_backup_enabled,owner,owner_id,department,
-		           risk_score,risk_level,last_scanned_at,scan_status,tags,notes,
+		           is_monitored,is_backup_enabled,COALESCE(owner,''),owner_id,COALESCE(department,''),
+		           risk_score,risk_level,last_scanned_at,scan_status,tags,COALESCE(notes,''),
 		           created_by,created_at,updated_at`,
 		args...,
 	).Scan(
@@ -433,8 +433,8 @@ func (r *DSPMRepository) CreateScanJob(ctx context.Context, tenantID uuid.UUID, 
 		`INSERT INTO dspm_scan_jobs (tenant_id,data_store_id,scan_type,triggered_by,started_at)
 		 VALUES ($1,$2,$3,$4,NOW())
 		 RETURNING id,tenant_id,data_store_id,scan_type,status,findings_count,
-		           sensitive_findings_count,scanned_objects,error_message,triggered_by,
-		           started_at,completed_at,duration_seconds,created_at,updated_at`,
+		           sensitive_findings_count,scanned_objects,COALESCE(error_message,''),COALESCE(triggered_by,''),
+		           started_at,completed_at,COALESCE(duration_seconds,0),created_at,updated_at`,
 		tenantID, req.DataStoreID, req.ScanType, triggeredBy,
 	).Scan(
 		&j.ID, &j.TenantID, &j.DataStoreID, &j.ScanType, &j.Status,
@@ -459,8 +459,8 @@ func (r *DSPMRepository) GetScanJob(ctx context.Context, tenantID, jobID uuid.UU
 	var j model.DSPMScanJob
 	err := r.db.QueryRow(ctx,
 		`SELECT id,tenant_id,data_store_id,scan_type,status,findings_count,
-		        sensitive_findings_count,scanned_objects,error_message,triggered_by,
-		        started_at,completed_at,duration_seconds,created_at,updated_at
+		        sensitive_findings_count,scanned_objects,COALESCE(error_message,''),COALESCE(triggered_by,''),
+		        started_at,completed_at,COALESCE(duration_seconds,0),created_at,updated_at
 		 FROM dspm_scan_jobs WHERE tenant_id=$1 AND id=$2`,
 		tenantID, jobID,
 	).Scan(
@@ -481,8 +481,8 @@ func (r *DSPMRepository) GetScanJob(ctx context.Context, tenantID, jobID uuid.UU
 func (r *DSPMRepository) ListScanJobs(ctx context.Context, tenantID, storeID uuid.UUID) ([]model.DSPMScanJob, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,data_store_id,scan_type,status,findings_count,
-		        sensitive_findings_count,scanned_objects,error_message,triggered_by,
-		        started_at,completed_at,duration_seconds,created_at,updated_at
+		        sensitive_findings_count,scanned_objects,COALESCE(error_message,''),COALESCE(triggered_by,''),
+		        started_at,completed_at,COALESCE(duration_seconds,0),created_at,updated_at
 		 FROM dspm_scan_jobs WHERE tenant_id=$1 AND data_store_id=$2
 		 ORDER BY created_at DESC LIMIT 50`,
 		tenantID, storeID,
@@ -559,8 +559,8 @@ func (r *DSPMRepository) UpdateScanJob(ctx context.Context, tenantID, jobID uuid
 		`UPDATE dspm_scan_jobs SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
 		 RETURNING id,tenant_id,data_store_id,scan_type,status,findings_count,
-		           sensitive_findings_count,scanned_objects,error_message,triggered_by,
-		           started_at,completed_at,duration_seconds,created_at,updated_at`,
+		           sensitive_findings_count,scanned_objects,COALESCE(error_message,''),COALESCE(triggered_by,''),
+		           started_at,completed_at,COALESCE(duration_seconds,0),created_at,updated_at`,
 		args...,
 	).Scan(
 		&j.ID, &j.TenantID, &j.DataStoreID, &j.ScanType, &j.Status,
@@ -604,9 +604,9 @@ func (r *DSPMRepository) CreateFinding(ctx context.Context, tenantID uuid.UUID, 
 		  description,evidence,remediation,compliance_violations,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 RETURNING id,tenant_id,data_store_id,scan_job_id,finding_type,severity,status,
-		           location_path,location_field,record_count,is_public_accessible,is_encrypted,
-		           title,description,evidence,remediation,compliance_violations,
-		           resolved_by,resolved_at,tags,detected_at,created_at,updated_at`,
+		           COALESCE(location_path,''),COALESCE(location_field,''),record_count,is_public_accessible,is_encrypted,
+		           title,COALESCE(description,''),COALESCE(evidence,''),COALESCE(remediation,''),compliance_violations,
+		           COALESCE(resolved_by,''),resolved_at,tags,detected_at,created_at,updated_at`,
 		tenantID, req.DataStoreID, req.ScanJobID, req.FindingType, req.Severity,
 		req.LocationPath, req.LocationField, req.RecordCount, req.IsPublicAccessible,
 		req.IsEncrypted, req.Title, req.Description, req.Evidence, req.Remediation,
@@ -634,9 +634,9 @@ func (r *DSPMRepository) GetFinding(ctx context.Context, tenantID, findingID uui
 	var f model.DSPMFinding
 	err := r.db.QueryRow(ctx,
 		`SELECT f.id,f.tenant_id,f.data_store_id,f.scan_job_id,f.finding_type,f.severity,f.status,
-		        f.location_path,f.location_field,f.record_count,f.is_public_accessible,f.is_encrypted,
-		        f.title,f.description,f.evidence,f.remediation,f.compliance_violations,
-		        f.resolved_by,f.resolved_at,f.tags,f.detected_at,f.created_at,f.updated_at,
+		        COALESCE(f.location_path,''),COALESCE(f.location_field,''),f.record_count,f.is_public_accessible,f.is_encrypted,
+		        f.title,COALESCE(f.description,''),COALESCE(f.evidence,''),COALESCE(f.remediation,''),f.compliance_violations,
+		        COALESCE(f.resolved_by,''),f.resolved_at,f.tags,f.detected_at,f.created_at,f.updated_at,
 		        COUNT(ri.id) AS remediation_count
 		 FROM dspm_findings f
 		 LEFT JOIN dspm_remediation_items ri ON ri.finding_id=f.id
@@ -706,9 +706,9 @@ func (r *DSPMRepository) ListFindings(ctx context.Context, tenantID uuid.UUID, f
 
 	rows, err := r.db.Query(ctx,
 		`SELECT f.id,f.tenant_id,f.data_store_id,f.scan_job_id,f.finding_type,f.severity,f.status,
-		        f.location_path,f.location_field,f.record_count,f.is_public_accessible,f.is_encrypted,
-		        f.title,f.description,f.evidence,f.remediation,f.compliance_violations,
-		        f.resolved_by,f.resolved_at,f.tags,f.detected_at,f.created_at,f.updated_at
+		        COALESCE(f.location_path,''),COALESCE(f.location_field,''),f.record_count,f.is_public_accessible,f.is_encrypted,
+		        f.title,COALESCE(f.description,''),COALESCE(f.evidence,''),COALESCE(f.remediation,''),f.compliance_violations,
+		        COALESCE(f.resolved_by,''),f.resolved_at,f.tags,f.detected_at,f.created_at,f.updated_at
 		 FROM dspm_findings f
 		 WHERE `+where+
 			fmt.Sprintf(` ORDER BY CASE f.severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, f.detected_at DESC LIMIT $%d OFFSET $%d`, n, n+1),
@@ -777,9 +777,9 @@ func (r *DSPMRepository) UpdateFinding(ctx context.Context, tenantID, findingID 
 		`UPDATE dspm_findings SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
 		 RETURNING id,tenant_id,data_store_id,scan_job_id,finding_type,severity,status,
-		           location_path,location_field,record_count,is_public_accessible,is_encrypted,
-		           title,description,evidence,remediation,compliance_violations,
-		           resolved_by,resolved_at,tags,detected_at,created_at,updated_at`,
+		           COALESCE(location_path,''),COALESCE(location_field,''),record_count,is_public_accessible,is_encrypted,
+		           title,COALESCE(description,''),COALESCE(evidence,''),COALESCE(remediation,''),compliance_violations,
+		           COALESCE(resolved_by,''),resolved_at,tags,detected_at,created_at,updated_at`,
 		args...,
 	).Scan(
 		&f.ID, &f.TenantID, &f.DataStoreID, &f.ScanJobID, &f.FindingType, &f.Severity, &f.Status,
@@ -831,7 +831,7 @@ func (r *DSPMRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, r
 		 (tenant_id,name,description,policy_type,rules,action,
 		  applies_to_categories,applies_to_types,compliance_frameworks,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		 RETURNING id,tenant_id,name,description,policy_type,rules,action,is_active,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,rules,action,is_active,
 		           applies_to_categories,applies_to_types,compliance_frameworks,
 		           violation_count,created_by,created_at,updated_at`,
 		tenantID, req.Name, req.Description, req.PolicyType, rulesJSON, action,
@@ -864,7 +864,7 @@ func (r *DSPMRepository) GetPolicy(ctx context.Context, tenantID, policyID uuid.
 	var p model.DSPMPolicy
 	var rulesRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT id,tenant_id,name,description,policy_type,rules,action,is_active,
+		`SELECT id,tenant_id,name,COALESCE(description,''),policy_type,rules,action,is_active,
 		        applies_to_categories,applies_to_types,compliance_frameworks,
 		        violation_count,created_by,created_at,updated_at
 		 FROM dspm_policies WHERE tenant_id=$1 AND id=$2`,
@@ -898,7 +898,7 @@ func (r *DSPMRepository) GetPolicy(ctx context.Context, tenantID, policyID uuid.
 
 func (r *DSPMRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID) ([]model.DSPMPolicy, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,policy_type,rules,action,is_active,
+		`SELECT id,tenant_id,name,COALESCE(description,''),policy_type,rules,action,is_active,
 		        applies_to_categories,applies_to_types,compliance_frameworks,
 		        violation_count,created_by,created_at,updated_at
 		 FROM dspm_policies WHERE tenant_id=$1
@@ -980,7 +980,7 @@ func (r *DSPMRepository) UpdatePolicy(ctx context.Context, tenantID, policyID uu
 	err := r.db.QueryRow(ctx,
 		`UPDATE dspm_policies SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,description,policy_type,rules,action,is_active,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,rules,action,is_active,
 		           applies_to_categories,applies_to_types,compliance_frameworks,
 		           violation_count,created_by,created_at,updated_at`,
 		args...,
@@ -1011,12 +1011,25 @@ func (r *DSPMRepository) UpdatePolicy(ctx context.Context, tenantID, policyID uu
 	return &p, nil
 }
 
+// DeletePolicy removes a policy belonging to this tenant.
+//
+// Deleting nothing is reported rather than accepted: the tenant filter already
+// stopped another customer's policy from being removed, but returning nil told
+// that caller it had succeeded — a 204 for a deletion that did not happen,
+// which is also what a client retrying a delete sees when it has to tell a
+// no-op from a success.
 func (r *DSPMRepository) DeletePolicy(ctx context.Context, tenantID, policyID uuid.UUID) error {
-	_, err := r.db.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`DELETE FROM dspm_policies WHERE tenant_id=$1 AND id=$2`,
 		tenantID, policyID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete policy: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("policy not found")
+	}
+	return nil
 }
 
 // ─── Remediation Items ────────────────────────────────────────────────────────
@@ -1031,8 +1044,8 @@ func (r *DSPMRepository) CreateRemediationItem(ctx context.Context, tenantID uui
 		`INSERT INTO dspm_remediation_items
 		 (tenant_id,finding_id,priority,assignee_id,assignee_name,due_date,notes)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)
-		 RETURNING id,tenant_id,finding_id,status,priority,assignee_id,assignee_name,
-		           due_date,notes,resolution,created_at,updated_at`,
+		 RETURNING id,tenant_id,finding_id,status,priority,assignee_id,COALESCE(assignee_name,''),
+		           due_date,COALESCE(notes,''),COALESCE(resolution,''),created_at,updated_at`,
 		tenantID, req.FindingID, priority, req.AssigneeID, req.AssigneeName, req.DueDate, req.Notes,
 	).Scan(
 		&item.ID, &item.TenantID, &item.FindingID, &item.Status, &item.Priority,
@@ -1048,8 +1061,8 @@ func (r *DSPMRepository) CreateRemediationItem(ctx context.Context, tenantID uui
 func (r *DSPMRepository) GetRemediationItem(ctx context.Context, tenantID, itemID uuid.UUID) (*model.DSPMRemediationItem, error) {
 	var item model.DSPMRemediationItem
 	err := r.db.QueryRow(ctx,
-		`SELECT id,tenant_id,finding_id,status,priority,assignee_id,assignee_name,
-		        due_date,notes,resolution,created_at,updated_at
+		`SELECT id,tenant_id,finding_id,status,priority,assignee_id,COALESCE(assignee_name,''),
+		        due_date,COALESCE(notes,''),COALESCE(resolution,''),created_at,updated_at
 		 FROM dspm_remediation_items WHERE tenant_id=$1 AND id=$2`,
 		tenantID, itemID,
 	).Scan(
@@ -1068,8 +1081,8 @@ func (r *DSPMRepository) GetRemediationItem(ctx context.Context, tenantID, itemI
 
 func (r *DSPMRepository) ListRemediationItems(ctx context.Context, tenantID, findingID uuid.UUID) ([]model.DSPMRemediationItem, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,finding_id,status,priority,assignee_id,assignee_name,
-		        due_date,notes,resolution,created_at,updated_at
+		`SELECT id,tenant_id,finding_id,status,priority,assignee_id,COALESCE(assignee_name,''),
+		        due_date,COALESCE(notes,''),COALESCE(resolution,''),created_at,updated_at
 		 FROM dspm_remediation_items WHERE tenant_id=$1 AND finding_id=$2
 		 ORDER BY CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, created_at`,
 		tenantID, findingID,
@@ -1138,8 +1151,8 @@ func (r *DSPMRepository) UpdateRemediationItem(ctx context.Context, tenantID, it
 	err := r.db.QueryRow(ctx,
 		`UPDATE dspm_remediation_items SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,finding_id,status,priority,assignee_id,assignee_name,
-		           due_date,notes,resolution,created_at,updated_at`,
+		 RETURNING id,tenant_id,finding_id,status,priority,assignee_id,COALESCE(assignee_name,''),
+		           due_date,COALESCE(notes,''),COALESCE(resolution,''),created_at,updated_at`,
 		args...,
 	).Scan(
 		&item.ID, &item.TenantID, &item.FindingID, &item.Status, &item.Priority,
@@ -1265,10 +1278,10 @@ func (r *DSPMRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mod
 
 	// TopRiskyStores
 	rows5, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,store_type,cloud_provider,region,endpoint,
+		`SELECT id,tenant_id,name,store_type,COALESCE(cloud_provider,''),COALESCE(region,''),COALESCE(endpoint,''),
 		        sensitivity_level,data_categories,is_encrypted,is_access_controlled,
-		        is_monitored,is_backup_enabled,owner,owner_id,department,
-		        risk_score,risk_level,last_scanned_at,scan_status,tags,notes,
+		        is_monitored,is_backup_enabled,COALESCE(owner,''),owner_id,COALESCE(department,''),
+		        risk_score,risk_level,last_scanned_at,scan_status,tags,COALESCE(notes,''),
 		        created_by,created_at,updated_at
 		 FROM dspm_data_stores WHERE tenant_id=$1
 		 ORDER BY risk_score DESC LIMIT 5`,
@@ -1302,9 +1315,9 @@ func (r *DSPMRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mod
 	// RecentFindings
 	rows6, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,data_store_id,scan_job_id,finding_type,severity,status,
-		        location_path,location_field,record_count,is_public_accessible,is_encrypted,
-		        title,description,evidence,remediation,compliance_violations,
-		        resolved_by,resolved_at,tags,detected_at,created_at,updated_at
+		        COALESCE(location_path,''),COALESCE(location_field,''),record_count,is_public_accessible,is_encrypted,
+		        title,COALESCE(description,''),COALESCE(evidence,''),COALESCE(remediation,''),compliance_violations,
+		        COALESCE(resolved_by,''),resolved_at,tags,detected_at,created_at,updated_at
 		 FROM dspm_findings WHERE tenant_id=$1
 		 ORDER BY detected_at DESC LIMIT 10`,
 		tenantID,
@@ -1335,4 +1348,3 @@ func (r *DSPMRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mod
 
 	return stats, nil
 }
-

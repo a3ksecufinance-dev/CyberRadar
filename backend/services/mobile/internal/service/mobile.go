@@ -250,13 +250,13 @@ func (s *Service) CreateThreat(ctx context.Context, tenantID uuid.UUID, req mode
 	// Publish critical or high threats
 	if threat.Severity == "critical" || threat.Severity == "high" {
 		s.publish("mobile.threat.detected", map[string]any{
-			"tenant_id":    tenantID,
-			"threat_id":    threat.ID,
-			"device_id":    threat.DeviceID,
-			"threat_type":  threat.ThreatType,
-			"severity":     threat.Severity,
-			"title":        threat.Title,
-			"detected_at":  threat.DetectedAt,
+			"tenant_id":   tenantID,
+			"threat_id":   threat.ID,
+			"device_id":   threat.DeviceID,
+			"threat_type": threat.ThreatType,
+			"severity":    threat.Severity,
+			"title":       threat.Title,
+			"detected_at": threat.DetectedAt,
 		})
 	}
 	// Publish ransomware / malware immediately regardless of severity

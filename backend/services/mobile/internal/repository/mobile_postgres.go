@@ -79,12 +79,12 @@ func (r *MobileRepository) CreateDevice(ctx context.Context, tenantID uuid.UUID,
 		  serial_number,imei,udid,ownership,owner_name,owner_id,owner_email,department,
 		  is_encrypted,is_screen_lock,risk_score,risk_level,carrier,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-		 RETURNING id,tenant_id,device_name,device_type,platform,os_version,model,manufacturer,
-		           serial_number,imei,udid,enrollment_status,enrollment_date,mdm_profile_installed,
-		           ownership,owner_name,owner_id,owner_email,department,
+		 RETURNING id,tenant_id,device_name,device_type,platform,COALESCE(os_version,''),COALESCE(model,''),COALESCE(manufacturer,''),
+		           COALESCE(serial_number,''),COALESCE(imei,''),COALESCE(udid,''),enrollment_status,enrollment_date,mdm_profile_installed,
+		           ownership,COALESCE(owner_name,''),owner_id,COALESCE(owner_email,''),COALESCE(department,''),
 		           is_jailbroken,is_rooted,is_encrypted,is_screen_lock,is_compliant,
-		           compliance_issues,risk_score,risk_level,last_location,last_seen_at,
-		           last_checkin_at,last_ip,carrier,tags,notes,created_by,created_at,updated_at`,
+		           compliance_issues,risk_score,risk_level,COALESCE(last_location,''),last_seen_at,
+		           last_checkin_at,COALESCE(last_ip,''),COALESCE(carrier,''),tags,COALESCE(notes,''),created_by,created_at,updated_at`,
 		tenantID, req.DeviceName, req.DeviceType, req.Platform, req.OSVersion,
 		req.Model, req.Manufacturer, req.SerialNumber, req.IMEI, req.UDID,
 		ownership, req.OwnerName, req.OwnerID, req.OwnerEmail, req.Department,
@@ -104,12 +104,12 @@ func (r *MobileRepository) CreateDevice(ctx context.Context, tenantID uuid.UUID,
 func (r *MobileRepository) GetDevice(ctx context.Context, tenantID, id uuid.UUID) (*model.MobDevice, error) {
 	var d model.MobDevice
 	err := r.db.QueryRow(ctx,
-		`SELECT d.id,d.tenant_id,d.device_name,d.device_type,d.platform,d.os_version,d.model,d.manufacturer,
-		        d.serial_number,d.imei,d.udid,d.enrollment_status,d.enrollment_date,d.mdm_profile_installed,
-		        d.ownership,d.owner_name,d.owner_id,d.owner_email,d.department,
+		`SELECT d.id,d.tenant_id,d.device_name,d.device_type,d.platform,COALESCE(d.os_version,''),COALESCE(d.model,''),COALESCE(d.manufacturer,''),
+		        COALESCE(d.serial_number,''),COALESCE(d.imei,''),COALESCE(d.udid,''),d.enrollment_status,d.enrollment_date,d.mdm_profile_installed,
+		        d.ownership,COALESCE(d.owner_name,''),d.owner_id,COALESCE(d.owner_email,''),COALESCE(d.department,''),
 		        d.is_jailbroken,d.is_rooted,d.is_encrypted,d.is_screen_lock,d.is_compliant,
-		        d.compliance_issues,d.risk_score,d.risk_level,d.last_location,d.last_seen_at,
-		        d.last_checkin_at,d.last_ip,d.carrier,d.tags,d.notes,d.created_by,d.created_at,d.updated_at,
+		        d.compliance_issues,d.risk_score,d.risk_level,COALESCE(d.last_location,''),d.last_seen_at,
+		        d.last_checkin_at,COALESCE(d.last_ip,''),COALESCE(d.carrier,''),d.tags,COALESCE(d.notes,''),d.created_by,d.created_at,d.updated_at,
 		        COUNT(DISTINCT da.app_id) FILTER (WHERE da.is_active) AS app_count,
 		        COUNT(DISTINCT t.id) FILTER (WHERE t.status NOT IN ('resolved','false_positive')) AS threat_count
 		 FROM mob_devices d
@@ -138,22 +138,34 @@ func (r *MobileRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.Platform != "" {
-		cond = append(cond, fmt.Sprintf("platform=$%d", n)); args = append(args, f.Platform); n++
+		cond = append(cond, fmt.Sprintf("platform=$%d", n))
+		args = append(args, f.Platform)
+		n++
 	}
 	if f.EnrollmentStatus != "" {
-		cond = append(cond, fmt.Sprintf("enrollment_status=$%d", n)); args = append(args, f.EnrollmentStatus); n++
+		cond = append(cond, fmt.Sprintf("enrollment_status=$%d", n))
+		args = append(args, f.EnrollmentStatus)
+		n++
 	}
 	if f.Ownership != "" {
-		cond = append(cond, fmt.Sprintf("ownership=$%d", n)); args = append(args, f.Ownership); n++
+		cond = append(cond, fmt.Sprintf("ownership=$%d", n))
+		args = append(args, f.Ownership)
+		n++
 	}
 	if f.RiskLevel != "" {
-		cond = append(cond, fmt.Sprintf("risk_level=$%d", n)); args = append(args, f.RiskLevel); n++
+		cond = append(cond, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, f.RiskLevel)
+		n++
 	}
 	if f.IsCompliant != nil {
-		cond = append(cond, fmt.Sprintf("is_compliant=$%d", n)); args = append(args, *f.IsCompliant); n++
+		cond = append(cond, fmt.Sprintf("is_compliant=$%d", n))
+		args = append(args, *f.IsCompliant)
+		n++
 	}
 	if f.Department != "" {
-		cond = append(cond, fmt.Sprintf("department=$%d", n)); args = append(args, f.Department); n++
+		cond = append(cond, fmt.Sprintf("department=$%d", n))
+		args = append(args, f.Department)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -165,12 +177,12 @@ func (r *MobileRepository) ListDevices(ctx context.Context, tenantID uuid.UUID, 
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_name,device_type,platform,os_version,model,manufacturer,
-		        serial_number,imei,udid,enrollment_status,enrollment_date,mdm_profile_installed,
-		        ownership,owner_name,owner_id,owner_email,department,
+		`SELECT id,tenant_id,device_name,device_type,platform,COALESCE(os_version,''),COALESCE(model,''),COALESCE(manufacturer,''),
+		        COALESCE(serial_number,''),COALESCE(imei,''),COALESCE(udid,''),enrollment_status,enrollment_date,mdm_profile_installed,
+		        ownership,COALESCE(owner_name,''),owner_id,COALESCE(owner_email,''),COALESCE(department,''),
 		        is_jailbroken,is_rooted,is_encrypted,is_screen_lock,is_compliant,
-		        compliance_issues,risk_score,risk_level,last_location,last_seen_at,
-		        last_checkin_at,last_ip,carrier,tags,notes,created_by,created_at,updated_at
+		        compliance_issues,risk_score,risk_level,COALESCE(last_location,''),last_seen_at,
+		        last_checkin_at,COALESCE(last_ip,''),COALESCE(carrier,''),tags,COALESCE(notes,''),created_by,created_at,updated_at
 		 FROM mob_devices WHERE `+where+
 			fmt.Sprintf(` ORDER BY risk_score DESC LIMIT $%d OFFSET $%d`, n, n+1),
 		args...)
@@ -202,59 +214,89 @@ func (r *MobileRepository) UpdateDevice(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.DeviceName != nil {
-		sets = append(sets, fmt.Sprintf("device_name=$%d", n)); args = append(args, *req.DeviceName); n++
+		sets = append(sets, fmt.Sprintf("device_name=$%d", n))
+		args = append(args, *req.DeviceName)
+		n++
 	}
 	if req.OSVersion != nil {
-		sets = append(sets, fmt.Sprintf("os_version=$%d", n)); args = append(args, *req.OSVersion); n++
+		sets = append(sets, fmt.Sprintf("os_version=$%d", n))
+		args = append(args, *req.OSVersion)
+		n++
 	}
 	if req.EnrollmentStatus != nil {
-		sets = append(sets, fmt.Sprintf("enrollment_status=$%d", n)); args = append(args, *req.EnrollmentStatus); n++
+		sets = append(sets, fmt.Sprintf("enrollment_status=$%d", n))
+		args = append(args, *req.EnrollmentStatus)
+		n++
 	}
 	if req.MDMProfileInstalled != nil {
-		sets = append(sets, fmt.Sprintf("mdm_profile_installed=$%d", n)); args = append(args, *req.MDMProfileInstalled); n++
+		sets = append(sets, fmt.Sprintf("mdm_profile_installed=$%d", n))
+		args = append(args, *req.MDMProfileInstalled)
+		n++
 	}
 	if req.IsJailbroken != nil {
-		sets = append(sets, fmt.Sprintf("is_jailbroken=$%d", n)); args = append(args, *req.IsJailbroken); n++
+		sets = append(sets, fmt.Sprintf("is_jailbroken=$%d", n))
+		args = append(args, *req.IsJailbroken)
+		n++
 	}
 	if req.IsRooted != nil {
-		sets = append(sets, fmt.Sprintf("is_rooted=$%d", n)); args = append(args, *req.IsRooted); n++
+		sets = append(sets, fmt.Sprintf("is_rooted=$%d", n))
+		args = append(args, *req.IsRooted)
+		n++
 	}
 	if req.IsEncrypted != nil {
-		sets = append(sets, fmt.Sprintf("is_encrypted=$%d", n)); args = append(args, *req.IsEncrypted); n++
+		sets = append(sets, fmt.Sprintf("is_encrypted=$%d", n))
+		args = append(args, *req.IsEncrypted)
+		n++
 	}
 	if req.IsScreenLock != nil {
-		sets = append(sets, fmt.Sprintf("is_screen_lock=$%d", n)); args = append(args, *req.IsScreenLock); n++
+		sets = append(sets, fmt.Sprintf("is_screen_lock=$%d", n))
+		args = append(args, *req.IsScreenLock)
+		n++
 	}
 	if req.IsCompliant != nil {
-		sets = append(sets, fmt.Sprintf("is_compliant=$%d", n)); args = append(args, *req.IsCompliant); n++
+		sets = append(sets, fmt.Sprintf("is_compliant=$%d", n))
+		args = append(args, *req.IsCompliant)
+		n++
 	}
 	if req.ComplianceIssues != nil {
-		sets = append(sets, fmt.Sprintf("compliance_issues=$%d", n)); args = append(args, req.ComplianceIssues); n++
+		sets = append(sets, fmt.Sprintf("compliance_issues=$%d", n))
+		args = append(args, req.ComplianceIssues)
+		n++
 	}
 	if req.LastLocation != nil {
-		sets = append(sets, fmt.Sprintf("last_location=$%d", n)); args = append(args, *req.LastLocation); n++
-		sets = append(sets, fmt.Sprintf("last_seen_at=$%d", n)); args = append(args, time.Now().UTC()); n++
+		sets = append(sets, fmt.Sprintf("last_location=$%d", n))
+		args = append(args, *req.LastLocation)
+		n++
+		sets = append(sets, fmt.Sprintf("last_seen_at=$%d", n))
+		args = append(args, time.Now().UTC())
+		n++
 	}
 	if req.LastIP != nil {
-		sets = append(sets, fmt.Sprintf("last_ip=$%d", n)); args = append(args, *req.LastIP); n++
+		sets = append(sets, fmt.Sprintf("last_ip=$%d", n))
+		args = append(args, *req.LastIP)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var d model.MobDevice
 	err := r.db.QueryRow(ctx,
 		`UPDATE mob_devices SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,device_name,device_type,platform,os_version,model,manufacturer,
-		           serial_number,imei,udid,enrollment_status,enrollment_date,mdm_profile_installed,
-		           ownership,owner_name,owner_id,owner_email,department,
+		 RETURNING id,tenant_id,device_name,device_type,platform,COALESCE(os_version,''),COALESCE(model,''),COALESCE(manufacturer,''),
+		           COALESCE(serial_number,''),COALESCE(imei,''),COALESCE(udid,''),enrollment_status,enrollment_date,mdm_profile_installed,
+		           ownership,COALESCE(owner_name,''),owner_id,COALESCE(owner_email,''),COALESCE(department,''),
 		           is_jailbroken,is_rooted,is_encrypted,is_screen_lock,is_compliant,
-		           compliance_issues,risk_score,risk_level,last_location,last_seen_at,
-		           last_checkin_at,last_ip,carrier,tags,notes,created_by,created_at,updated_at`,
+		           compliance_issues,risk_score,risk_level,COALESCE(last_location,''),last_seen_at,
+		           last_checkin_at,COALESCE(last_ip,''),COALESCE(carrier,''),tags,COALESCE(notes,''),created_by,created_at,updated_at`,
 		args...,
 	).Scan(&d.ID, &d.TenantID, &d.DeviceName, &d.DeviceType, &d.Platform,
 		&d.OSVersion, &d.Model, &d.Manufacturer, &d.SerialNumber, &d.IMEI, &d.UDID,
@@ -267,10 +309,24 @@ func (r *MobileRepository) UpdateDevice(ctx context.Context, tenantID, id uuid.U
 	return &d, err
 }
 
+// DeleteDevice removes a device belonging to this tenant, and everything that
+// hangs off it.
+//
+// Deleting nothing is reported rather than accepted: the tenant filter already
+// stopped another customer's phone from being unenrolled, but returning nil
+// told that caller it had worked. Unenrolling a device is not a small act —
+// it drops its threats, its compliance history and any queued remote action —
+// so a caller has to be able to tell a no-op from a success.
 func (r *MobileRepository) DeleteDevice(ctx context.Context, tenantID, deviceID uuid.UUID) error {
-	_, err := r.db.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`DELETE FROM mob_devices WHERE tenant_id=$1 AND id=$2`, tenantID, deviceID)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("device not found")
+	}
+	return nil
 }
 
 // refreshDeviceRisk recomputes risk score after threat changes
@@ -316,7 +372,7 @@ func (r *MobileRepository) CreateApp(ctx context.Context, tenantID uuid.UUID, re
 		   SET app_name=EXCLUDED.app_name, updated_at=NOW()
 		 RETURNING id,tenant_id,app_name,bundle_id,version,platform,store_source,is_managed,
 		           is_approved,risk_level,permissions,has_known_vulns,vuln_count,
-		           is_blocklisted,blocklist_reason,developer,category,install_count,tags,created_at,updated_at`,
+		           is_blocklisted,COALESCE(blocklist_reason,''),COALESCE(developer,''),COALESCE(category,''),install_count,tags,created_at,updated_at`,
 		tenantID, req.AppName, req.BundleID, req.Version, req.Platform,
 		src, req.IsManaged, perms, req.Developer, req.Category, tags,
 	).Scan(&a.ID, &a.TenantID, &a.AppName, &a.BundleID, &a.Version, &a.Platform,
@@ -331,7 +387,7 @@ func (r *MobileRepository) GetApp(ctx context.Context, tenantID, appID uuid.UUID
 	err := r.db.QueryRow(ctx,
 		`SELECT id,tenant_id,app_name,bundle_id,version,platform,store_source,is_managed,
 		        is_approved,risk_level,permissions,has_known_vulns,vuln_count,
-		        is_blocklisted,blocklist_reason,developer,category,install_count,tags,created_at,updated_at
+		        is_blocklisted,COALESCE(blocklist_reason,''),COALESCE(developer,''),COALESCE(category,''),install_count,tags,created_at,updated_at
 		 FROM mob_apps WHERE tenant_id=$1 AND id=$2`,
 		tenantID, appID,
 	).Scan(&a.ID, &a.TenantID, &a.AppName, &a.BundleID, &a.Version, &a.Platform,
@@ -349,16 +405,24 @@ func (r *MobileRepository) ListApps(ctx context.Context, tenantID uuid.UUID, f m
 	args := []any{tenantID}
 	n := 2
 	if f.Platform != "" {
-		cond = append(cond, fmt.Sprintf("platform=$%d", n)); args = append(args, f.Platform); n++
+		cond = append(cond, fmt.Sprintf("platform=$%d", n))
+		args = append(args, f.Platform)
+		n++
 	}
 	if f.IsApproved != nil {
-		cond = append(cond, fmt.Sprintf("is_approved=$%d", n)); args = append(args, *f.IsApproved); n++
+		cond = append(cond, fmt.Sprintf("is_approved=$%d", n))
+		args = append(args, *f.IsApproved)
+		n++
 	}
 	if f.IsBlocklisted != nil {
-		cond = append(cond, fmt.Sprintf("is_blocklisted=$%d", n)); args = append(args, *f.IsBlocklisted); n++
+		cond = append(cond, fmt.Sprintf("is_blocklisted=$%d", n))
+		args = append(args, *f.IsBlocklisted)
+		n++
 	}
 	if f.HasVulns != nil {
-		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *f.HasVulns); n++
+		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *f.HasVulns)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -372,7 +436,7 @@ func (r *MobileRepository) ListApps(ctx context.Context, tenantID uuid.UUID, f m
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,app_name,bundle_id,version,platform,store_source,is_managed,
 		        is_approved,risk_level,permissions,has_known_vulns,vuln_count,
-		        is_blocklisted,blocklist_reason,developer,category,install_count,tags,created_at,updated_at
+		        is_blocklisted,COALESCE(blocklist_reason,''),COALESCE(developer,''),COALESCE(category,''),install_count,tags,created_at,updated_at
 		 FROM mob_apps WHERE `+where+
 			fmt.Sprintf(` ORDER BY is_blocklisted DESC, vuln_count DESC, install_count DESC LIMIT $%d OFFSET $%d`, n, n+1),
 		args...)
@@ -400,25 +464,39 @@ func (r *MobileRepository) UpdateApp(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.IsApproved != nil {
-		sets = append(sets, fmt.Sprintf("is_approved=$%d", n)); args = append(args, *req.IsApproved); n++
+		sets = append(sets, fmt.Sprintf("is_approved=$%d", n))
+		args = append(args, *req.IsApproved)
+		n++
 	}
 	if req.IsBlocklisted != nil {
-		sets = append(sets, fmt.Sprintf("is_blocklisted=$%d", n)); args = append(args, *req.IsBlocklisted); n++
+		sets = append(sets, fmt.Sprintf("is_blocklisted=$%d", n))
+		args = append(args, *req.IsBlocklisted)
+		n++
 	}
 	if req.BlocklistReason != nil {
-		sets = append(sets, fmt.Sprintf("blocklist_reason=$%d", n)); args = append(args, *req.BlocklistReason); n++
+		sets = append(sets, fmt.Sprintf("blocklist_reason=$%d", n))
+		args = append(args, *req.BlocklistReason)
+		n++
 	}
 	if req.HasKnownVulns != nil {
-		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *req.HasKnownVulns); n++
+		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *req.HasKnownVulns)
+		n++
 	}
 	if req.VulnCount != nil {
-		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n)); args = append(args, *req.VulnCount); n++
+		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n))
+		args = append(args, *req.VulnCount)
+		n++
 	}
 	if req.RiskLevel != nil {
-		sets = append(sets, fmt.Sprintf("risk_level=$%d", n)); args = append(args, *req.RiskLevel); n++
+		sets = append(sets, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, *req.RiskLevel)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var a model.MobApp
@@ -427,7 +505,7 @@ func (r *MobileRepository) UpdateApp(ctx context.Context, tenantID, id uuid.UUID
 			` WHERE tenant_id=$1 AND id=$2
 		 RETURNING id,tenant_id,app_name,bundle_id,version,platform,store_source,is_managed,
 		           is_approved,risk_level,permissions,has_known_vulns,vuln_count,
-		           is_blocklisted,blocklist_reason,developer,category,install_count,tags,created_at,updated_at`,
+		           is_blocklisted,COALESCE(blocklist_reason,''),COALESCE(developer,''),COALESCE(category,''),install_count,tags,created_at,updated_at`,
 		args...,
 	).Scan(&a.ID, &a.TenantID, &a.AppName, &a.BundleID, &a.Version, &a.Platform,
 		&a.StoreSource, &a.IsManaged, &a.IsApproved, &a.RiskLevel, &a.Permissions,
@@ -437,7 +515,26 @@ func (r *MobileRepository) UpdateApp(ctx context.Context, tenantID, id uuid.UUID
 }
 
 // InstallApp links an app to a device and increments install_count
+// InstallApp records an app as installed on a device.
+//
+// mob_device_apps carries no tenant_id — it is a join table between two tables
+// that do — so both ends have to be checked here. Without that, an install
+// could be recorded against another customer's device, and ListDeviceApps
+// would then show that customer an app nobody in their fleet ever installed.
 func (r *MobileRepository) InstallApp(ctx context.Context, tenantID, deviceID, appID uuid.UUID) error {
+	if err := r.deviceBelongsTo(ctx, tenantID, deviceID); err != nil {
+		return err
+	}
+	var appExists bool
+	if err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM mob_apps WHERE tenant_id=$1 AND id=$2)`,
+		tenantID, appID).Scan(&appExists); err != nil {
+		return fmt.Errorf("check app: %w", err)
+	}
+	if !appExists {
+		return fmt.Errorf("app not found")
+	}
+
 	_, err := r.db.Exec(ctx,
 		`INSERT INTO mob_device_apps (device_id, app_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
 		deviceID, appID)
@@ -454,7 +551,7 @@ func (r *MobileRepository) ListDeviceApps(ctx context.Context, tenantID, deviceI
 	rows, err := r.db.Query(ctx,
 		`SELECT a.id,a.tenant_id,a.app_name,a.bundle_id,a.version,a.platform,a.store_source,a.is_managed,
 		        a.is_approved,a.risk_level,a.permissions,a.has_known_vulns,a.vuln_count,
-		        a.is_blocklisted,a.blocklist_reason,a.developer,a.category,a.install_count,a.tags,a.created_at,a.updated_at
+		        a.is_blocklisted,COALESCE(a.blocklist_reason,''),COALESCE(a.developer,''),COALESCE(a.category,''),a.install_count,a.tags,a.created_at,a.updated_at
 		 FROM mob_apps a
 		 JOIN mob_device_apps da ON da.app_id=a.id
 		 WHERE a.tenant_id=$1 AND da.device_id=$2 AND da.is_active=true
@@ -500,8 +597,8 @@ func (r *MobileRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID,
 		`INSERT INTO mob_policies
 		 (tenant_id,name,description,policy_type,platform,rules,action,applies_to,department,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		 RETURNING id,tenant_id,name,description,policy_type,platform,rules,action,is_active,
-		           applies_to,department,assigned_count,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,platform,rules,action,is_active,
+		           applies_to,COALESCE(department,''),assigned_count,created_by,created_at,updated_at`,
 		tenantID, req.Name, req.Description, req.PolicyType, platform, rules,
 		action, appliesTo, req.Department, createdBy,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType, &p.Platform,
@@ -518,8 +615,8 @@ func (r *MobileRepository) GetPolicy(ctx context.Context, tenantID, policyID uui
 	var p model.MobPolicy
 	var rulesRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT id,tenant_id,name,description,policy_type,platform,rules,action,is_active,
-		        applies_to,department,assigned_count,created_by,created_at,updated_at
+		`SELECT id,tenant_id,name,COALESCE(description,''),policy_type,platform,rules,action,is_active,
+		        applies_to,COALESCE(department,''),assigned_count,created_by,created_at,updated_at
 		 FROM mob_policies WHERE tenant_id=$1 AND id=$2`,
 		tenantID, policyID,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType, &p.Platform,
@@ -537,8 +634,8 @@ func (r *MobileRepository) GetPolicy(ctx context.Context, tenantID, policyID uui
 
 func (r *MobileRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID) ([]model.MobPolicy, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,name,description,policy_type,platform,rules,action,is_active,
-		        applies_to,department,assigned_count,created_by,created_at,updated_at
+		`SELECT id,tenant_id,name,COALESCE(description,''),policy_type,platform,rules,action,is_active,
+		        applies_to,COALESCE(department,''),assigned_count,created_by,created_at,updated_at
 		 FROM mob_policies WHERE tenant_id=$1 ORDER BY policy_type,name`,
 		tenantID)
 	if err != nil {
@@ -566,23 +663,35 @@ func (r *MobileRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.Rules != nil {
 		rules, _ := json.Marshal(req.Rules)
-		sets = append(sets, fmt.Sprintf("rules=$%d", n)); args = append(args, rules); n++
+		sets = append(sets, fmt.Sprintf("rules=$%d", n))
+		args = append(args, rules)
+		n++
 	}
 	if req.Action != nil {
-		sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, *req.Action); n++
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, *req.Action)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 	if req.AppliesTo != nil {
-		sets = append(sets, fmt.Sprintf("applies_to=$%d", n)); args = append(args, *req.AppliesTo); n++
+		sets = append(sets, fmt.Sprintf("applies_to=$%d", n))
+		args = append(args, *req.AppliesTo)
+		n++
 	}
 
 	var p model.MobPolicy
@@ -590,8 +699,8 @@ func (r *MobileRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.U
 	err := r.db.QueryRow(ctx,
 		`UPDATE mob_policies SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,name,description,policy_type,platform,rules,action,is_active,
-		           applies_to,department,assigned_count,created_by,created_at,updated_at`,
+		 RETURNING id,tenant_id,name,COALESCE(description,''),policy_type,platform,rules,action,is_active,
+		           applies_to,COALESCE(department,''),assigned_count,created_by,created_at,updated_at`,
 		args...,
 	).Scan(&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType, &p.Platform,
 		&rulesRaw, &p.Action, &p.IsActive, &p.AppliesTo, &p.Department,
@@ -603,10 +712,18 @@ func (r *MobileRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.U
 	return &p, nil
 }
 
+// DeletePolicy removes a policy belonging to this tenant, and reports a
+// deletion that removed nothing rather than answering 204 for it.
 func (r *MobileRepository) DeletePolicy(ctx context.Context, tenantID, policyID uuid.UUID) error {
-	_, err := r.db.Exec(ctx,
+	tag, err := r.db.Exec(ctx,
 		`DELETE FROM mob_policies WHERE tenant_id=$1 AND id=$2`, tenantID, policyID)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete policy: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("policy not found")
+	}
+	return nil
 }
 
 // ─── Threats ──────────────────────────────────────────────────────────────────
@@ -624,9 +741,9 @@ func (r *MobileRepository) CreateThreat(ctx context.Context, tenantID uuid.UUID,
 		 (tenant_id,device_id,threat_type,severity,title,description,
 		  threat_indicator,affected_app,network_details,detected_by,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 RETURNING id,tenant_id,device_id,threat_type,severity,status,title,description,
-		           threat_indicator,affected_app,network_details,detected_by,detected_at,
-		           auto_remediated,remediation,resolved_by,resolved_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,device_id,threat_type,severity,status,title,COALESCE(description,''),
+		           COALESCE(threat_indicator,''),COALESCE(affected_app,''),network_details,COALESCE(detected_by,''),detected_at,
+		           auto_remediated,COALESCE(remediation,''),COALESCE(resolved_by,''),resolved_at,tags,created_at,updated_at`,
 		tenantID, req.DeviceID, req.ThreatType, req.Severity, req.Title, req.Description,
 		req.ThreatIndicator, req.AffectedApp, netDet, req.DetectedBy, tags,
 	).Scan(&t.ID, &t.TenantID, &t.DeviceID, &t.ThreatType, &t.Severity, &t.Status,
@@ -645,9 +762,9 @@ func (r *MobileRepository) GetThreat(ctx context.Context, tenantID, threatID uui
 	var t model.MobThreat
 	var netRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,description,
-		        threat_indicator,affected_app,network_details,detected_by,detected_at,
-		        auto_remediated,remediation,resolved_by,resolved_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,COALESCE(description,''),
+		        COALESCE(threat_indicator,''),COALESCE(affected_app,''),network_details,COALESCE(detected_by,''),detected_at,
+		        auto_remediated,COALESCE(remediation,''),COALESCE(resolved_by,''),resolved_at,tags,created_at,updated_at
 		 FROM mob_threats WHERE tenant_id=$1 AND id=$2`,
 		tenantID, threatID,
 	).Scan(&t.ID, &t.TenantID, &t.DeviceID, &t.ThreatType, &t.Severity, &t.Status,
@@ -669,16 +786,24 @@ func (r *MobileRepository) ListThreats(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.DeviceID != nil {
-		cond = append(cond, fmt.Sprintf("device_id=$%d", n)); args = append(args, *f.DeviceID); n++
+		cond = append(cond, fmt.Sprintf("device_id=$%d", n))
+		args = append(args, *f.DeviceID)
+		n++
 	}
 	if f.ThreatType != "" {
-		cond = append(cond, fmt.Sprintf("threat_type=$%d", n)); args = append(args, f.ThreatType); n++
+		cond = append(cond, fmt.Sprintf("threat_type=$%d", n))
+		args = append(args, f.ThreatType)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -690,9 +815,9 @@ func (r *MobileRepository) ListThreats(ctx context.Context, tenantID uuid.UUID, 
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,description,
-		        threat_indicator,affected_app,network_details,detected_by,detected_at,
-		        auto_remediated,remediation,resolved_by,resolved_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,COALESCE(description,''),
+		        COALESCE(threat_indicator,''),COALESCE(affected_app,''),network_details,COALESCE(detected_by,''),detected_at,
+		        auto_remediated,COALESCE(remediation,''),COALESCE(resolved_by,''),resolved_at,tags,created_at,updated_at
 		 FROM mob_threats WHERE `+where+
 			fmt.Sprintf(` ORDER BY detected_at DESC LIMIT $%d OFFSET $%d`, n, n+1),
 		args...)
@@ -722,17 +847,24 @@ func (r *MobileRepository) UpdateThreat(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "resolved" || *req.Status == "false_positive" {
 			sets = append(sets, fmt.Sprintf("resolved_at=COALESCE(resolved_at,$%d)", n))
-			args = append(args, time.Now().UTC()); n++
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.Remediation != nil {
-		sets = append(sets, fmt.Sprintf("remediation=$%d", n)); args = append(args, *req.Remediation); n++
+		sets = append(sets, fmt.Sprintf("remediation=$%d", n))
+		args = append(args, *req.Remediation)
+		n++
 	}
 	if req.ResolvedBy != nil {
-		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n)); args = append(args, *req.ResolvedBy); n++
+		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n))
+		args = append(args, *req.ResolvedBy)
+		n++
 	}
 
 	var t model.MobThreat
@@ -740,9 +872,9 @@ func (r *MobileRepository) UpdateThreat(ctx context.Context, tenantID, id uuid.U
 	err := r.db.QueryRow(ctx,
 		`UPDATE mob_threats SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,device_id,threat_type,severity,status,title,description,
-		           threat_indicator,affected_app,network_details,detected_by,detected_at,
-		           auto_remediated,remediation,resolved_by,resolved_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,device_id,threat_type,severity,status,title,COALESCE(description,''),
+		           COALESCE(threat_indicator,''),COALESCE(affected_app,''),network_details,COALESCE(detected_by,''),detected_at,
+		           auto_remediated,COALESCE(remediation,''),COALESCE(resolved_by,''),resolved_at,tags,created_at,updated_at`,
 		args...,
 	).Scan(&t.ID, &t.TenantID, &t.DeviceID, &t.ThreatType, &t.Severity, &t.Status,
 		&t.Title, &t.Description, &t.ThreatIndicator, &t.AffectedApp, &netRaw,
@@ -821,7 +953,7 @@ func (r *MobileRepository) RunComplianceCheck(ctx context.Context, tenantID uuid
 		`INSERT INTO mob_compliance_checks
 		 (tenant_id,device_id,policy_id,is_compliant,violations,compliance_score,next_check_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)
-		 RETURNING id,tenant_id,device_id,policy_id,is_compliant,violations,compliance_score,action_taken,checked_at,next_check_at`,
+		 RETURNING id,tenant_id,device_id,policy_id,is_compliant,violations,compliance_score,COALESCE(action_taken,''),checked_at,next_check_at`,
 		tenantID, deviceID, policyID, isCompliant, violationsJSON, score, nextCheck,
 	).Scan(&check.ID, &check.TenantID, &check.DeviceID, &check.PolicyID,
 		&check.IsCompliant, &violRaw, &check.ComplianceScore,
@@ -848,7 +980,7 @@ func (r *MobileRepository) ListComplianceChecks(ctx context.Context, tenantID, d
 		limit = 20
 	}
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_id,policy_id,is_compliant,violations,compliance_score,action_taken,checked_at,next_check_at
+		`SELECT id,tenant_id,device_id,policy_id,is_compliant,violations,compliance_score,COALESCE(action_taken,''),checked_at,next_check_at
 		 FROM mob_compliance_checks WHERE tenant_id=$1 AND device_id=$2
 		 ORDER BY checked_at DESC LIMIT $3`,
 		tenantID, deviceID, limit)
@@ -873,7 +1005,33 @@ func (r *MobileRepository) ListComplianceChecks(ctx context.Context, tenantID, d
 
 // ─── Remote Actions ───────────────────────────────────────────────────────────
 
+// deviceBelongsTo refuses an identifier the caller's tenant does not own.
+//
+// A device identifier arrives from the client, and the row written carries the
+// caller's own tenant_id — so a tenant filter on the INSERT proves nothing: the
+// row is "theirs" whatever device it points at. Without this check a caller who
+// knows a device UUID in another customer's fleet could queue a remote wipe on
+// it, because the agent that executes the order dispatches by device, not by
+// tenant. Every write that takes a device identifier from outside goes through
+// here first.
+func (r *MobileRepository) deviceBelongsTo(ctx context.Context, tenantID, deviceID uuid.UUID) error {
+	var exists bool
+	err := r.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM mob_devices WHERE tenant_id=$1 AND id=$2)`,
+		tenantID, deviceID).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("check device: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("device not found")
+	}
+	return nil
+}
+
 func (r *MobileRepository) CreateRemoteAction(ctx context.Context, tenantID uuid.UUID, req model.CreateRemoteActionRequest) (*model.MobRemoteAction, error) {
+	if err := r.deviceBelongsTo(ctx, tenantID, req.DeviceID); err != nil {
+		return nil, err
+	}
 	payload, _ := json.Marshal(req.Payload)
 	var a model.MobRemoteAction
 	var payRaw []byte
@@ -881,8 +1039,8 @@ func (r *MobileRepository) CreateRemoteAction(ctx context.Context, tenantID uuid
 		`INSERT INTO mob_remote_actions
 		 (tenant_id,device_id,action_type,payload,message,requested_by,requested_by_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7)
-		 RETURNING id,tenant_id,device_id,action_type,status,payload,message,
-		           requested_by,requested_by_id,sent_at,completed_at,failure_reason,created_at,updated_at`,
+		 RETURNING id,tenant_id,device_id,action_type,status,payload,COALESCE(message,''),
+		           COALESCE(requested_by,''),requested_by_id,sent_at,completed_at,COALESCE(failure_reason,''),created_at,updated_at`,
 		tenantID, req.DeviceID, req.ActionType, payload, req.Message,
 		req.RequestedBy, req.RequestedByID,
 	).Scan(&a.ID, &a.TenantID, &a.DeviceID, &a.ActionType, &a.Status, &payRaw,
@@ -899,8 +1057,8 @@ func (r *MobileRepository) GetRemoteAction(ctx context.Context, tenantID, action
 	var a model.MobRemoteAction
 	var payRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT id,tenant_id,device_id,action_type,status,payload,message,
-		        requested_by,requested_by_id,sent_at,completed_at,failure_reason,created_at,updated_at
+		`SELECT id,tenant_id,device_id,action_type,status,payload,COALESCE(message,''),
+		        COALESCE(requested_by,''),requested_by_id,sent_at,completed_at,COALESCE(failure_reason,''),created_at,updated_at
 		 FROM mob_remote_actions WHERE tenant_id=$1 AND id=$2`,
 		tenantID, actionID,
 	).Scan(&a.ID, &a.TenantID, &a.DeviceID, &a.ActionType, &a.Status, &payRaw,
@@ -918,8 +1076,8 @@ func (r *MobileRepository) GetRemoteAction(ctx context.Context, tenantID, action
 
 func (r *MobileRepository) ListRemoteActions(ctx context.Context, tenantID, deviceID uuid.UUID) ([]model.MobRemoteAction, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_id,action_type,status,payload,message,
-		        requested_by,requested_by_id,sent_at,completed_at,failure_reason,created_at,updated_at
+		`SELECT id,tenant_id,device_id,action_type,status,payload,COALESCE(message,''),
+		        COALESCE(requested_by,''),requested_by_id,sent_at,completed_at,COALESCE(failure_reason,''),created_at,updated_at
 		 FROM mob_remote_actions WHERE tenant_id=$1 AND device_id=$2
 		 ORDER BY created_at DESC LIMIT 50`,
 		tenantID, deviceID)
@@ -948,17 +1106,25 @@ func (r *MobileRepository) UpdateRemoteAction(ctx context.Context, tenantID, id 
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		now := time.Now().UTC()
 		switch *req.Status {
 		case "sent":
-			sets = append(sets, fmt.Sprintf("sent_at=COALESCE(sent_at,$%d)", n)); args = append(args, now); n++
+			sets = append(sets, fmt.Sprintf("sent_at=COALESCE(sent_at,$%d)", n))
+			args = append(args, now)
+			n++
 		case "completed", "failed":
-			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n)); args = append(args, now); n++
+			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n))
+			args = append(args, now)
+			n++
 		}
 	}
 	if req.FailureReason != nil {
-		sets = append(sets, fmt.Sprintf("failure_reason=$%d", n)); args = append(args, *req.FailureReason); n++
+		sets = append(sets, fmt.Sprintf("failure_reason=$%d", n))
+		args = append(args, *req.FailureReason)
+		n++
 	}
 
 	var a model.MobRemoteAction
@@ -966,8 +1132,8 @@ func (r *MobileRepository) UpdateRemoteAction(ctx context.Context, tenantID, id 
 	err := r.db.QueryRow(ctx,
 		`UPDATE mob_remote_actions SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,device_id,action_type,status,payload,message,
-		           requested_by,requested_by_id,sent_at,completed_at,failure_reason,created_at,updated_at`,
+		 RETURNING id,tenant_id,device_id,action_type,status,payload,COALESCE(message,''),
+		           COALESCE(requested_by,''),requested_by_id,sent_at,completed_at,COALESCE(failure_reason,''),created_at,updated_at`,
 		args...,
 	).Scan(&a.ID, &a.TenantID, &a.DeviceID, &a.ActionType, &a.Status, &payRaw,
 		&a.Message, &a.RequestedBy, &a.RequestedByID,
@@ -987,6 +1153,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 		DevicesByOwnership: make(map[string]int),
 		ThreatsBySeverity:  make(map[string]int),
 		ThreatsByType:      make(map[string]int),
+		TopRiskyDevices:    []model.MobDevice{},
+		RecentThreats:      []model.MobThreat{},
 	}
 
 	_ = r.db.QueryRow(ctx,
@@ -1019,7 +1187,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows.Scan(&k, &v)
 			stats.DevicesByPlatform[k] = v
 		}
@@ -1031,7 +1200,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows2 != nil {
 		defer rows2.Close()
 		for rows2.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows2.Scan(&k, &v)
 			stats.DevicesByOwnership[k] = v
 		}
@@ -1043,7 +1213,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows3 != nil {
 		defer rows3.Close()
 		for rows3.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows3.Scan(&k, &v)
 			stats.ThreatsBySeverity[k] = v
 		}
@@ -1055,7 +1226,8 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if rows4 != nil {
 		defer rows4.Close()
 		for rows4.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows4.Scan(&k, &v)
 			stats.ThreatsByType[k] = v
 		}
@@ -1063,12 +1235,12 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 
 	// Top risky devices
 	drows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_name,device_type,platform,os_version,model,manufacturer,
-		        serial_number,imei,udid,enrollment_status,enrollment_date,mdm_profile_installed,
-		        ownership,owner_name,owner_id,owner_email,department,
+		`SELECT id,tenant_id,device_name,device_type,platform,COALESCE(os_version,''),COALESCE(model,''),COALESCE(manufacturer,''),
+		        COALESCE(serial_number,''),COALESCE(imei,''),COALESCE(udid,''),enrollment_status,enrollment_date,mdm_profile_installed,
+		        ownership,COALESCE(owner_name,''),owner_id,COALESCE(owner_email,''),COALESCE(department,''),
 		        is_jailbroken,is_rooted,is_encrypted,is_screen_lock,is_compliant,
-		        compliance_issues,risk_score,risk_level,last_location,last_seen_at,
-		        last_checkin_at,last_ip,carrier,tags,notes,created_by,created_at,updated_at
+		        compliance_issues,risk_score,risk_level,COALESCE(last_location,''),last_seen_at,
+		        last_checkin_at,COALESCE(last_ip,''),COALESCE(carrier,''),tags,COALESCE(notes,''),created_by,created_at,updated_at
 		 FROM mob_devices WHERE tenant_id=$1 AND risk_level IN ('critical','high')
 		 ORDER BY risk_score DESC LIMIT 5`, tenantID)
 	if drows != nil {
@@ -1090,9 +1262,9 @@ func (r *MobileRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*m
 
 	// Recent threats
 	trows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,description,
-		        threat_indicator,affected_app,network_details,detected_by,detected_at,
-		        auto_remediated,remediation,resolved_by,resolved_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,device_id,threat_type,severity,status,title,COALESCE(description,''),
+		        COALESCE(threat_indicator,''),COALESCE(affected_app,''),network_details,COALESCE(detected_by,''),detected_at,
+		        auto_remediated,COALESCE(remediation,''),COALESCE(resolved_by,''),resolved_at,tags,created_at,updated_at
 		 FROM mob_threats WHERE tenant_id=$1 AND status NOT IN ('resolved','false_positive')
 		 ORDER BY detected_at DESC LIMIT 5`, tenantID)
 	if trows != nil {

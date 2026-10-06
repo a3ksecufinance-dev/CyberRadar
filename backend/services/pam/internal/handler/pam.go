@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/pam/internal/model"
 	"github.com/cyberradar/platform/services/pam/internal/service"
@@ -61,7 +62,7 @@ func (h *PAMHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"accounts": accounts, "total": len(accounts)})
+	response.OKWithMeta(w, accounts, &response.Meta{Total: int64(len(accounts))})
 }
 
 func (h *PAMHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +113,7 @@ func (h *PAMHandler) ListRequests(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"requests": requests, "total": total})
+	response.OKWithMeta(w, requests, &response.Meta{Total: int64(total)})
 }
 
 func (h *PAMHandler) CreateRequest(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +193,7 @@ func (h *PAMHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"sessions": sessions, "total": total})
+	response.OKWithMeta(w, sessions, &response.Meta{Total: int64(total)})
 }
 
 func (h *PAMHandler) OpenSession(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +282,7 @@ func (h *PAMHandler) ListSessionEvents(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"events": events, "total": len(events)})
+	response.OKWithMeta(w, events, &response.Meta{Total: int64(len(events))})
 }
 
 // ─── Identity Risk ────────────────────────────────────────────────────────────
@@ -327,21 +328,17 @@ func (h *PAMHandler) ListHighRisk(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"profiles": profiles, "total": len(profiles)})
+	response.OKWithMeta(w, profiles, &response.Meta{Total: int64(len(profiles))})
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -355,16 +352,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

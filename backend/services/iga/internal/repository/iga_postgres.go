@@ -25,12 +25,13 @@ func NewIGARepository(pool *pgxpool.Pool) *IGARepository {
 // ─── Roles ────────────────────────────────────────────────────────────────────
 
 const roleSelect = `
-SELECT r.id, r.tenant_id, r.name, r.description, r.role_type, r.category, r.owner,
-       r.risk_level, r.is_active, r.requires_mfa, r.max_duration_days, r.metadata,
+SELECT r.id, r.tenant_id, r.name, COALESCE(r.description,''), r.role_type,
+       COALESCE(r.category,''), COALESCE(r.owner,''),
+       COALESCE(r.risk_level,''), r.is_active, r.requires_mfa, r.max_duration_days, r.metadata,
        r.created_at, r.updated_at,
        COUNT(a.id) FILTER (WHERE a.status='active') AS assignment_count
 FROM iga_roles r
-LEFT JOIN iga_role_assignments a ON a.role_id = r.id`
+LEFT JOIN iga_role_assignments a ON a.role_id = r.id AND a.tenant_id = r.tenant_id`
 
 func scanRole(row pgx.Row) (*model.IGARole, error) {
 	r := &model.IGARole{}
@@ -102,8 +103,10 @@ func (r *IGARepository) GetRole(ctx context.Context, tenantID, roleID uuid.UUID)
 
 func (r *IGARepository) listEntitlements(ctx context.Context, tenantID, roleID uuid.UUID) ([]*model.RoleEntitlement, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, role_id, system_name, entitlement, entitlement_type, created_at
-		FROM iga_role_entitlements WHERE role_id=$1 ORDER BY system_name, entitlement`, roleID)
+		SELECT id, tenant_id, role_id, system_name, entitlement,
+		       COALESCE(entitlement_type,''), created_at
+		FROM iga_role_entitlements WHERE role_id=$1 AND tenant_id=$2
+		ORDER BY system_name, entitlement`, roleID, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +234,9 @@ func (r *IGARepository) UpdateRole(ctx context.Context, tenantID, roleID uuid.UU
 // ─── Role Assignments ─────────────────────────────────────────────────────────
 
 const assignmentSelect = `
-SELECT id, tenant_id, identity_id, identity_name, identity_email,
-       role_id, role_name, assignment_type, status, justification,
+SELECT id, tenant_id, identity_id, identity_name, COALESCE(identity_email,''),
+       role_id, role_name, COALESCE(assignment_type,''), COALESCE(status,''),
+       COALESCE(justification,''),
        requested_by, approved_by, approved_at,
        valid_from, valid_until, last_reviewed_at, created_at, updated_at
 FROM iga_role_assignments`
@@ -394,8 +398,10 @@ func (r *IGARepository) ExpireAssignments(ctx context.Context) (int64, error) {
 // ─── Campaigns ────────────────────────────────────────────────────────────────
 
 const campaignSelect = `
-SELECT id, tenant_id, name, description, campaign_type, scope, scope_filter,
-       status, reviewer_type, total_items, reviewed_items, certified_items, revoked_items,
+SELECT id, tenant_id, name, COALESCE(description,''), campaign_type,
+       COALESCE(scope,''), COALESCE(scope_filter,''),
+       COALESCE(status,''), COALESCE(reviewer_type,''),
+       total_items, reviewed_items, certified_items, revoked_items,
        start_date, due_date, completed_at, created_by, created_at, updated_at
 FROM iga_campaigns`
 
@@ -558,7 +564,8 @@ func (r *IGARepository) computeReviewRisk(ctx context.Context, tenantID, identit
 
 	// Check role risk level
 	var roleType, riskLevel string
-	r.pool.QueryRow(ctx, `SELECT role_type, risk_level FROM iga_roles WHERE id=$1`, roleID).Scan(&roleType, &riskLevel)
+	r.pool.QueryRow(ctx, `SELECT role_type, COALESCE(risk_level,'') FROM iga_roles
+		WHERE id=$1 AND tenant_id=$2`, roleID, tenantID).Scan(&roleType, &riskLevel)
 	if roleType == "privileged" {
 		flags = append(flags, model.FlagPrivilegedRole)
 		score += 30
@@ -637,9 +644,11 @@ func (r *IGARepository) ListReviewItems(ctx context.Context, tenantID uuid.UUID,
 	args = append(args, f.PageSize, offset)
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, campaign_id, identity_id, identity_name, identity_email,
-		       role_id, role_name, assignment_id, decision, decision_reason,
-		       reviewer_id, reviewer_name, reviewed_at, risk_flags, risk_score, created_at
+		SELECT id, tenant_id, campaign_id, identity_id, identity_name,
+		       COALESCE(identity_email,''), role_id, role_name, assignment_id,
+		       COALESCE(decision,''), COALESCE(decision_reason,''),
+		       reviewer_id, COALESCE(reviewer_name,''), reviewed_at,
+		       COALESCE(risk_flags,'{}'), risk_score, created_at
 		FROM iga_review_items `+where+
 		fmt.Sprintf(` ORDER BY risk_score DESC, created_at LIMIT $%d OFFSET $%d`, n, n+1), args...)
 	if err != nil {
@@ -664,9 +673,25 @@ func (r *IGARepository) ListReviewItems(ctx context.Context, tenantID uuid.UUID,
 	return items, total, nil
 }
 
+// SubmitReviewDecision records one reviewer's decision on one review item.
+//
+// The decision is taken once, and the write says so: the UPDATE carries
+// "decision IS NULL" and the number of rows it touched is now read. It used to
+// be discarded, and the three things that follow — the campaign's counters, the
+// assignment's revocation, the item returned to the caller — ran whether or not
+// anything had been written. So a second decision on the same item moved
+// reviewed_items again (the number the auditor reads, and the number that
+// decides when the campaign closes), and a decision submitted by another tenant
+// moved them too: the re-read below matched on the identifier alone, which
+// handed the neighbour's identity, role and reviewer back to the caller, and the
+// revocation that follows it set status='revoked' on the neighbour's assignment
+// by identifier alone — somebody else's employee losing their access.
 func (r *IGARepository) SubmitReviewDecision(ctx context.Context, tenantID, itemID, reviewerID uuid.UUID, req *model.ReviewDecisionRequest) (*model.ReviewItem, error) {
+	if req.Decision == "" {
+		return nil, fmt.Errorf("a review decision names no outcome")
+	}
 	now := time.Now()
-	_, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE iga_review_items SET
 			decision=$1, decision_reason=$2, reviewer_id=$3, reviewer_name=$4, reviewed_at=$5
 		WHERE id=$6 AND tenant_id=$7 AND decision IS NULL`,
@@ -674,15 +699,20 @@ func (r *IGARepository) SubmitReviewDecision(ctx context.Context, tenantID, item
 	if err != nil {
 		return nil, err
 	}
+	if tag.RowsAffected() == 0 {
+		return nil, fmt.Errorf("review item not found, or already decided")
+	}
 
 	// Get the item to update campaign counters and potentially revoke assignment
 	var item model.ReviewItem
 	var reviewerIDScanned *uuid.UUID
 	err = r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, campaign_id, identity_id, identity_name, identity_email,
-		       role_id, role_name, assignment_id, decision, decision_reason,
-		       reviewer_id, reviewer_name, reviewed_at, risk_flags, risk_score, created_at
-		FROM iga_review_items WHERE id=$1`, itemID).Scan(
+		SELECT id, tenant_id, campaign_id, identity_id, identity_name,
+		       COALESCE(identity_email,''), role_id, role_name, assignment_id,
+		       COALESCE(decision,''), COALESCE(decision_reason,''),
+		       reviewer_id, COALESCE(reviewer_name,''), reviewed_at,
+		       COALESCE(risk_flags,'{}'), risk_score, created_at
+		FROM iga_review_items WHERE id=$1 AND tenant_id=$2`, itemID, tenantID).Scan(
 		&item.ID, &item.TenantID, &item.CampaignID, &item.IdentityID, &item.IdentityName, &item.IdentityEmail,
 		&item.RoleID, &item.RoleName, &item.AssignmentID, &item.Decision, &item.DecisionReason,
 		&reviewerIDScanned, &item.ReviewerName, &item.ReviewedAt, &item.RiskFlags, &item.RiskScore, &item.CreatedAt,
@@ -694,38 +724,55 @@ func (r *IGARepository) SubmitReviewDecision(ctx context.Context, tenantID, item
 
 	// Update campaign counters
 	if req.Decision == "certified" {
-		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, certified_items=certified_items+1, updated_at=NOW() WHERE id=$1`, item.CampaignID)
+		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, certified_items=certified_items+1, updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, item.CampaignID, tenantID)
 	} else if req.Decision == "revoked" {
-		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, revoked_items=revoked_items+1, updated_at=NOW() WHERE id=$1`, item.CampaignID)
+		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, revoked_items=revoked_items+1, updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, item.CampaignID, tenantID)
 		// Revoke the assignment
 		if item.AssignmentID != nil {
-			_, _ = r.pool.Exec(ctx, `UPDATE iga_role_assignments SET status='revoked', updated_at=NOW() WHERE id=$1`, *item.AssignmentID)
+			_, _ = r.pool.Exec(ctx, `UPDATE iga_role_assignments SET status='revoked', updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, *item.AssignmentID, tenantID)
 		}
 	} else {
-		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, updated_at=NOW() WHERE id=$1`, item.CampaignID)
+		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET reviewed_items=reviewed_items+1, updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, item.CampaignID, tenantID)
 	}
 
 	// Check if campaign is complete
-	r.checkCampaignCompletion(ctx, item.CampaignID)
+	r.checkCampaignCompletion(ctx, tenantID, item.CampaignID)
 
 	return &item, nil
 }
 
-func (r *IGARepository) checkCampaignCompletion(ctx context.Context, campaignID uuid.UUID) {
+func (r *IGARepository) checkCampaignCompletion(ctx context.Context, tenantID, campaignID uuid.UUID) {
 	var total, reviewed int
-	r.pool.QueryRow(ctx, `SELECT total_items, reviewed_items FROM iga_campaigns WHERE id=$1`, campaignID).Scan(&total, &reviewed)
+	r.pool.QueryRow(ctx, `SELECT total_items, reviewed_items FROM iga_campaigns
+		WHERE id=$1 AND tenant_id=$2`, campaignID, tenantID).Scan(&total, &reviewed)
 	if total > 0 && reviewed >= total {
-		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET status='completed', completed_at=NOW(), updated_at=NOW() WHERE id=$1`, campaignID)
+		_, _ = r.pool.Exec(ctx, `UPDATE iga_campaigns SET status='completed', completed_at=NOW(), updated_at=NOW() WHERE id=$1 AND tenant_id=$2`, campaignID, tenantID)
 	}
 }
 
 // ─── SoD Policies ─────────────────────────────────────────────────────────────
 
+// CreateSoDPolicy declares two roles the same person must not hold at once.
+//
+// Both role names used to be read with the error discarded, and the foreign key
+// behind role_a_id points at iga_roles with no tenant of its own — so a policy
+// naming a role in another customer's estate was stored with an empty
+// role_b_name, and the detection that reads it could never match anything. A
+// policy pitting a role against itself was stored too, and it reports every
+// holder of that single role as being in conflict with themselves.
 func (r *IGARepository) CreateSoDPolicy(ctx context.Context, tenantID uuid.UUID, req *model.CreateSoDPolicyRequest) (*model.SoDPolicy, error) {
-	// Fetch role names
+	if req.RoleAID == req.RoleBID {
+		return nil, fmt.Errorf("a separation of duties policy needs two different roles")
+	}
 	var roleAName, roleBName string
-	r.pool.QueryRow(ctx, `SELECT name FROM iga_roles WHERE id=$1 AND tenant_id=$2`, req.RoleAID, tenantID).Scan(&roleAName)
-	r.pool.QueryRow(ctx, `SELECT name FROM iga_roles WHERE id=$1 AND tenant_id=$2`, req.RoleBID, tenantID).Scan(&roleBName)
+	if err := r.pool.QueryRow(ctx, `SELECT name FROM iga_roles WHERE id=$1 AND tenant_id=$2`,
+		req.RoleAID, tenantID).Scan(&roleAName); err != nil {
+		return nil, fmt.Errorf("role not found: %w", err)
+	}
+	if err := r.pool.QueryRow(ctx, `SELECT name FROM iga_roles WHERE id=$1 AND tenant_id=$2`,
+		req.RoleBID, tenantID).Scan(&roleBName); err != nil {
+		return nil, fmt.Errorf("role not found: %w", err)
+	}
 
 	action := req.Action
 	if action == "" {
@@ -748,8 +795,9 @@ func (r *IGARepository) CreateSoDPolicy(ctx context.Context, tenantID uuid.UUID,
 func (r *IGARepository) GetSoDPolicy(ctx context.Context, tenantID, policyID uuid.UUID) (*model.SoDPolicy, error) {
 	p := &model.SoDPolicy{}
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, name, description, role_a_id, role_a_name, role_b_id, role_b_name,
-		       severity, action, is_active, created_at, updated_at
+		SELECT id, tenant_id, name, COALESCE(description,''), role_a_id, role_a_name,
+		       role_b_id, role_b_name, severity, COALESCE(action,''), is_active,
+		       created_at, updated_at
 		FROM iga_sod_policies WHERE id=$1 AND tenant_id=$2`, policyID, tenantID).Scan(
 		&p.ID, &p.TenantID, &p.Name, &p.Description, &p.RoleAID, &p.RoleAName, &p.RoleBID, &p.RoleBName,
 		&p.Severity, &p.Action, &p.IsActive, &p.CreatedAt, &p.UpdatedAt,
@@ -762,8 +810,9 @@ func (r *IGARepository) GetSoDPolicy(ctx context.Context, tenantID, policyID uui
 
 func (r *IGARepository) ListSoDPolicies(ctx context.Context, tenantID uuid.UUID) ([]*model.SoDPolicy, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, name, description, role_a_id, role_a_name, role_b_id, role_b_name,
-		       severity, action, is_active, created_at, updated_at
+		SELECT id, tenant_id, name, COALESCE(description,''), role_a_id, role_a_name,
+		       role_b_id, role_b_name, severity, COALESCE(action,''), is_active,
+		       created_at, updated_at
 		FROM iga_sod_policies WHERE tenant_id=$1 AND is_active=TRUE ORDER BY severity DESC, name`, tenantID)
 	if err != nil {
 		return nil, err
@@ -805,23 +854,43 @@ func (r *IGARepository) DetectSoDViolations(ctx context.Context, tenantID uuid.U
 			continue
 		}
 
+		type conflict struct {
+			identityID               uuid.UUID
+			identityName, identEmail string
+		}
+		var conflicts []conflict
 		for rows.Next() {
-			var identityID uuid.UUID
-			var identityName, identityEmail string
-			if err := rows.Scan(&identityID, &identityName, &identityEmail); err != nil {
+			var c conflict
+			if err := rows.Scan(&c.identityID, &c.identityName, &c.identEmail); err != nil {
 				continue
 			}
-			// Insert violation (ignore duplicates)
-			_, _ = r.pool.Exec(ctx, `INSERT INTO iga_sod_violations
-				(tenant_id, policy_id, policy_name, identity_id, identity_name, identity_email,
-				 role_a_id, role_a_name, role_b_id, role_b_name, severity)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-				ON CONFLICT DO NOTHING`,
-				tenantID, policy.ID, policy.Name, identityID, identityName, identityEmail,
-				policy.RoleAID, policy.RoleAName, policy.RoleBID, policy.RoleBName, policy.Severity)
-			detected++
+			conflicts = append(conflicts, c)
 		}
 		rows.Close()
+
+		for _, c := range conflicts {
+			// One open violation per (policy, identity).
+			//
+			// ON CONFLICT DO NOTHING was here, and iga_sod_violations carries no
+			// unique constraint for it to act on — so every run of the detection
+			// inserted the same conflict again, and the count on the dashboard
+			// grew by the number of conflicts each time somebody pressed the
+			// button. The guard is the condition the product actually means: a
+			// conflict already raised and not yet dealt with is not a new one.
+			tag, err := r.pool.Exec(ctx, `INSERT INTO iga_sod_violations
+				(tenant_id, policy_id, policy_name, identity_id, identity_name, identity_email,
+				 role_a_id, role_a_name, role_b_id, role_b_name, severity)
+				SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
+				WHERE NOT EXISTS (
+					SELECT 1 FROM iga_sod_violations
+					WHERE tenant_id=$1 AND policy_id=$2 AND identity_id=$4
+					  AND status IN ('open','exception_granted'))`,
+				tenantID, policy.ID, policy.Name, c.identityID, c.identityName, c.identEmail,
+				policy.RoleAID, policy.RoleAName, policy.RoleBID, policy.RoleBName, policy.Severity)
+			if err == nil {
+				detected += int(tag.RowsAffected())
+			}
+		}
 	}
 	return detected, nil
 }
@@ -858,9 +927,11 @@ func (r *IGARepository) ListSoDViolations(ctx context.Context, tenantID uuid.UUI
 	args = append(args, pageSize, offset)
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, policy_id, policy_name, identity_id, identity_name, identity_email,
-		       role_a_id, role_a_name, role_b_id, role_b_name, severity, status,
-		       exception_reason, exception_by, exception_at, detected_at, created_at
+		SELECT id, tenant_id, policy_id, policy_name, identity_id, identity_name,
+		       COALESCE(identity_email,''),
+		       role_a_id, role_a_name, role_b_id, role_b_name, severity,
+		       COALESCE(status,''), COALESCE(exception_reason,''),
+		       exception_by, exception_at, detected_at, created_at
 		FROM iga_sod_violations `+where+
 		fmt.Sprintf(` ORDER BY detected_at DESC LIMIT $%d OFFSET $%d`, n, n+1), args...)
 	if err != nil {
@@ -886,7 +957,14 @@ func (r *IGARepository) ListSoDViolations(ctx context.Context, tenantID uuid.UUI
 }
 
 func (r *IGARepository) UpdateViolation(ctx context.Context, tenantID, violationID, updatedBy uuid.UUID, req *model.UpdateViolationRequest) (*model.SoDViolation, error) {
-	sets := []string{fmt.Sprintf("status=$1")}
+	// The column carries a CHECK, and the empty string is not one of the four
+	// values it allows: without this the call fails inside PostgreSQL rather
+	// than at the edge, and the caller reads a 500 instead of being told what
+	// is missing.
+	if req.Status == "" {
+		return nil, fmt.Errorf("an update to a violation names no status")
+	}
+	sets := []string{"status=$1"}
 	args := []any{req.Status}
 	n := 2
 
@@ -912,9 +990,11 @@ func (r *IGARepository) UpdateViolation(ctx context.Context, tenantID, violation
 	v := &model.SoDViolation{}
 	var exceptionBy *uuid.UUID
 	err = r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, policy_id, policy_name, identity_id, identity_name, identity_email,
-		       role_a_id, role_a_name, role_b_id, role_b_name, severity, status,
-		       exception_reason, exception_by, exception_at, detected_at, created_at
+		SELECT id, tenant_id, policy_id, policy_name, identity_id, identity_name,
+		       COALESCE(identity_email,''),
+		       role_a_id, role_a_name, role_b_id, role_b_name, severity,
+		       COALESCE(status,''), COALESCE(exception_reason,''),
+		       exception_by, exception_at, detected_at, created_at
 		FROM iga_sod_violations WHERE id=$1 AND tenant_id=$2`, violationID, tenantID).Scan(
 		&v.ID, &v.TenantID, &v.PolicyID, &v.PolicyName, &v.IdentityID, &v.IdentityName, &v.IdentityEmail,
 		&v.RoleAID, &v.RoleAName, &v.RoleBID, &v.RoleBName, &v.Severity, &v.Status,

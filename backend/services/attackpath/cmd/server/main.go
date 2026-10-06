@@ -10,14 +10,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	"github.com/cyberradar/platform/internal/pkg/graphdb"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/kpi"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/attackpath/internal/handler"
 	"github.com/cyberradar/platform/services/attackpath/internal/repository"
 	"github.com/cyberradar/platform/services/attackpath/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -26,10 +32,23 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "attackpath-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8012")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"attackpath-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8012")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -41,6 +60,14 @@ func main() {
 	}
 	defer pool.Close()
 
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, pool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
+
 	// ── Kafka producer (publishes graph events for downstream consumers) ───────
 	producer := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,
@@ -49,24 +76,73 @@ func main() {
 	_ = producer
 
 	// ── Repositories / services ───────────────────────────────────────────────
-	graphRepo  := repository.NewGraphRepository(pool)
-	attackSvc  := service.NewAttackPathService(graphRepo, logger)
-	attackH    := handler.NewAttackPathHandler(attackSvc)
+	graphRepo := repository.NewGraphRepository(pool)
+
+	// ── Neo4j, when a deployment has one ──────────────────────────────────────
+	//
+	// Configuring NEO4J_URI turns on the mirror: every graph write goes to
+	// PostgreSQL and then to Neo4j. Reads stay on PostgreSQL until
+	// ATTACKPATH_GRAPH_READS is set to "neo4j", and that switch is only
+	// defensible once `reconcile` reports parity for the tenants in question.
+	//
+	// Startup fails on an unreachable Neo4j rather than carrying on without
+	// it: a mirror that is configured but silently not written drifts from the
+	// source of truth, and a traversal on a drifted graph reports attack paths
+	// that do not exist.
+	var graphOpts []service.Option
+	if cfg, configured := graphdb.FromEnv(os.Getenv); configured {
+		neoStore, err := repository.NewNeo4jGraphStore(ctx, cfg, graphRepo)
+		if err != nil {
+			logger.Fatal().Err(err).Str("uri", cfg.URI).Msg("neo4j connect failed")
+		}
+		defer func() { _ = neoStore.Close(context.Background()) }()
+		graphOpts = append(graphOpts, service.WithMirror(neoStore))
+
+		reads := envOrDefault("ATTACKPATH_GRAPH_READS", "postgres")
+		if reads == "neo4j" {
+			graphOpts = append(graphOpts, service.WithGraphStore(neoStore))
+		}
+		logger.Info().Str("uri", cfg.URI).Str("reads", reads).Msg("neo4j graph mirror enabled")
+	}
+
+	attackSvc := service.NewAttackPathService(graphRepo, logger, graphOpts...)
+	attackH := handler.NewAttackPathHandler(attackSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
+	// ── Report this domain's KPIs to the dashboard ────────────────────────────
+	// PlatformOverview is assembled from the latest snapshot each domain
+	// published. Nothing published any, so the overview answered zero for every
+	// tenant — see internal/pkg/kpi.
+	kpi.Start(ctx, kpi.Config{
+		Brokers: brokers,
+		Domain:  "attackpath",
+		Tenants: kpi.TenantsFromPostgres(pool),
+		Source:  attackSvc.KPISamples,
+	}, logger)
+
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
+	r.Use(observe.Middleware("attackpath-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(60 * time.Second)) // longer timeout: BFS can be slow
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"attackpath-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
+		r.Use(authmw.RequirePermissionByMethod("attack_paths"))
 		attackH.RegisterRoutes(r)
 	})
 
@@ -94,42 +170,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("attackpath-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

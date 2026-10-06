@@ -1,0 +1,49 @@
+# CRP-C2-0001 — Contact avec un indicateur de compromission connu
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-C2-0001
+title: Contact avec un indicateur de compromission connu
+description: Une valeur de l'événement figure au renseignement du tenant, quel que soit le
+  champ.
+category: Network
+severity: CRITICAL
+mitre:
+  tactic: TA0011
+  technique: T1071.001
+conditions:
+  field_matches:
+  - op: exists
+    field: ioc_matched
+    value: ''
+actions:
+- type: notify
+- type: block_ip
+dedup_window_s: 300
+rationale: >-
+  La détection la plus directe que la plateforme sache faire : le renseignement du client
+  a nommé cette valeur, et elle vient d'apparaître dans son parc.
+false_positives: >-
+  Un indicateur périmé ou trop large — une adresse d'hébergeur mutualisé, un domaine de CDN.
+  La qualité du flux est la seule vraie défense ; le champ ioc_matched nomme l'indicateur
+  pour qu'on puisse le retirer.
+response: >-
+  Confirmer l'indicateur dans le renseignement, puis remonter à l'hôte source et à ce qu'il
+  faisait.
+frameworks:
+- DORA
+- SWIFTCSP
+- ISO27001
+controls:
+- DORA-10.3
+- CSCF-6.4
+- A.5.7
+requires: []
+enabled_by_default: true
+tags:
+- renseignement
+- standard

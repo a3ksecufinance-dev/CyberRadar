@@ -99,6 +99,16 @@ func (s *SIEMService) GetAlertStats(ctx context.Context, tenantID uuid.UUID) (*m
 	if err != nil {
 		return nil, apierrors.Internal("alert stats", err)
 	}
+
+	// The counts above come from ClickHouse, which knows nothing about an
+	// alert's status: that lives in PostgreSQL. Without this the open count
+	// was always zero.
+	open, err := s.caseRepo.CountOpenAlerts(ctx, tenantID)
+	if err != nil {
+		return nil, apierrors.Internal("open alert count", err)
+	}
+	stats.Open = open
+
 	return stats, nil
 }
 

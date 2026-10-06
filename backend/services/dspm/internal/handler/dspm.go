@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
+	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/dspm/internal/model"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -102,34 +105,15 @@ func (h *DSPMHandler) Routes() chi.Router {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, bool) {
-	raw, ok := r.Context().Value("tenant_id").(string)
-	if !ok || raw == "" {
-		return uuid.Nil, false
-	}
-	id, err := uuid.Parse(raw)
-	return id, err == nil
+	id := authctx.TenantID(r.Context())
+	return id, id != uuid.Nil
 }
 
 func userFromCtx(r *http.Request) *uuid.UUID {
-	raw, ok := r.Context().Value("user_id").(string)
-	if !ok || raw == "" {
-		return nil
+	if id := authctx.UserID(r.Context()); id != uuid.Nil {
+		return &id
 	}
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return nil
-	}
-	return &id
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	return nil
 }
 
 // ─── Data Stores ──────────────────────────────────────────────────────────────
@@ -137,51 +121,51 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func (h *DSPMHandler) CreateDataStore(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	var req model.CreateDataStoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	ds, err := h.svc.CreateDataStore(r.Context(), tenantID, req, userFromCtx(r))
 	if err != nil {
 		h.logger.Error().Err(err).Msg("CreateDataStore")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusCreated, ds)
+	response.Created(w, ds)
 }
 
 func (h *DSPMHandler) GetDataStore(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid store id")
+		response.BadRequest(w, "INVALID_ID", "invalid store id")
 		return
 	}
 	ds, err := h.svc.GetDataStore(r.Context(), tenantID, storeID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetDataStore")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if ds == nil {
-		writeError(w, http.StatusNotFound, "data store not found")
+		response.NotFound(w, "data store not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, ds)
+	response.OK(w, ds)
 }
 
 func (h *DSPMHandler) ListDataStores(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	q := r.URL.Query()
@@ -210,55 +194,55 @@ func (h *DSPMHandler) ListDataStores(w http.ResponseWriter, r *http.Request) {
 	stores, total, err := h.svc.ListDataStores(r.Context(), tenantID, f)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ListDataStores")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": stores, "total": total})
+	response.OKWithMeta(w, stores, &response.Meta{Total: int64(total)})
 }
 
 func (h *DSPMHandler) UpdateDataStore(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid store id")
+		response.BadRequest(w, "INVALID_ID", "invalid store id")
 		return
 	}
 	var req model.UpdateDataStoreRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	ds, err := h.svc.UpdateDataStore(r.Context(), tenantID, storeID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("UpdateDataStore")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if ds == nil {
-		writeError(w, http.StatusNotFound, "data store not found")
+		response.NotFound(w, "data store not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, ds)
+	response.OK(w, ds)
 }
 
 func (h *DSPMHandler) DeleteDataStore(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid store id")
+		response.BadRequest(w, "INVALID_ID", "invalid store id")
 		return
 	}
 	if err := h.svc.DeleteDataStore(r.Context(), tenantID, storeID); err != nil {
 		h.logger.Error().Err(err).Msg("DeleteDataStore")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -269,100 +253,100 @@ func (h *DSPMHandler) DeleteDataStore(w http.ResponseWriter, r *http.Request) {
 func (h *DSPMHandler) CreateScanJob(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid store id")
+		response.BadRequest(w, "INVALID_ID", "invalid store id")
 		return
 	}
 	var req model.CreateScanJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	req.DataStoreID = storeID
 	job, err := h.svc.CreateScanJob(r.Context(), tenantID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("CreateScanJob")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusCreated, job)
+	response.Created(w, job)
 }
 
 func (h *DSPMHandler) ListScanJobs(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	storeID, err := uuid.Parse(chi.URLParam(r, "storeID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid store id")
+		response.BadRequest(w, "INVALID_ID", "invalid store id")
 		return
 	}
 	jobs, err := h.svc.ListScanJobs(r.Context(), tenantID, storeID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ListScanJobs")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": jobs})
+	response.OKWithMeta(w, jobs, &response.Meta{Total: int64(len(jobs))})
 }
 
 func (h *DSPMHandler) GetScanJob(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	jobID, err := uuid.Parse(chi.URLParam(r, "jobID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid job id")
+		response.BadRequest(w, "INVALID_ID", "invalid job id")
 		return
 	}
 	job, err := h.svc.GetScanJob(r.Context(), tenantID, jobID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetScanJob")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if job == nil {
-		writeError(w, http.StatusNotFound, "scan job not found")
+		response.NotFound(w, "scan job not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	response.OK(w, job)
 }
 
 func (h *DSPMHandler) UpdateScanJob(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	jobID, err := uuid.Parse(chi.URLParam(r, "jobID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid job id")
+		response.BadRequest(w, "INVALID_ID", "invalid job id")
 		return
 	}
 	var req model.UpdateScanJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	job, err := h.svc.UpdateScanJob(r.Context(), tenantID, jobID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("UpdateScanJob")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if job == nil {
-		writeError(w, http.StatusNotFound, "scan job not found")
+		response.NotFound(w, "scan job not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, job)
+	response.OK(w, job)
 }
 
 // ─── Findings ─────────────────────────────────────────────────────────────────
@@ -370,51 +354,51 @@ func (h *DSPMHandler) UpdateScanJob(w http.ResponseWriter, r *http.Request) {
 func (h *DSPMHandler) CreateFinding(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	var req model.CreateFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	f, err := h.svc.CreateFinding(r.Context(), tenantID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("CreateFinding")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusCreated, f)
+	response.Created(w, f)
 }
 
 func (h *DSPMHandler) GetFinding(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	findingID, err := uuid.Parse(chi.URLParam(r, "findingID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid finding id")
+		response.BadRequest(w, "INVALID_ID", "invalid finding id")
 		return
 	}
 	f, err := h.svc.GetFinding(r.Context(), tenantID, findingID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetFinding")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if f == nil {
-		writeError(w, http.StatusNotFound, "finding not found")
+		response.NotFound(w, "finding not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, f)
+	response.OK(w, f)
 }
 
 func (h *DSPMHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	q := r.URL.Query()
@@ -441,39 +425,39 @@ func (h *DSPMHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 	findings, total, err := h.svc.ListFindings(r.Context(), tenantID, filter)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ListFindings")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": findings, "total": total})
+	response.OKWithMeta(w, findings, &response.Meta{Total: int64(total)})
 }
 
 func (h *DSPMHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	findingID, err := uuid.Parse(chi.URLParam(r, "findingID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid finding id")
+		response.BadRequest(w, "INVALID_ID", "invalid finding id")
 		return
 	}
 	var req model.UpdateFindingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	f, err := h.svc.UpdateFinding(r.Context(), tenantID, findingID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("UpdateFinding")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if f == nil {
-		writeError(w, http.StatusNotFound, "finding not found")
+		response.NotFound(w, "finding not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, f)
+	response.OK(w, f)
 }
 
 // ─── Policies ─────────────────────────────────────────────────────────────────
@@ -481,105 +465,105 @@ func (h *DSPMHandler) UpdateFinding(w http.ResponseWriter, r *http.Request) {
 func (h *DSPMHandler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	var req model.CreatePolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	p, err := h.svc.CreatePolicy(r.Context(), tenantID, req, userFromCtx(r))
 	if err != nil {
 		h.logger.Error().Err(err).Msg("CreatePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusCreated, p)
+	response.Created(w, p)
 }
 
 func (h *DSPMHandler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	p, err := h.svc.GetPolicy(r.Context(), tenantID, policyID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetPolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if p == nil {
-		writeError(w, http.StatusNotFound, "policy not found")
+		response.NotFound(w, "policy not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	response.OK(w, p)
 }
 
 func (h *DSPMHandler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	policies, err := h.svc.ListPolicies(r.Context(), tenantID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ListPolicies")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": policies})
+	response.OKWithMeta(w, policies, &response.Meta{Total: int64(len(policies))})
 }
 
 func (h *DSPMHandler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	var req model.UpdatePolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	p, err := h.svc.UpdatePolicy(r.Context(), tenantID, policyID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("UpdatePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if p == nil {
-		writeError(w, http.StatusNotFound, "policy not found")
+		response.NotFound(w, "policy not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	response.OK(w, p)
 }
 
 func (h *DSPMHandler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	policyID, err := uuid.Parse(chi.URLParam(r, "policyID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
+		response.BadRequest(w, "INVALID_ID", "invalid policy id")
 		return
 	}
 	if err := h.svc.DeletePolicy(r.Context(), tenantID, policyID); err != nil {
 		h.logger.Error().Err(err).Msg("DeletePolicy")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -590,94 +574,94 @@ func (h *DSPMHandler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 func (h *DSPMHandler) CreateRemediationItem(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	var req model.CreateRemediationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	item, err := h.svc.CreateRemediationItem(r.Context(), tenantID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("CreateRemediationItem")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusCreated, item)
+	response.Created(w, item)
 }
 
 func (h *DSPMHandler) ListRemediationItems(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	findingID, err := uuid.Parse(chi.URLParam(r, "findingID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid finding id")
+		response.BadRequest(w, "INVALID_ID", "invalid finding id")
 		return
 	}
 	items, err := h.svc.ListRemediationItems(r.Context(), tenantID, findingID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("ListRemediationItems")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	response.OKWithMeta(w, items, &response.Meta{Total: int64(len(items))})
 }
 
 func (h *DSPMHandler) GetRemediationItem(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	itemID, err := uuid.Parse(chi.URLParam(r, "itemID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid item id")
+		response.BadRequest(w, "INVALID_ID", "invalid item id")
 		return
 	}
 	item, err := h.svc.GetRemediationItem(r.Context(), tenantID, itemID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetRemediationItem")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if item == nil {
-		writeError(w, http.StatusNotFound, "remediation item not found")
+		response.NotFound(w, "remediation item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	response.OK(w, item)
 }
 
 func (h *DSPMHandler) UpdateRemediationItem(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	itemID, err := uuid.Parse(chi.URLParam(r, "itemID"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid item id")
+		response.BadRequest(w, "INVALID_ID", "invalid item id")
 		return
 	}
 	var req model.UpdateRemediationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid body")
+		response.BadRequest(w, "INVALID_VALUE", "invalid body")
 		return
 	}
 	item, err := h.svc.UpdateRemediationItem(r.Context(), tenantID, itemID, req)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("UpdateRemediationItem")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
 	if item == nil {
-		writeError(w, http.StatusNotFound, "remediation item not found")
+		response.NotFound(w, "remediation item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	response.OK(w, item)
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -685,14 +669,14 @@ func (h *DSPMHandler) UpdateRemediationItem(w http.ResponseWriter, r *http.Reque
 func (h *DSPMHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "missing tenant")
+		response.Unauthorized(w, "missing tenant")
 		return
 	}
 	stats, err := h.svc.GetStats(r.Context(), tenantID)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("GetStats")
-		writeError(w, http.StatusInternalServerError, err.Error())
+		httperr.WriteLogged(w, err, h.logger)
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	response.OK(w, stats)
 }

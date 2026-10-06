@@ -7,22 +7,34 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/event"
+	"github.com/cyberradar/platform/internal/pkg/iocindex"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/pipeline/internal/enricher"
 	"github.com/cyberradar/platform/services/pipeline/internal/writer"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
+// IOCMatcher answers which known indicators an event touches.
+//
+// An interface so the processor can be tested without a database, and so a
+// deployment that has not been given one is a deliberate, visible choice
+// rather than a silent nil.
+type IOCMatcher interface {
+	Match(tenantID uuid.UUID, ev *event.NormalizedEvent) []iocindex.Hit
+}
+
 // Processor consumes normalized events, enriches them, and writes to ClickHouse.
 type Processor struct {
-	geo            *enricher.GeoEnricher
-	threat         *enricher.ThreatEnricher
-	chWriter       *writer.ClickHouseWriter
-	enrichedPub    *pkgkafka.Producer // publishes to crp.events.enriched
-	alertPub       *pkgkafka.Producer // publishes to crp.events.alerts
-	dlqPub         *pkgkafka.Producer // publishes to crp.events.dlq
-	logger         zerolog.Logger
-	flushInterval  time.Duration
+	geo           *enricher.GeoEnricher
+	threat        *enricher.ThreatEnricher
+	iocs          IOCMatcher
+	chWriter      *writer.ClickHouseWriter
+	enrichedPub   *pkgkafka.Producer // publishes to crp.events.enriched
+	alertPub      *pkgkafka.Producer // publishes to crp.events.alerts
+	dlqPub        *pkgkafka.Producer // publishes to crp.events.dlq
+	logger        zerolog.Logger
+	flushInterval time.Duration
 }
 
 // Config holds Processor configuration.
@@ -34,6 +46,7 @@ type Config struct {
 func NewProcessor(
 	geo *enricher.GeoEnricher,
 	threat *enricher.ThreatEnricher,
+	iocs IOCMatcher,
 	chWriter *writer.ClickHouseWriter,
 	enrichedPub *pkgkafka.Producer,
 	alertPub *pkgkafka.Producer,
@@ -48,6 +61,7 @@ func NewProcessor(
 	return &Processor{
 		geo:           geo,
 		threat:        threat,
+		iocs:          iocs,
 		chWriter:      chWriter,
 		enrichedPub:   enrichedPub,
 		alertPub:      alertPub,
@@ -76,8 +90,21 @@ func (p *Processor) Handle(ctx context.Context, msg pkgkafka.Message) error {
 		}
 	}
 
+	// ── Indicator matching ───────────────────────────────────────────────────
+	// Before the rule engine, not beside it. The threat intelligence service
+	// also matches indicators, from its own consumer of the enriched topic —
+	// but it runs alongside the rule engine, so a match it found could never
+	// influence a detection. This is the same question asked early enough to
+	// matter.
+	var hits []iocindex.Hit
+	if p.iocs != nil {
+		if tenantID, err := uuid.Parse(e.TenantID); err == nil {
+			hits = p.iocs.Match(tenantID, &e)
+		}
+	}
+
 	// ── Threat enrichment ────────────────────────────────────────────────────
-	threat := p.threat.Enrich(&e)
+	threat := p.threat.Enrich(&e, hits)
 	e.ThreatScore = threat.ThreatScore
 	e.RiskScore = threat.RiskScore
 	e.IOCMatched = threat.IOCMatched

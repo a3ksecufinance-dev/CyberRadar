@@ -11,10 +11,22 @@ vendor/
 *.test
 *.out
 
+# Compiled service binaries — `make build` writes 1.1 GB here
+backend/bin/
+
+# Redis snapshot, written wherever redis-server is started
+*.rdb
+
 # Env
 .env
 .env.*
 !.env.example
+
+# Generated keys and certificates — never commit private key material
+backend/deployments/jwt/
+backend/deployments/certs/
+*.pem
+*.key
 
 # OS
 .DS_Store
@@ -29,3 +41,13 @@ Thumbs.db
 *.log
 ~$*.docx
 *.docx
+
+# Local install (backend/scripts/dev-local.sh): pids, logs, and the data
+# directories of the infrastructure it starts.
+backend/.dev-local/
+
+# Content releases are built artefacts, published separately from the source.
+# The signing key is already covered by *.key; the public half is not secret but
+# a deployment's trust store is its own decision, not the repository's.
+*.crpack
+backend/deployments/content/

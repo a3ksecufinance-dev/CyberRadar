@@ -16,12 +16,24 @@ import (
 // CollectorService handles event ingestion and publishing.
 type CollectorService struct {
 	producer *kafka.Producer
+	dlq      *kafka.Producer
 	logger   zerolog.Logger
 }
 
 // NewCollectorService creates a CollectorService.
-func NewCollectorService(producer *kafka.Producer, logger zerolog.Logger) *CollectorService {
-	return &CollectorService{producer: producer, logger: logger}
+//
+// The two producers write to different topics and must not be the same one. An
+// event that failed to normalize goes to the dead-letter topic; publishing it
+// to the normalized topic instead would hand the pipeline worker a DLQMessage
+// where it expects a NormalizedEvent, and json.Unmarshal would accept it —
+// silently injecting an event with no id, no tenant and no category for every
+// malformed line a connector sends.
+//
+// dlq may be nil, in which case a failure to normalize is logged and dropped
+// rather than published anywhere. That is a deliberate option for a deployment
+// without a dead-letter topic, not a default: cmd/server passes one.
+func NewCollectorService(producer, dlq *kafka.Producer, logger zerolog.Logger) *CollectorService {
+	return &CollectorService{producer: producer, dlq: dlq, logger: logger}
 }
 
 // Ingest normalizes raw events and publishes them to Kafka.
@@ -91,6 +103,12 @@ func (s *CollectorService) Heartbeat(ctx context.Context, tenantID string, hb *m
 }
 
 func (s *CollectorService) publishDLQ(ctx context.Context, raw string, tenantID string, cause error) {
+	if s.dlq == nil {
+		s.logger.Warn().
+			Str("tenant_id", tenantID).
+			Msg("dlq_not_configured_event_dropped")
+		return
+	}
 	dlq := event.DLQMessage{
 		OriginalTopic: event.TopicNormalized,
 		Payload:       []byte(raw),
@@ -98,7 +116,7 @@ func (s *CollectorService) publishDLQ(ctx context.Context, raw string, tenantID 
 		FailedAt:      time.Now().UTC(),
 		TenantID:      tenantID,
 	}
-	if err := s.producer.Publish(ctx, tenantID, dlq); err != nil {
+	if err := s.dlq.Publish(ctx, tenantID, dlq); err != nil {
 		s.logger.Error().Err(err).Msg("dlq_publish_failed")
 	}
 }

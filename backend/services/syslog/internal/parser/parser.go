@@ -13,10 +13,10 @@ import (
 type SyslogFormat string
 
 const (
-	FormatRFC3164    SyslogFormat = "rfc3164"
-	FormatRFC5424    SyslogFormat = "rfc5424"
-	FormatCEFSyslog  SyslogFormat = "cef_syslog"
-	FormatUnknown    SyslogFormat = "unknown"
+	FormatRFC3164   SyslogFormat = "rfc3164"
+	FormatRFC5424   SyslogFormat = "rfc5424"
+	FormatCEFSyslog SyslogFormat = "cef_syslog"
+	FormatUnknown   SyslogFormat = "unknown"
 )
 
 // Syslog severity values (RFC 5424 Table 2).
@@ -33,14 +33,14 @@ const (
 
 // Syslog facility codes (RFC 5424 Table 1, partial).
 const (
-	FacKernel  = 0
-	FacUser    = 1
-	FacMail    = 2
-	FacDaemon  = 3
-	FacAuth    = 4
-	FacSyslog  = 5
+	FacKernel   = 0
+	FacUser     = 1
+	FacMail     = 2
+	FacDaemon   = 3
+	FacAuth     = 4
+	FacSyslog   = 5
 	FacAuthpriv = 10
-	FacLocal0  = 16
+	FacLocal0   = 16
 )
 
 // Parsed is the output of the syslog parser — format-agnostic intermediate.

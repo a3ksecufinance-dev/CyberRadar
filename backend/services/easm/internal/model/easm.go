@@ -21,14 +21,14 @@ const (
 // ─── Exposure types ───────────────────────────────────────────────────────────
 
 const (
-	ExposureTypeOpenPort        = "open_port"
-	ExposureTypeExpiredTLS      = "expired_tls"
-	ExposureTypeWeakCipher      = "weak_cipher"
-	ExposureTypeHTTPRedirect    = "http_redirect"
-	ExposureTypeDanglingDNS     = "dangling_dns"
-	ExposureTypeAdminInterface  = "admin_interface"
-	ExposureTypeAPIEndpoint     = "api_endpoint"
-	ExposureTypeSensitivePath   = "sensitive_path"
+	ExposureTypeOpenPort       = "open_port"
+	ExposureTypeExpiredTLS     = "expired_tls"
+	ExposureTypeWeakCipher     = "weak_cipher"
+	ExposureTypeHTTPRedirect   = "http_redirect"
+	ExposureTypeDanglingDNS    = "dangling_dns"
+	ExposureTypeAdminInterface = "admin_interface"
+	ExposureTypeAPIEndpoint    = "api_endpoint"
+	ExposureTypeSensitivePath  = "sensitive_path"
 )
 
 // ─── Severities ───────────────────────────────────────────────────────────────
@@ -54,13 +54,13 @@ const (
 // ─── Brand alert types ────────────────────────────────────────────────────────
 
 const (
-	AlertTypePhishingDomain  = "phishing_domain"
-	AlertTypeTyposquatting   = "typosquatting"
-	AlertTypeImpersonation   = "impersonation"
-	AlertTypeFakeApp         = "fake_app"
-	AlertTypeSocialMedia     = "social_media"
-	AlertTypeDarkWebMention  = "dark_web_mention"
-	AlertTypePasteMention    = "paste_mention"
+	AlertTypePhishingDomain = "phishing_domain"
+	AlertTypeTyposquatting  = "typosquatting"
+	AlertTypeImpersonation  = "impersonation"
+	AlertTypeFakeApp        = "fake_app"
+	AlertTypeSocialMedia    = "social_media"
+	AlertTypeDarkWebMention = "dark_web_mention"
+	AlertTypePasteMention   = "paste_mention"
 )
 
 // ─── Brand alert statuses ─────────────────────────────────────────────────────
@@ -77,20 +77,20 @@ const (
 // ─── Core structs ─────────────────────────────────────────────────────────────
 
 type EASMAsset struct {
-	ID            uuid.UUID         `json:"id"`
-	TenantID      uuid.UUID         `json:"tenant_id"`
-	AssetType     string            `json:"asset_type"`
-	Value         string            `json:"value"`
-	Source        string            `json:"source"`
-	Status        string            `json:"status"`
-	RiskScore     int               `json:"risk_score"`
-	Tags          []string          `json:"tags"`
-	FirstSeenAt   time.Time         `json:"first_seen_at"`
-	LastSeenAt    time.Time         `json:"last_seen_at"`
-	Metadata      map[string]any    `json:"metadata"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
-	ExposureCount int               `json:"exposure_count,omitempty"`
+	ID            uuid.UUID      `json:"id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	AssetType     string         `json:"asset_type"`
+	Value         string         `json:"value"`
+	Source        string         `json:"source"`
+	Status        string         `json:"status"`
+	RiskScore     int            `json:"risk_score"`
+	Tags          []string       `json:"tags"`
+	FirstSeenAt   time.Time      `json:"first_seen_at"`
+	LastSeenAt    time.Time      `json:"last_seen_at"`
+	Metadata      map[string]any `json:"metadata"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	ExposureCount int            `json:"exposure_count,omitempty"`
 }
 
 type EASMExposure struct {
@@ -139,44 +139,44 @@ type EASMBrandAlert struct {
 }
 
 type EASMScan struct {
-	ID              uuid.UUID  `json:"id"`
-	TenantID        uuid.UUID  `json:"tenant_id"`
-	ScanType        string     `json:"scan_type"`
-	Status          string     `json:"status"`
-	Targets         []string   `json:"targets"`
-	AssetsFound     int        `json:"assets_found"`
-	ExposuresFound  int        `json:"exposures_found"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-	ErrorText       string     `json:"error_text,omitempty"`
-	CreatedBy       *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID             uuid.UUID  `json:"id"`
+	TenantID       uuid.UUID  `json:"tenant_id"`
+	ScanType       string     `json:"scan_type"`
+	Status         string     `json:"status"`
+	Targets        []string   `json:"targets"`
+	AssetsFound    int        `json:"assets_found"`
+	ExposuresFound int        `json:"exposures_found"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	ErrorText      string     `json:"error_text,omitempty"`
+	CreatedBy      *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 type ExternalRiskScore struct {
-	TenantID           uuid.UUID `json:"tenant_id"`
-	OverallScore       int       `json:"overall_score"`
-	AssetScore         int       `json:"asset_score"`
-	ExposureScore      int       `json:"exposure_score"`
-	LeakScore          int       `json:"leak_score"`
-	BrandScore         int       `json:"brand_score"`
-	CriticalExposures  int       `json:"critical_exposures"`
-	HighExposures      int       `json:"high_exposures"`
-	ActiveLeaks        int       `json:"active_leaks"`
-	ActiveAlerts       int       `json:"active_alerts"`
-	ComputedAt         time.Time `json:"computed_at"`
+	TenantID          uuid.UUID `json:"tenant_id"`
+	OverallScore      int       `json:"overall_score"`
+	AssetScore        int       `json:"asset_score"`
+	ExposureScore     int       `json:"exposure_score"`
+	LeakScore         int       `json:"leak_score"`
+	BrandScore        int       `json:"brand_score"`
+	CriticalExposures int       `json:"critical_exposures"`
+	HighExposures     int       `json:"high_exposures"`
+	ActiveLeaks       int       `json:"active_leaks"`
+	ActiveAlerts      int       `json:"active_alerts"`
+	ComputedAt        time.Time `json:"computed_at"`
 }
 
 type EASMStats struct {
-	TotalAssets          int                `json:"total_assets"`
-	ActiveAssets         int                `json:"active_assets"`
-	TotalExposures       int                `json:"total_exposures"`
-	RemediatedExposures  int                `json:"remediated_exposures"`
-	OpenLeaks            int                `json:"open_leaks"`
-	OpenAlerts           int                `json:"open_alerts"`
-	RiskScore            ExternalRiskScore  `json:"risk_score"`
-	ScansByStatus        map[string]int     `json:"scans_by_status"`
-	ExposuresBySeverity  map[string]int     `json:"exposures_by_severity"`
+	TotalAssets         int               `json:"total_assets"`
+	ActiveAssets        int               `json:"active_assets"`
+	TotalExposures      int               `json:"total_exposures"`
+	RemediatedExposures int               `json:"remediated_exposures"`
+	OpenLeaks           int               `json:"open_leaks"`
+	OpenAlerts          int               `json:"open_alerts"`
+	RiskScore           ExternalRiskScore `json:"risk_score"`
+	ScansByStatus       map[string]int    `json:"scans_by_status"`
+	ExposuresBySeverity map[string]int    `json:"exposures_by_severity"`
 }
 
 // ─── Request / filter models ──────────────────────────────────────────────────

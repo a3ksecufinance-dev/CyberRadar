@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cyberradar/platform/internal/pkg/authctx"
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/iga/internal/model"
 	"github.com/cyberradar/platform/services/iga/internal/service"
@@ -65,40 +67,15 @@ func (h *IGAHandler) RegisterRoutes(r chi.Router) {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func tenantFromCtx(r *http.Request) (uuid.UUID, error) {
-	raw, _ := r.Context().Value("tenant_id").(string)
-	return uuid.Parse(raw)
+	id := authctx.TenantID(r.Context())
+	if id == uuid.Nil {
+		return uuid.Nil, apierrors.Forbidden("no tenant in context")
+	}
+	return id, nil
 }
 
 func userFromCtx(r *http.Request) uuid.UUID {
-	raw, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(raw)
-	return id
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, err error) {
-	de, ok := err.(*apierrors.DomainError)
-	if !ok {
-		response.InternalError(w)
-		return
-	}
-	switch de.Kind {
-	case apierrors.KindNotFound:
-		response.NotFound(w, de.Message)
-	case apierrors.KindForbidden:
-		response.Forbidden(w, de.Message)
-	case apierrors.KindUnauth:
-		response.Unauthorized(w, de.Message)
-	case apierrors.KindBadInput, apierrors.KindConflict:
-		response.BadRequest(w, string(de.Kind), de.Message)
-	default:
-		response.InternalError(w)
-	}
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(r *http.Request, param string) (uuid.UUID, error) {
@@ -119,34 +96,34 @@ func queryInt(r *http.Request, key, def string) int {
 func (h *IGAHandler) CreateRole(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	role, err := h.svc.CreateRole(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, role)
+	response.Created(w, role)
 }
 
 func (h *IGAHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	activeOnly := r.URL.Query().Get("active_only") != "false"
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -158,53 +135,53 @@ func (h *IGAHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 		r.URL.Query().Get("role_type"), r.URL.Query().Get("risk_level"),
 		activeOnly, page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"roles": roles, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, roles, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *IGAHandler) GetRole(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	roleID, err := parseUUID(r, "roleID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid role id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid role id"))
 		return
 	}
 	role, err := h.svc.GetRole(r.Context(), tenantID, roleID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, role)
+	response.OK(w, role)
 }
 
 func (h *IGAHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	roleID, err := parseUUID(r, "roleID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid role id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid role id"))
 		return
 	}
 	var req model.UpdateRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	role, err := h.svc.UpdateRole(r.Context(), tenantID, roleID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, role)
+	response.OK(w, role)
 }
 
 // ─── Assignments ──────────────────────────────────────────────────────────────
@@ -212,30 +189,30 @@ func (h *IGAHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 func (h *IGAHandler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.AssignRoleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	assignment, err := h.svc.AssignRole(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, assignment)
+	response.Created(w, assignment)
 }
 
 func (h *IGAHandler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListAssignmentsFilter{
@@ -261,53 +238,53 @@ func (h *IGAHandler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 	}
 	assignments, total, err := h.svc.ListAssignments(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assignments": assignments, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, assignments, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *IGAHandler) GetAssignment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	assignmentID, err := parseUUID(r, "assignmentID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid assignment id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid assignment id"))
 		return
 	}
 	assignment, err := h.svc.GetAssignment(r.Context(), tenantID, assignmentID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, assignment)
+	response.OK(w, assignment)
 }
 
 func (h *IGAHandler) UpdateAssignment(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	assignmentID, err := parseUUID(r, "assignmentID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid assignment id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid assignment id"))
 		return
 	}
 	var req model.UpdateAssignmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	assignment, err := h.svc.UpdateAssignment(r.Context(), tenantID, assignmentID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, assignment)
+	response.OK(w, assignment)
 }
 
 // ─── Campaigns ────────────────────────────────────────────────────────────────
@@ -315,78 +292,78 @@ func (h *IGAHandler) UpdateAssignment(w http.ResponseWriter, r *http.Request) {
 func (h *IGAHandler) CreateCampaign(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateCampaignRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	c, err := h.svc.CreateCampaign(r.Context(), tenantID, &req, userFromCtx(r))
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, c)
+	response.Created(w, c)
 }
 
 func (h *IGAHandler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "20")
 	campaigns, total, err := h.svc.ListCampaigns(r.Context(), tenantID, r.URL.Query().Get("status"), page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"campaigns": campaigns, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, campaigns, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *IGAHandler) GetCampaign(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	campaignID, err := parseUUID(r, "campaignID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid campaign id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid campaign id"))
 		return
 	}
 	c, err := h.svc.GetCampaign(r.Context(), tenantID, campaignID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	response.OK(w, c)
 }
 
 func (h *IGAHandler) LaunchCampaign(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	campaignID, err := parseUUID(r, "campaignID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid campaign id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid campaign id"))
 		return
 	}
 	c, err := h.svc.LaunchCampaign(r.Context(), tenantID, campaignID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	response.OK(w, c)
 }
 
 // ─── Review Items ─────────────────────────────────────────────────────────────
@@ -394,7 +371,7 @@ func (h *IGAHandler) LaunchCampaign(w http.ResponseWriter, r *http.Request) {
 func (h *IGAHandler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	f := model.ListReviewItemsFilter{
@@ -420,38 +397,38 @@ func (h *IGAHandler) ListReviewItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, total, err := h.svc.ListReviewItems(r.Context(), tenantID, f)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "page": f.Page, "page_size": f.PageSize})
+	response.OKWithMeta(w, items, &response.Meta{Total: int64(total), Page: f.Page, Limit: f.PageSize})
 }
 
 func (h *IGAHandler) SubmitDecision(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	itemID, err := parseUUID(r, "itemID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid item id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid item id"))
 		return
 	}
 	var req model.ReviewDecisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	item, err := h.svc.SubmitDecision(r.Context(), tenantID, itemID, userFromCtx(r), &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	response.OK(w, item)
 }
 
 // ─── SoD ──────────────────────────────────────────────────────────────────────
@@ -459,61 +436,61 @@ func (h *IGAHandler) SubmitDecision(w http.ResponseWriter, r *http.Request) {
 func (h *IGAHandler) CreateSoDPolicy(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	var req model.CreateSoDPolicyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	policy, err := h.svc.CreateSoDPolicy(r.Context(), tenantID, &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, policy)
+	response.Created(w, policy)
 }
 
 func (h *IGAHandler) ListSoDPolicies(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	policies, err := h.svc.ListSoDPolicies(r.Context(), tenantID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"policies": policies, "total": len(policies)})
+	response.OKWithMeta(w, policies, &response.Meta{Total: int64(len(policies))})
 }
 
 func (h *IGAHandler) RunSoDScan(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	count, err := h.svc.RunSoDScan(r.Context(), tenantID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"violations_detected": count})
+	response.OK(w, map[string]any{"violations_detected": count})
 }
 
 func (h *IGAHandler) ListSoDViolations(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
-	page     := queryInt(r, "page", "1")
+	page := queryInt(r, "page", "1")
 	pageSize := queryInt(r, "page_size", "50")
 	if page < 1 {
 		page = 1
@@ -524,38 +501,38 @@ func (h *IGAHandler) ListSoDViolations(w http.ResponseWriter, r *http.Request) {
 	violations, total, err := h.svc.ListSoDViolations(r.Context(), tenantID,
 		r.URL.Query().Get("status"), r.URL.Query().Get("severity"), page, pageSize)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"violations": violations, "total": total, "page": page, "page_size": pageSize})
+	response.OKWithMeta(w, violations, &response.Meta{Total: int64(total), Page: page, Limit: pageSize})
 }
 
 func (h *IGAHandler) UpdateViolation(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	violationID, err := parseUUID(r, "violationID")
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, "invalid violation id"))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, "invalid violation id"))
 		return
 	}
 	var req model.UpdateViolationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
+		httperr.Write(w, apierrors.Wrap(apierrors.KindBadInput, "invalid request body", err))
 		return
 	}
 	if err := h.validate.Struct(req); err != nil {
-		writeError(w, apierrors.New(apierrors.KindBadInput, err.Error()))
+		httperr.Write(w, apierrors.New(apierrors.KindBadInput, err.Error()))
 		return
 	}
 	v, err := h.svc.UpdateViolation(r.Context(), tenantID, violationID, userFromCtx(r), &req)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, v)
+	response.OK(w, v)
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -563,13 +540,13 @@ func (h *IGAHandler) UpdateViolation(w http.ResponseWriter, r *http.Request) {
 func (h *IGAHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := tenantFromCtx(r)
 	if err != nil {
-		writeError(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
+		httperr.Write(w, apierrors.New(apierrors.KindUnauth, "invalid tenant"))
 		return
 	}
 	stats, err := h.svc.Stats(r.Context(), tenantID)
 	if err != nil {
-		writeError(w, err)
+		httperr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, stats)
+	response.OK(w, stats)
 }

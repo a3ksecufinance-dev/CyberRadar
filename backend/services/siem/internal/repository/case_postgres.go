@@ -375,3 +375,22 @@ func scanCase(row scannable) (*model.Case, error) {
 	}
 	return c, nil
 }
+
+// CountOpenAlerts counts the alerts still awaiting work.
+//
+// ClickHouse holds the alert rows; PostgreSQL holds their mutable status in
+// alert_metadata, and the two are joined by alert_id. The stats query only
+// ever asked ClickHouse, so AlertStats.Open stayed at zero however many alerts
+// were open — on the SIEM's own page and on the platform dashboard, which
+// reads this number as open_alerts.
+//
+// An alert with no metadata row has never been triaged; the column defaults to
+// 'open' and so does the absence of the row.
+func (r *CaseRepository) CountOpenAlerts(ctx context.Context, tenantID uuid.UUID) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM alert_metadata
+		WHERE tenant_id = $1 AND status IN ('open', 'acknowledged', 'in_progress')`,
+		tenantID).Scan(&n)
+	return n, err
+}

@@ -1,0 +1,668 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    name: Backend — build, vet, test
+    runs-on: ubuntu-latest
+    # Tests that talk to a real dependency skip when none is reachable, and a
+    # skip is indistinguishable from a pass in CI output. These services, plus
+    # the *_TEST_* variables below, turn those skips into failures — so the
+    # shared detection counters and the PAM activity windows cannot go green by
+    # never running.
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      clickhouse:
+        # The dashboard's KPI store. Its repository was never exercised against
+        # a real server, and every read in it was broken by a driver binding
+        # rule no unit test could have caught.
+        image: clickhouse/clickhouse-server:24.3-alpine
+        env:
+          # Without this the entrypoint reports "neither CLICKHOUSE_USER nor
+          # CLICKHOUSE_PASSWORD is set, disabling network access for user
+          # 'default'" and every connection from outside the container is
+          # refused with "Authentication failed". The health check below ran
+          # inside the container, over localhost, so it passed — the service
+          # reported healthy while being unusable, and the migration step
+          # failed on its first file with code 516.
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        ports: ["9000:9000", "8123:8123"]
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      neo4j:
+        # The attack graph's mirror. Its Cypher, its tenant filtering and the
+        # claim that the traversal returns the same paths from either store are
+        # only worth anything run against a real server.
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/crp_password_dev
+        ports: ["7687:7687", "7474:7474"]
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s --health-timeout 5s --health-retries 20
+      kafka:
+        # The collector's ingestion path. What its tests prove is where a
+        # message lands — a normalized event on one topic, a dead letter on
+        # another — and no fake producer can prove that: the service published
+        # its dead letters onto the normalized topic until a test against a
+        # real broker said so.
+        #
+        # Same image and same KRaft settings as deployments/docker-compose.yml,
+        # which is the configuration a developer already runs, with one change:
+        # the quorum voter is localhost rather than the compose service name,
+        # because a single-node controller talks to itself and must not depend
+        # on resolving its own hostname.
+        image: confluentinc/cp-kafka:7.6.0
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          # A KRaft cluster id is a 16-byte UUID in base64, not a label:
+          # cp-kafka decodes it and refuses to start on anything else.
+          # "crp-kafka-cluster-ci" decoded to 15 bytes, so the broker
+          # never came up and the whole job failed on its health check.
+          CLUSTER_ID: abJmc64xRMOGJdyAgr4muQ
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+      postgres:
+        # pgvector, not plain postgres: migration 000034 creates the extension
+        # and the copilot knowledge tests search a real HNSW index.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/9
+      PAM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      COPILOT_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      IR_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      IDENTITY_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      DASHBOARD_TEST_CH: localhost:9000
+      ATTACKPATH_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      ATTACKPATH_TEST_NEO4J: bolt://localhost:7687
+      KG_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      KG_TEST_NEO4J: bolt://localhost:7687
+      RBAC_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      ASSET_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      SIEM_TEST_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: crp_password_dev
+      # internal/pkg/testinfra: repository tests cut a database of their own
+      # from a migrated template on this server. It never touches
+      # crp_foundation, which the migration and content steps above use.
+      #
+      # The require list names all three, because this job now provides all
+      # three. Naming a dependency it does not provide would fail the suite for
+      # the pipeline's omission rather than for a defect; leaving one out that
+      # it does provide would let those tests go green by skipping.
+      CRP_TEST_POSTGRES_DSN: postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable
+      CRP_TEST_CLICKHOUSE_DSN: clickhouse://default:@localhost:9000/default
+      CRP_TEST_KAFKA_BROKERS: localhost:9092
+      CRP_TEST_REQUIRE_INFRA: postgres,clickhouse,kafka
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Apply migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+            go run ./internal/cmd/migrate up
+
+      # Six of these seven never applied — a TTL on a DateTime64 column and a
+      # DESC in a sorting key — so the SIEM, UEBA, TI, vuln and audit schemas
+      # did not exist. Failing the build on a bad one is the point.
+      - name: Apply ClickHouse migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          for f in migrations/clickhouse/*.sql; do
+            echo "applying $(basename "$f")"
+            docker run --rm --network host -i \
+              clickhouse/clickhouse-server:24.3-alpine \
+              clickhouse-client --host localhost --multiquery < "$f"
+          done
+
+      - name: Format
+        working-directory: backend
+        run: make fmt-check
+
+      - name: Build
+        working-directory: backend
+        run: make build
+
+      - name: Vet
+        working-directory: backend
+        run: make vet
+
+      # The detection catalogue is no longer carried by a migration, so a fresh
+      # database has none until this runs — and the SIEM library tests read it.
+      # It is also the step that would fail if a detection named a field the
+      # engine does not read: content ships without the code, so the check that
+      # content is sound has to run on its own.
+      #
+      # It goes through the whole published path on purpose — build, sign,
+      # publish into a channel, then install what the channel calls current —
+      # rather than loading the working directory. A pipeline that only ever
+      # loaded the directory would never exercise what a deployment does, and
+      # the first time anyone found out would be at a customer.
+      - name: Build, publish and install a signed content release
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go run ./services/siem/cmd/contentctl -check
+          go run ./services/siem/cmd/contentctl -keygen /tmp/ci-content
+          mkdir -p /tmp/ci-trust && cp /tmp/ci-content.pub /tmp/ci-trust/
+          go run ./services/siem/cmd/contentctl \
+            -build /tmp/ci-pack.crpack -publish /tmp/ci-channel \
+            -sign-key /tmp/ci-content.key
+          go run ./services/siem/cmd/contentctl \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
+          go run ./services/siem/cmd/contentctl \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -apply \
+            -db "postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable"
+
+      # Each refusal is asserted rather than assumed: a verification that
+      # silently passed everything would look exactly like one that worked.
+      # These are the four ways a deployment can be handed content it should
+      # not install, and each has to fail for its own reason.
+      - name: Content that should be refused is refused
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          ctl() { go run ./services/siem/cmd/contentctl "$@"; }
+
+          # The expected reason is asserted, not just the failure. A refusal
+          # for the wrong reason is how a check that never runs passes: an
+          # archive rejected before its signature is read looks, from the exit
+          # code alone, exactly like one whose signature was checked.
+          refuses() {
+            local what="$1" expect="$2"; shift 2
+            if ctl "$@" >/tmp/ci-refusal 2>&1; then
+              echo "NOT REFUSED: $what" >&2; cat /tmp/ci-refusal >&2; exit 1
+            fi
+            if ! grep -qF -- "$expect" /tmp/ci-refusal; then
+              echo "REFUSED FOR THE WRONG REASON ($what): expected \"$expect\"" >&2
+              cat /tmp/ci-refusal >&2; exit 1
+            fi
+            echo "refused ($what): $(grep -F -- "$expect" /tmp/ci-refusal | head -1)"
+          }
+
+          # Signed by a key this deployment does not trust.
+          ctl -keygen /tmp/ci-other
+          refuses "an untrusted key" "does not trust" \
+            -channel /tmp/ci-channel -trust /tmp/ci-other.pub -verify-only
+
+          # The index edited after it was signed — the replay a channel exists
+          # to stop.
+          cp -r /tmp/ci-channel /tmp/ci-tampered
+          python3 - <<'EOF'
+          import json
+          p = "/tmp/ci-tampered/index.json"
+          d = json.load(open(p)); d["current"] = "0.0.0"
+          open(p, "w").write(json.dumps(d, separators=(",", ":")))
+          EOF
+          refuses "an index edited after signing" "does not match" \
+            -channel /tmp/ci-tampered -trust /tmp/ci-trust -verify-only
+
+          # A trust store the deployment never configured.
+          refuses "no trust configured" "-allow-unsigned" -channel /tmp/ci-channel -verify-only
+
+          # The signing key withdrawn.
+          key_id=$(ctl -trust-list -trust /tmp/ci-trust | awk '/trusted/{print $2}')
+          echo "$key_id withdrawn by CI" > /tmp/ci-trust/ci.revoked
+          refuses "a revoked key" "has revoked (withdrawn by CI)" \
+            -channel /tmp/ci-channel -trust /tmp/ci-trust -verify-only
+          rm /tmp/ci-trust/ci.revoked
+
+      # The API reference is generated from the services' routes. A route added
+      # without regenerating it makes the published list wrong in the one way
+      # nobody notices until a call 404s, so the drift is a failing build.
+      - name: The API reference matches the code
+        working-directory: backend
+        run: make docs-api-check
+
+      - name: Test
+        working-directory: backend
+        run: make test
+
+  testinfra-containers:
+    name: testinfra — the container path
+    runs-on: ubuntu-latest
+    # The backend job points the helper at service containers, which is the
+    # fast path and the one every repository test takes. That leaves the other
+    # half of the helper — the one that starts containers itself, for a
+    # developer who has Docker and has started nothing — exercised by nobody.
+    #
+    # This job declares no service and no CRP_TEST_*_DSN, so the helper has to
+    # start PostgreSQL, ClickHouse and Kafka on its own, and requires all three
+    # so that a Docker failure is red rather than three skips.
+    env:
+      CRP_TEST_REQUIRE_INFRA: all
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Start every dependency from the test helper itself
+        working-directory: backend
+        run: go test ./internal/pkg/testinfra/ -count=1 -v
+
+  migrations:
+    name: Migrations — apply to a clean database
+    runs-on: ubuntu-latest
+    # A reserved word used as a column name shipped unnoticed because nothing
+    # ever ran these files. This job applies all of them to an empty database.
+    services:
+      postgres:
+        # pgvector, not plain postgres: 000034 runs CREATE EXTENSION vector.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://crp_user:crp_password_dev@127.0.0.1:5432/crp_foundation?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Apply PostgreSQL migrations
+        working-directory: backend
+        run: go run ./internal/cmd/migrate up
+
+      # The reason this job exists twice over. Applying the files once proves
+      # they parse; applying them again proves the version table is doing its
+      # job, which is what makes a new migration deployable to a running
+      # installation instead of a reason to drop the database. The second run
+      # has to print "nothing to apply" — if it re-executed anything, the
+      # first CREATE TABLE without IF NOT EXISTS fails and so does this step.
+      - name: Apply them again — nothing may be applied twice
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          out=$(go run ./internal/cmd/migrate up)
+          echo "$out"
+          case "$out" in
+            *"nothing to apply"*) ;;
+            *) echo "::error::the second application was not a no-op: $out"; exit 1 ;;
+          esac
+
+      - name: Report schema and version
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          echo "version: $(go run ./internal/cmd/migrate version)"
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' tables created' FROM information_schema.tables WHERE table_schema='public'"
+
+      # An installation that predates the version table has the schema and no
+      # version. `baseline` is the documented way in, and it is only a
+      # documented way in if it keeps working: drop the version table, adopt
+      # the schema that is still there, and check `up` then has nothing to do.
+      - name: Adopt a schema applied before the version table existed
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q \
+            -c "DROP TABLE schema_migrations"
+          go run ./internal/cmd/migrate baseline
+          out=$(go run ./internal/cmd/migrate up)
+          echo "$out"
+          case "$out" in
+            *"nothing to apply"*) ;;
+            *) echo "::error::up after baseline was not a no-op: $out"; exit 1 ;;
+          esac
+
+  frontend:
+    name: Frontend — typecheck, lint, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      # next-intl renders the key itself when it cannot resolve one, so a page
+      # with a missing translation looks built rather than broken. Five shipped
+      # that way before this step existed.
+      - name: Translations
+        working-directory: frontend
+        run: npm run check:messages
+
+      - name: Build
+        working-directory: frontend
+        # next build needs these present; they are not secrets at build time.
+        env:
+          NEXTAUTH_URL: http://localhost:3000
+          NEXTAUTH_SECRET: ci-build-only-not-a-real-secret-000000000
+          KEYCLOAK_CLIENT_ID: ci
+          KEYCLOAK_CLIENT_SECRET: ci
+          KEYCLOAK_ISSUER: http://localhost:8080/realms/cyberradar
+          NEXT_PUBLIC_API_URL: http://localhost:8001
+        run: npm run build
+
+  e2e-chain:
+    name: e2e-chain — one attack, end to end
+    runs-on: ubuntu-latest
+    env:
+      # On the job, not on one step. CRP_OIDC_ISSUER explicitly empty means
+      # "there is no Keycloak here", and the services then accept only
+      # platform-signed tokens — which is what the chain mints. Set on the
+      # start step alone, the step that provisions the SOAR's credential and
+      # restarts it did not have it: the restarted service took the default
+      # issuer, probed a Keycloak that does not exist, and exited, while the
+      # step reported success. Three runs of the chain drove a platform with
+      # no SOAR in it.
+      CRP_OIDC_ISSUER: ""
+      # CRP_CORS_ORIGINS, which is the name the script reads. It was
+      # CRP_CORS_ALLOWED_ORIGINS here, which nothing has ever read.
+      CRP_CORS_ORIGINS: http://localhost:3000
+      # This job's Redis runs with no password, and the local runner otherwise
+      # sends crp_password_dev: every AUTH then fails, so every service that
+      # uses Redis runs on its fallback path. The SIEM's sliding window counts
+      # in-process when that happens — by design, because a detection engine
+      # that stops counting when its cache blinks misses the attack — so the
+      # chain still passes while nothing exercises the shared counter it is
+      # supposed to use.
+      CRP_REDIS_PASSWORD: ""
+    # The chain this job drives: an event is ingested, the rule engine raises an
+    # alert, an analyst promotes it to a case, a playbook runs, the address is
+    # blocked at the network, and the audit trail names the playbook.
+    #
+    # Every one of those steps had a unit test. None of them had a test that the
+    # next step happens, and that is where this platform's defects lived: the
+    # SOAR's block_ip action posts to netsec's policy endpoint, which answered
+    # 500 on every call for as long as it existed; and the SOAR's own service
+    # account was never created anywhere, so every action that reached another
+    # service answered 401. Both were found by running this chain for the first
+    # time, not by reading the code.
+    #
+    # No Keycloak: CRP_OIDC_ISSUER is explicitly empty, so the services accept
+    # only the platform's own signed tokens, which is what the chain mints.
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.3-alpine
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        ports: ["9000:9000", "8123:8123"]
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      kafka:
+        image: confluentinc/cp-kafka:7.6.0
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+          CLUSTER_ID: abJmc64xRMOGJdyAgr4muQ
+        ports: ["9092:9092"]
+        options: >-
+          --health-cmd "kafka-topics --bootstrap-server localhost:9092 --list"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: crp_user
+          POSTGRES_PASSWORD: crp_password_dev
+          POSTGRES_DB: crp_foundation
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crp_user -d crp_foundation"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      - name: Apply migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          DATABASE_URL="postgres://crp_user:crp_password_dev@localhost:5432/crp_foundation?sslmode=disable" \
+            go run ./internal/cmd/migrate up
+
+      - name: Apply ClickHouse migrations
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          for f in migrations/clickhouse/*.sql; do
+            docker run --rm --network host -i \
+              clickhouse/clickhouse-server:24.3-alpine \
+              clickhouse-client --host localhost --multiquery < "$f"
+          done
+
+      - name: Seed identities and detection content
+        working-directory: backend
+        env:
+          PGPASSWORD: crp_password_dev
+        run: |
+          set -euo pipefail
+          psql -h localhost -U crp_user -d crp_foundation -v ON_ERROR_STOP=1 -q \
+            -f migrations/seed/001_identities.sql
+          psql -h localhost -U crp_user -d crp_foundation -tAc \
+            "SELECT count(*) || ' identities' FROM identities WHERE status='active'"
+
+      - name: Generate the signing key
+        working-directory: backend
+        run: ./scripts/gen-jwt-keys.sh
+
+      - name: Start the platform
+        working-directory: backend
+        run: ./scripts/dev-local.sh services
+
+      # The step that was missing from every installation. Without it the SOAR
+      # holds no credential and every containment answers 401.
+      - name: Provision the service accounts
+        working-directory: backend
+        run: ./scripts/dev-local.sh accounts
+
+      - name: One attack, end to end
+        working-directory: backend
+        run: make e2e-chain
+
+      # The chain reports which step failed; these say why.
+      #
+      # Both halves matter. The full tail goes to the log for reading in
+      # detail, and the error lines go out as annotations, because a job log
+      # is megabytes of service output and container teardown that the API
+      # will not hand over a page at a time — the reason ends up written down
+      # where nobody can get at it. An annotation is one line attached to the
+      # run.
+      - name: The logs of the services in the chain
+        if: failure()
+        working-directory: backend
+        run: |
+          found=0
+          for s in collector siem soar netsec audit identity pipeline-worker; do
+            f=".dev-local/logs/$s-service.log"
+            [ -f "$f" ] || f=".dev-local/logs/$s.log"
+            if [ ! -f "$f" ]; then
+              echo "::error title=no log::$s wrote no log, so it never started"
+              continue
+            fi
+            found=$((found + 1))
+            echo "──────── $f"
+            tail -40 "$f"
+            grep -iE '"level":"(error|fatal)"' "$f" | tail -3 | while read -r line; do
+              echo "::error title=$s::$(printf '%s' "$line" | cut -c1-400)"
+            done
+            # And the last lines whatever their level, as one annotation. The
+            # error lines alone were not enough: a rule engine that consumes
+            # cleanly and raises nothing logs nothing at error level, so the
+            # only thing the annotations showed was silence.
+            echo "::error title=$s (tail)::$(tail -3 "$f" | tr '\n' '|' | cut -c1-600)"
+          done
+          if [ "$found" = 0 ]; then
+            echo "::error title=no logs at all::nothing under .dev-local/logs; the platform step wrote elsewhere"
+            ls -la .dev-local 2>&1 || true
+          fi
+
+      # Where the events actually got to, from the broker rather than from a
+      # log. Neither the pipeline worker nor the rule engine logs a line per
+      # event, so a successful handover and a lost one look identical in both
+      # journals — the only place that knows is Kafka. End offsets say how far
+      # each topic was written; the group lag says how much each consumer left
+      # unread. The chain reports that the engine produced nothing, and these
+      # two numbers say whether it was ever given anything to produce from.
+      - name: What the broker says about the handover
+        if: failure()
+        run: |
+          set -u
+          k() {
+            docker run --rm --network host confluentinc/cp-kafka:7.6.0 "$@" 2>&1 | tail -20
+          }
+          for t in crp.events.normalized crp.events.enriched crp.events.alerts; do
+            out=$(k kafka-get-offsets --bootstrap-server localhost:9092 --topic "$t" || true)
+            echo "offsets $t: $out"
+            echo "::error title=offsets $t::$(printf '%s' "$out" | tr '\n' '|' | cut -c1-300)"
+          done
+          for g in crp-pipeline crp-siem-rule-engine; do
+            out=$(k kafka-consumer-groups --bootstrap-server localhost:9092 --describe --group "$g" || true)
+            echo "group $g:"; printf '%s\n' "$out"
+            echo "::error title=group $g::$(printf '%s' "$out" | tr '\n' '|' | cut -c1-600)"
+          done
+
+  vulnerabilities:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.work.sum
+
+      # Blocking, through a gate rather than directly.
+      #
+      # Its first run reported 49 reachable vulnerabilities: the Go standard
+      # library at 1.22.12, golang.org/x/net, golang-jwt/jwt/v5,
+      # ClickHouse/ch-go and the OpenTelemetry SDK. A second pass took eight
+      # more, including an SQL injection in pgx and chi's RealIP, which needed
+      # the call removed rather than the version bumped. All are at a fixed
+      # version or gone.
+      #
+      # What is left is the case plain govulncheck cannot express: two
+      # vulnerabilities in docker/docker with no fixed version, reached only
+      # from the package that starts PostgreSQL, ClickHouse and Kafka for
+      # tests. Blocking on them means the pipeline can never be green, and
+      # that teaches everyone to ignore it; not blocking means the next real
+      # one is read in a log nobody opens. So the gate holds the exceptions,
+      # each with a reason and a review date, fails on anything else, fails on
+      # an exception past its date, and fails if the claim an exception rests
+      # on stops being true. It also fails when the scan itself could not run,
+      # which plain govulncheck reports as success.
+      - name: govulncheck
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          python3 scripts/govulncheck-gate.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Reports rather than gates, and it is the one half of this job that
+      # still does.
+      #
+      # npm audit reports 1 critical and 9 high, every one of which only a
+      # Next 16 and next-intl 4 migration resolves — both breaking changes, and
+      # a piece of work of their own. The critical one is a denial of service in
+      # the Image Optimizer, which this application disables
+      # (images.unoptimized in next.config.mjs), so it is not reachable here.
+      #
+      # Gating on it today would mean a red pipeline on every commit until that
+      # migration lands, which teaches everyone to ignore the pipeline. It
+      # becomes blocking with the migration, not before.
+      - name: npm audit
+        working-directory: frontend
+        continue-on-error: true
+        run: npm audit --audit-level=high

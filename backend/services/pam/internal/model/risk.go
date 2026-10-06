@@ -24,16 +24,16 @@ type IdentityRiskProfile struct {
 	LateralMovementScore float64 `json:"lateral_movement_score"`
 
 	// Behavioral baseline
-	NormalLoginHours  []int    `json:"normal_login_hours"`
-	NormalCountries   []string `json:"normal_countries"`
-	NormalIPPrefixes  []string `json:"normal_ip_prefixes"`
-	AvgDailyEvents    float64  `json:"avg_daily_events"`
-	BaselineReady     bool     `json:"baseline_ready"`
+	NormalLoginHours []int    `json:"normal_login_hours"`
+	NormalCountries  []string `json:"normal_countries"`
+	NormalIPPrefixes []string `json:"normal_ip_prefixes"`
+	AvgDailyEvents   float64  `json:"avg_daily_events"`
+	BaselineReady    bool     `json:"baseline_ready"`
 
 	// Anomaly counters
-	LastAnomalyAt  *time.Time `json:"last_anomaly_at,omitempty"`
-	AnomalyCount7d  int       `json:"anomaly_count_7d"`
-	AnomalyCount30d int       `json:"anomaly_count_30d"`
+	LastAnomalyAt   *time.Time `json:"last_anomaly_at,omitempty"`
+	AnomalyCount7d  int        `json:"anomaly_count_7d"`
+	AnomalyCount30d int        `json:"anomaly_count_30d"`
 
 	// Recent activity
 	LastLoginAt      *time.Time `json:"last_login_at,omitempty"`
@@ -81,7 +81,7 @@ type RiskBreakdown struct {
 type AnomalyEvent struct {
 	TenantID   string    `json:"tenant_id"`
 	IdentityID string    `json:"identity_id"`
-	Type       string    `json:"type"`     // impossible_travel, off_hours, new_country, brute_force, etc.
+	Type       string    `json:"type"` // impossible_travel, off_hours, new_country, brute_force, etc.
 	Detail     string    `json:"detail"`
 	Score      float64   `json:"score"`
 	DetectedAt time.Time `json:"detected_at"`

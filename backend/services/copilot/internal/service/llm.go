@@ -7,18 +7,30 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cyberradar/platform/services/copilot/internal/model"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
+// Defaults for the Messages API call. Each is overridable by environment
+// variable so an operator can move model or endpoint without a rebuild — a
+// sovereign deployment may have to point this at its own gateway, and the
+// model a customer is contractually allowed to use is not ours to hard-code.
 const (
-	anthropicAPI   = "https://api.anthropic.com/v1/messages"
-	anthropicModel = "claude-sonnet-4-6"
-	maxTokens      = 4096
+	defaultBaseURL   = "https://api.anthropic.com"
+	defaultModel     = "claude-opus-5-5"
+	defaultMaxTokens = 8192
 )
+
+// messagesPath is appended to the base URL.
+const messagesPath = "/v1/messages"
+
+// anthropicVersion is the wire version this client is written against.
+const anthropicVersion = "2023-06-01"
 
 // systemPrompt is the security analyst persona injected on every call.
 const systemPrompt = `You are CyberRadar Copilot, an expert AI security analyst embedded in the CyberRadar Platform (CRP) — a sovereign cybersecurity platform for banks, governments, and critical infrastructure.
@@ -42,9 +54,53 @@ Platform domains you can query:
 Always cite the tool call results that informed your answer.
 Never hallucinate data — if a tool returns no results, say so explicitly.`
 
+// LLMConfig is what the client needs beyond its credential.
+type LLMConfig struct {
+	BaseURL   string
+	Model     string
+	MaxTokens int
+	// Effort sets how much thinking the answer gets. Empty leaves the model's
+	// own default, which is what most deployments want.
+	Effort  string
+	Timeout time.Duration
+}
+
+// LLMConfigFromEnv reads the configuration, filling in the defaults.
+func LLMConfigFromEnv() LLMConfig {
+	cfg := LLMConfig{
+		BaseURL:   envOr("ANTHROPIC_BASE_URL", defaultBaseURL),
+		Model:     envOr("ANTHROPIC_MODEL", defaultModel),
+		MaxTokens: envInt("COPILOT_MAX_TOKENS", defaultMaxTokens),
+		Effort:    os.Getenv("COPILOT_EFFORT"),
+		Timeout:   time.Duration(envInt("COPILOT_TIMEOUT_SECONDS", 90)) * time.Second,
+	}
+	cfg.BaseURL = strings.TrimSuffix(cfg.BaseURL, "/")
+	return cfg
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
 // LLMClient calls the Anthropic Messages API with tool use.
 type LLMClient struct {
 	apiKey     string
+	cfg        LLMConfig
 	httpClient *http.Client
 	tools      []model.AnthropicTool
 	dispatcher *ToolDispatcher
@@ -52,23 +108,29 @@ type LLMClient struct {
 }
 
 // NewLLMClient creates an LLMClient with the security analyst toolset.
-func NewLLMClient(apiKey string, dispatcher *ToolDispatcher, logger zerolog.Logger) *LLMClient {
+func NewLLMClient(apiKey string, cfg LLMConfig, dispatcher *ToolDispatcher, logger zerolog.Logger) *LLMClient {
 	return &LLMClient{
 		apiKey:     apiKey,
-		httpClient: &http.Client{Timeout: 90 * time.Second},
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: cfg.Timeout},
 		tools:      buildTools(),
 		dispatcher: dispatcher,
 		logger:     logger,
 	}
 }
 
+// Model reports which model this client calls, for logs and for the health
+// endpoint: "which model is answering" is the first question asked of a
+// deployment, and guessing from a config file is how the wrong answer is given.
+func (c *LLMClient) Model() string { return c.cfg.Model }
+
 // Chat sends a conversational message and returns the assistant reply.
 // It implements the agentic loop: call Claude → dispatch tool use → call Claude again.
-func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*model.Message, userContent string) (*model.AnthropicResponse, error) {
+func (c *LLMClient) Chat(ctx context.Context, history []*model.Message, userContent string) (*model.AnthropicResponse, error) {
 	// Build Anthropic message list from persisted history
 	messages := buildAnthropicMessages(history)
 	messages = append(messages, model.AnthropicMessage{
-		Role: model.RoleUser,
+		Role:    model.RoleUser,
 		Content: []model.AnthropicContent{{Type: "text", Text: userContent}},
 	})
 
@@ -96,7 +158,7 @@ func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*mod
 			if block.Type != "tool_use" {
 				continue
 			}
-			result, err := c.dispatcher.Dispatch(ctx, tenantID, block.Name, block.Input)
+			result, err := c.dispatcher.Dispatch(ctx, block.Name, block.Input)
 			if err != nil {
 				c.logger.Warn().Err(err).Str("tool", block.Name).Msg("tool_dispatch_error")
 				toolResults = append(toolResults, model.AnthropicContent{
@@ -126,7 +188,7 @@ func (c *LLMClient) Chat(ctx context.Context, tenantID uuid.UUID, history []*mod
 }
 
 // Analyze sends a single-shot analysis prompt (used for async hunt jobs).
-func (c *LLMClient) Analyze(ctx context.Context, tenantID uuid.UUID, prompt string) (*model.AnthropicResponse, error) {
+func (c *LLMClient) Analyze(ctx context.Context, prompt string) (*model.AnthropicResponse, error) {
 	messages := []model.AnthropicMessage{
 		{Role: model.RoleUser, Content: []model.AnthropicContent{{Type: "text", Text: prompt}}},
 	}
@@ -145,7 +207,7 @@ func (c *LLMClient) Analyze(ctx context.Context, tenantID uuid.UUID, prompt stri
 			if block.Type != "tool_use" {
 				continue
 			}
-			result, _ := c.dispatcher.Dispatch(ctx, tenantID, block.Name, block.Input)
+			result, _ := c.dispatcher.Dispatch(ctx, block.Name, block.Input)
 			resultJSON, _ := json.Marshal(result)
 			results = append(results, model.AnthropicContent{
 				Type: "tool_result", ToolUseID: block.ID, Content: string(resultJSON),
@@ -159,11 +221,17 @@ func (c *LLMClient) Analyze(ctx context.Context, tenantID uuid.UUID, prompt stri
 // call makes a single HTTP POST to the Anthropic Messages API.
 func (c *LLMClient) call(ctx context.Context, messages []model.AnthropicMessage) (*model.AnthropicResponse, error) {
 	req := model.AnthropicRequest{
-		Model:     anthropicModel,
-		MaxTokens: maxTokens,
+		Model:     c.cfg.Model,
+		MaxTokens: c.cfg.MaxTokens,
 		System:    systemPrompt,
 		Messages:  messages,
 		Tools:     c.tools,
+	}
+	// Thinking is on by default on the current models and is not requested
+	// through a token budget — that field is refused outright. Depth is set
+	// here, and only when an operator asked for a particular one.
+	if c.cfg.Effort != "" {
+		req.OutputConfig = &model.AnthropicOutputConfig{Effort: c.cfg.Effort}
 	}
 
 	body, err := json.Marshal(req)
@@ -171,13 +239,13 @@ func (c *LLMClient) call(ctx context.Context, messages []model.AnthropicMessage)
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPI, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+messagesPath, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("anthropic-version", anthropicVersion)
 
 	httpResp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -208,24 +276,20 @@ func buildAnthropicMessages(history []*model.Message) []model.AnthropicMessage {
 		switch m.Role {
 		case model.RoleUser:
 			msgs = append(msgs, model.AnthropicMessage{
-				Role: model.RoleUser,
+				Role:    model.RoleUser,
 				Content: []model.AnthropicContent{{Type: "text", Text: m.Content}},
 			})
 		case model.RoleAssistant:
 			msgs = append(msgs, model.AnthropicMessage{
-				Role: model.RoleAssistant,
+				Role:    model.RoleAssistant,
 				Content: []model.AnthropicContent{{Type: "text", Text: m.Content}},
 			})
-		case model.RoleTool:
-			// Reconstruct tool result block attached to previous assistant turn
-			if len(msgs) > 0 && msgs[len(msgs)-1].Role == model.RoleUser {
-				msgs[len(msgs)-1].Content = append(msgs[len(msgs)-1].Content, model.AnthropicContent{
-					Type:      "tool_result",
-					ToolUseID: m.ToolName,
-					Content:   m.Content,
-				})
-			}
 		}
+		// A tool turn is deliberately not replayed. History is persisted as
+		// text, so the tool_use blocks it answered are gone — and a
+		// tool_result whose tool_use_id names a tool rather than a block, as
+		// this did, is rejected by the API. The tools are called again from
+		// the current question, which is also the fresher answer.
 	}
 	return msgs
 }
@@ -259,10 +323,10 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolQueryAlerts,
 			Description: "Query recent SIEM/XDR alerts. Returns a list of alerts matching filters.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"severity":   str("Filter by severity: CRITICAL, HIGH, MEDIUM, LOW"),
-				"status":     str("Filter by alert status: open, acknowledged, resolved"),
-				"limit":      num("Max number of results (default 10)"),
-				"rule_name":  str("Filter by SIEM rule name (partial match)"),
+				"severity":  str("Filter by severity: CRITICAL, HIGH, MEDIUM, LOW"),
+				"status":    str("Filter by alert status: open, acknowledged, resolved"),
+				"limit":     num("Max number of results (default 10)"),
+				"rule_name": str("Filter by SIEM rule name (partial match)"),
 			}),
 		},
 		{
@@ -297,20 +361,20 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolQueryVulns,
 			Description: "Query vulnerability findings. Returns CVE details, CVSS scores, EPSS, and affected assets.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"severity":    str("CRITICAL, HIGH, MEDIUM, LOW"),
-				"asset_id":    str("Filter by asset UUID"),
-				"cve_id":      str("Specific CVE ID (e.g. CVE-2024-1234)"),
+				"severity":     str("CRITICAL, HIGH, MEDIUM, LOW"),
+				"asset_id":     str("Filter by asset UUID"),
+				"cve_id":       str("Specific CVE ID (e.g. CVE-2024-1234)"),
 				"sla_breached": str("true to return only SLA-breached findings"),
-				"limit":       num("Max results (default 10)"),
+				"limit":        num("Max results (default 10)"),
 			}),
 		},
 		{
 			Name:        model.ToolAnalyzeAttackPath,
 			Description: "Query attack path analysis results: discovered lateral movement paths, choke points, and scenario risk scores.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"scenario_id": str("UUID of a specific scenario"),
-				"min_score":   num("Minimum path risk score (0-10)"),
-				"limit":       num("Max paths (default 5)"),
+				"scenario_id":  str("UUID of a specific scenario"),
+				"min_score":    num("Minimum path risk score (0-10)"),
+				"limit":        num("Max paths (default 5)"),
 				"choke_points": str("Set to 'true' to return choke point summary instead of paths"),
 			}),
 		},
@@ -328,9 +392,9 @@ func buildTools() []model.AnthropicTool {
 			Name:        model.ToolGetAsset,
 			Description: "Retrieve asset details by ID or hostname/IP.",
 			InputSchema: schema([]string{}, map[string]map[string]any{
-				"asset_id":  str("UUID of a specific asset"),
-				"hostname":  str("Hostname to search for"),
-				"ip":        str("IP address to search for"),
+				"asset_id": str("UUID of a specific asset"),
+				"hostname": str("Hostname to search for"),
+				"ip":       str("IP address to search for"),
 			}),
 		},
 		{

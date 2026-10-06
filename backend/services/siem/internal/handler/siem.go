@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/siem/internal/model"
 	"github.com/cyberradar/platform/services/siem/internal/service"
@@ -27,28 +29,37 @@ func NewSIEMHandler(svc *service.SIEMService) *SIEMHandler {
 }
 
 // RegisterRoutes mounts all SIEM routes.
+//
+// The three groups carry different permissions: authoring a detection rule is
+// not the same authority as triaging an alert, and a case is an incident.
 func (h *SIEMHandler) RegisterRoutes(r chi.Router) {
-	// Detection Rules
-	r.Get("/siem/rules", h.ListRules)
-	r.Post("/siem/rules", h.CreateRule)
-	r.Get("/siem/rules/{ruleID}", h.GetRule)
-	r.Put("/siem/rules/{ruleID}", h.UpdateRule)
-	r.Delete("/siem/rules/{ruleID}", h.DeleteRule)
+	r.Route("/siem/rules", func(r chi.Router) {
+		r.Use(authmw.RequirePermissionByMethod("rules"))
+		r.Get("/", h.ListRules)
+		r.Post("/", h.CreateRule)
+		r.Get("/{ruleID}", h.GetRule)
+		r.Put("/{ruleID}", h.UpdateRule)
+		r.Delete("/{ruleID}", h.DeleteRule)
+	})
 
-	// Alerts
-	r.Get("/siem/alerts", h.ListAlerts)
-	r.Get("/siem/alerts/stats", h.AlertStats)
-	r.Put("/siem/alerts/{alertID}", h.UpdateAlert)
-	r.Post("/siem/alerts/{alertID}/case", h.PromoteToCase)
+	r.Route("/siem/alerts", func(r chi.Router) {
+		r.Use(authmw.RequirePermissionByMethod("alerts"))
+		r.Get("/", h.ListAlerts)
+		r.Get("/stats", h.AlertStats)
+		r.Put("/{alertID}", h.UpdateAlert)
+		r.Post("/{alertID}/case", h.PromoteToCase)
+	})
 
-	// Cases
-	r.Get("/siem/cases", h.ListCases)
-	r.Post("/siem/cases", h.CreateCase)
-	r.Get("/siem/cases/{caseID}", h.GetCase)
-	r.Put("/siem/cases/{caseID}", h.UpdateCase)
-	r.Get("/siem/cases/{caseID}/comments", h.ListComments)
-	r.Post("/siem/cases/{caseID}/comments", h.AddComment)
-	r.Post("/siem/cases/{caseID}/observables", h.AddObservable)
+	r.Route("/siem/cases", func(r chi.Router) {
+		r.Use(authmw.RequirePermissionByMethod("incidents"))
+		r.Get("/", h.ListCases)
+		r.Post("/", h.CreateCase)
+		r.Get("/{caseID}", h.GetCase)
+		r.Put("/{caseID}", h.UpdateCase)
+		r.Get("/{caseID}/comments", h.ListComments)
+		r.Post("/{caseID}/comments", h.AddComment)
+		r.Post("/{caseID}/observables", h.AddObservable)
+	})
 }
 
 // ─── Rules ────────────────────────────────────────────────────────────────────
@@ -61,7 +72,7 @@ func (h *SIEMHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"rules": rules, "total": len(rules)})
+	response.OKWithMeta(w, rules, &response.Meta{Total: int64(len(rules))})
 }
 
 func (h *SIEMHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +174,7 @@ func (h *SIEMHandler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"alerts": alerts, "total": total})
+	response.OKWithMeta(w, alerts, &response.Meta{Total: int64(total)})
 }
 
 func (h *SIEMHandler) AlertStats(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +251,7 @@ func (h *SIEMHandler) ListCases(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"cases": cases, "total": total})
+	response.OKWithMeta(w, cases, &response.Meta{Total: int64(total)})
 }
 
 func (h *SIEMHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +318,7 @@ func (h *SIEMHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"comments": comments, "total": len(comments)})
+	response.OKWithMeta(w, comments, &response.Meta{Total: int64(len(comments))})
 }
 
 func (h *SIEMHandler) AddComment(w http.ResponseWriter, r *http.Request) {
@@ -361,15 +372,11 @@ func (h *SIEMHandler) AddObservable(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -383,16 +390,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

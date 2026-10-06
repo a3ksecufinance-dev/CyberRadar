@@ -53,7 +53,7 @@ function APIKeyRow({ k, onRotate, onRevoke }: { k: APIKey; onRotate: () => void;
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
-          {k.scopes.map(s => <ScopeTag key={s} scope={s} />)}
+          {(k.scopes ?? []).map(s => <ScopeTag key={s} scope={s} />)}
         </div>
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
@@ -112,7 +112,7 @@ function WebhookRow({ wh, onToggle, onTest, onDelete }: {
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
-          {wh.events.map(e => (
+          {(wh.events ?? []).map(e => (
             <span key={e} className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${EVENTS_COLORS[e] ?? 'bg-slate-800 text-slate-400 border-slate-600'}`}>
               {e}
             </span>
@@ -453,7 +453,7 @@ export default function APIGatewayPage() {
           {keysLoading && <LoadingState />}
           {keysError && <ErrorState message="Failed to load API keys" />}
           {!keysLoading && !keysError && keys.length === 0 && (
-            <EmptyState title="No API keys" description="Create your first API key to grant external access to the platform." />
+            <EmptyState message="No API keys yet — create one to grant external access to the platform." />
           )}
           {keys.length > 0 && (
             <Card>
@@ -487,7 +487,7 @@ export default function APIGatewayPage() {
           {whLoading && <LoadingState />}
           {whError && <ErrorState message="Failed to load webhooks" />}
           {!whLoading && !whError && webhooks.length === 0 && (
-            <EmptyState title="No webhooks" description="Configure outbound webhooks to push events to external systems (Slack, SIEM, SOAR...)." />
+            <EmptyState message="No webhooks configured — add one to push events to external systems (Slack, SIEM, SOAR)." />
           )}
           {webhooks.length > 0 && (
             <Card>

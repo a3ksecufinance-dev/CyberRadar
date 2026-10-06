@@ -10,13 +10,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/ot/internal/handler"
 	"github.com/cyberradar/platform/services/ot/internal/repository"
 	"github.com/cyberradar/platform/services/ot/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	kafka "github.com/segmentio/kafka-go"
@@ -26,10 +30,23 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "ot-service").Logger()
 
-	dbURL        := mustEnv("DATABASE_URL")
-	jwtSecret    := mustEnv("JWT_SECRET")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"ot-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	dbURL := mustEnv("DATABASE_URL")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
 	kafkaBrokers := envOrDefault("KAFKA_BROKERS", "localhost:9092")
-	port         := envOrDefault("SERVICE_PORT", "8028")
+	port := envOrDefault("SERVICE_PORT", "8028")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -39,6 +56,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("postgres connect failed")
 	}
 	defer pool.Close()
+
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, pool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
 
 	broker := strings.Split(kafkaBrokers, ",")[0]
 	kw := &kafka.Writer{
@@ -51,22 +76,32 @@ func main() {
 	defer kw.Close()
 
 	repo := repository.NewOTRepository(pool)
-	svc  := service.NewOTService(repo, kw, logger)
-	h    := handler.NewOTHandler(svc, logger)
+	svc := service.NewOTService(repo, kw, logger)
+	h := handler.NewOTHandler(svc, logger)
 
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
+	r.Use(observe.Middleware("ot-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"ot-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
+		r.Use(authmw.RequirePermissionByMethod("ot_assets"))
 		r.Mount("/ot", h.Routes())
 	})
 
@@ -94,42 +129,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("ot-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/audit/internal/model"
 	"github.com/google/uuid"
 )
@@ -110,42 +112,48 @@ func (r *AuditRepository) WriteBatch(ctx context.Context, events []*model.AuditE
 
 // Search queries audit logs with filters. Read-only.
 func (r *AuditRepository) Search(ctx context.Context, f *model.AuditEventFilter) ([]*model.AuditEvent, int64, error) {
+	// Named parameters go through clickhouse.Named, and their values are
+	// strings — that is what a ClickHouse query parameter is on the wire.
+	//
+	// This built a map[string]any instead, with a time.Time in it, and the
+	// driver refused the whole query: "expected string value in NamedValue for
+	// query parameter". Every read of the audit trail answered 500, for as
+	// long as the code has existed, and nothing said so — a 500 from a domain
+	// error wrapped as Internal left no log line at all until that was fixed.
 	where := "tenant_id = {tenant_id:String}"
-	args := map[string]any{"tenant_id": f.TenantID}
+	args := []any{clickhouse.Named("tenant_id", f.TenantID)}
+
+	add := func(clause, name, value string) {
+		where += clause
+		args = append(args, clickhouse.Named(name, value))
+	}
 
 	if f.ActorID != "" {
-		where += " AND actor_id = {actor_id:String}"
-		args["actor_id"] = f.ActorID
+		add(" AND actor_id = {actor_id:String}", "actor_id", f.ActorID)
 	}
 	if f.Action != "" {
-		where += " AND action = {action:String}"
-		args["action"] = f.Action
+		add(" AND action = {action:String}", "action", f.Action)
 	}
 	if f.ResourceType != "" {
-		where += " AND resource_type = {resource_type:String}"
-		args["resource_type"] = f.ResourceType
+		add(" AND resource_type = {resource_type:String}", "resource_type", f.ResourceType)
 	}
 	if f.ResourceID != "" {
-		where += " AND resource_id = {resource_id:String}"
-		args["resource_id"] = f.ResourceID
+		add(" AND resource_id = {resource_id:String}", "resource_id", f.ResourceID)
 	}
 	if f.Result != "" {
-		where += " AND result = {result:String}"
-		args["result"] = f.Result
+		add(" AND result = {result:String}", "result", f.Result)
 	}
 	if f.From != nil {
-		where += " AND timestamp >= {from:DateTime64(3)}"
-		args["from"] = *f.From
+		add(" AND timestamp >= {from:DateTime64(3)}", "from", db.CHTime64(*f.From))
 	}
 	if f.To != nil {
-		where += " AND timestamp <= {to:DateTime64(3)}"
-		args["to"] = *f.To
+		add(" AND timestamp <= {to:DateTime64(3)}", "to", db.CHTime64(*f.To))
 	}
 
 	// Count — ClickHouse is fast enough for count with the partition key set
 	var total uint64
 	countQ := fmt.Sprintf("SELECT COUNT(*) FROM crp_audit.audit_logs WHERE %s", where)
-	if err := r.conn.QueryRow(ctx, countQ, args).Scan(&total); err != nil {
+	if err := r.conn.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count audit events: %w", err)
 	}
 
@@ -161,7 +169,7 @@ func (r *AuditRepository) Search(ctx context.Context, f *model.AuditEventFilter)
 		ORDER BY timestamp DESC
 		LIMIT %d OFFSET %d`, where, f.Limit, offset)
 
-	rows, err := r.conn.Query(ctx, listQ, args)
+	rows, err := r.conn.Query(ctx, listQ, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query audit events: %w", err)
 	}

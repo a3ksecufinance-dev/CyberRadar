@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/compliance/internal/model"
 	"github.com/cyberradar/platform/services/compliance/internal/service"
@@ -20,9 +22,20 @@ type ComplianceHandler struct {
 	validate *validator.Validate
 }
 
+// frameworkCode is the shape a referential's code must have: upper case,
+// digits, dash and underscore. It is deliberately a shape and not a list —
+// see CreateFrameworkRequest and migration 000050 for why.
+var frameworkCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,31}$`)
+
 // NewComplianceHandler creates a ComplianceHandler.
 func NewComplianceHandler(svc *service.ComplianceService) *ComplianceHandler {
-	return &ComplianceHandler{svc: svc, validate: validator.New()}
+	v := validator.New()
+	// The error is ignored on purpose: it only fires on an empty tag name, and
+	// a nil return here would make every create fail open instead of closed.
+	_ = v.RegisterValidation("framework_code", func(fl validator.FieldLevel) bool {
+		return frameworkCode.MatchString(fl.Field().String())
+	})
+	return &ComplianceHandler{svc: svc, validate: v}
 }
 
 // RegisterRoutes mounts all compliance routes under the provided router.
@@ -78,7 +91,7 @@ func (h *ComplianceHandler) ListFrameworks(w http.ResponseWriter, r *http.Reques
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"frameworks": frameworks, "total": len(frameworks)})
+	response.OKWithMeta(w, frameworks, &response.Meta{Total: int64(len(frameworks))})
 }
 
 func (h *ComplianceHandler) CreateFramework(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +139,7 @@ func (h *ComplianceHandler) ActivateFramework(w http.ResponseWriter, r *http.Req
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "activated"})
+	response.OKWithMeta(w, "activated", &response.Meta{Total: int64(len("activated"))})
 }
 
 func (h *ComplianceHandler) DeactivateFramework(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +152,7 @@ func (h *ComplianceHandler) DeactivateFramework(w http.ResponseWriter, r *http.R
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "deactivated"})
+	response.OKWithMeta(w, "deactivated", &response.Meta{Total: int64(len("deactivated"))})
 }
 
 func (h *ComplianceHandler) FrameworkScore(w http.ResponseWriter, r *http.Request) {
@@ -184,7 +197,7 @@ func (h *ComplianceHandler) ListControls(w http.ResponseWriter, r *http.Request)
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"controls": controls, "total": total})
+	response.OKWithMeta(w, controls, &response.Meta{Total: int64(total)})
 }
 
 func (h *ComplianceHandler) CreateControl(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +256,7 @@ func (h *ComplianceHandler) ListAssessments(w http.ResponseWriter, r *http.Reque
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"assessments": assessments, "total": total})
+	response.OKWithMeta(w, assessments, &response.Meta{Total: int64(total)})
 }
 
 func (h *ComplianceHandler) UpsertAssessment(w http.ResponseWriter, r *http.Request) {
@@ -331,7 +344,7 @@ func (h *ComplianceHandler) AutoAssess(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"suggestions": suggestions, "total": len(suggestions)})
+	response.OKWithMeta(w, suggestions, &response.Meta{Total: int64(len(suggestions))})
 }
 
 // ─── Evidence ─────────────────────────────────────────────────────────────────
@@ -353,7 +366,7 @@ func (h *ComplianceHandler) ListEvidence(w http.ResponseWriter, r *http.Request)
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"evidence": evs, "total": len(evs)})
+	response.OKWithMeta(w, evs, &response.Meta{Total: int64(len(evs))})
 }
 
 func (h *ComplianceHandler) CreateEvidence(w http.ResponseWriter, r *http.Request) {
@@ -401,7 +414,7 @@ func (h *ComplianceHandler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"risks": risks, "total": total})
+	response.OKWithMeta(w, risks, &response.Meta{Total: int64(total)})
 }
 
 func (h *ComplianceHandler) CreateRisk(w http.ResponseWriter, r *http.Request) {
@@ -476,15 +489,11 @@ func (h *ComplianceHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -498,16 +507,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

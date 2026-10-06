@@ -1,5 +1,5 @@
 export { useApiGet, useApiList, useApiToken } from './useApi'
-export { useSIEMAlerts, useSIEMStats } from './useSIEM'
+export { useSIEMAlerts, useSIEMStats, useRuleLibrary, useRuleCoverage } from './useSIEM'
 export { useAssets, useAssetStats } from './useAssets'
 export { useIncidents, useIRStats } from './useIR'
 export { useDevices, useMobileStats } from './useMobile'
@@ -7,5 +7,16 @@ export { useDataStores, useDSPMFindings, useDSPMStats } from './useDSPM'
 export { useIOCs, useTIStats } from './useTI'
 export { useVulnerabilities, useVulnStats } from './useVuln'
 export { useOTAssets, useOTEvents, useOTStats } from './useOT'
+export { useAttackScenarios, useAttackPaths, useChokePoints, useAttackStats } from './useAttackPath'
+export { useFrameworks, useControls, useComplianceRisks, useComplianceStats } from './useCompliance'
+export { useRiskScenarios, useRiskAssets, useKRIs, useRiskStats } from './useRisk'
+export { useVendors, useComponents, useSCSAlerts, useSCSStats } from './useSCS'
+export { useUsers, usePrivilegedIdentities } from './useIdentity'
+export {
+  useRiskPresets, useActiveRiskProfile, useRiskProfileHistory,
+  useRemediationPresets, useActiveRemediationPolicy, useRemediationHistory,
+  useBehaviourPresets, useActiveBehaviourPolicy, useBehaviourHistory,
+  useAttackPresets, useActiveAttackPolicy, useAttackHistory,
+} from './useTenant'
 export { useDashboardOverview, useKPITimeseries } from './useDashboard'
 export { useAPIKeys, useWebhooks, useWebhookDeliveries, useAPIFWStats } from './useAPIGateway'

@@ -57,26 +57,26 @@ const (
 
 // PrivilegedAccount is a vaulted privileged account.
 type PrivilegedAccount struct {
-	ID                   uuid.UUID   `json:"id"`
-	TenantID             uuid.UUID   `json:"tenant_id"`
-	AccountName          string      `json:"account_name"`
-	AccountType          AccountType `json:"account_type"`
-	TargetAssetID        *uuid.UUID  `json:"target_asset_id,omitempty"`
-	TargetAssetHostname  string      `json:"target_asset_hostname,omitempty"`
-	TargetProtocol       Protocol    `json:"target_protocol"`
-	CredentialStored     bool        `json:"credential_stored"`
-	CredentialRef        string      `json:"credential_ref,omitempty"` // Vault path only
-	LastRotatedAt        *time.Time  `json:"last_rotated_at,omitempty"`
-	RotationPolicyDays   int         `json:"rotation_policy_days"`
-	AutoRotate           bool        `json:"auto_rotate"`
-	RequiresApproval     bool        `json:"requires_approval"`
-	MaxSessionMinutes    int         `json:"max_session_minutes"`
-	AllowedRoles         []string    `json:"allowed_roles"`
-	IsActive             bool        `json:"is_active"`
-	LastUsedAt           *time.Time  `json:"last_used_at,omitempty"`
-	UseCount             int         `json:"use_count"`
-	CreatedAt            time.Time   `json:"created_at"`
-	UpdatedAt            time.Time   `json:"updated_at"`
+	ID                  uuid.UUID   `json:"id"`
+	TenantID            uuid.UUID   `json:"tenant_id"`
+	AccountName         string      `json:"account_name"`
+	AccountType         AccountType `json:"account_type"`
+	TargetAssetID       *uuid.UUID  `json:"target_asset_id,omitempty"`
+	TargetAssetHostname string      `json:"target_asset_hostname,omitempty"`
+	TargetProtocol      Protocol    `json:"target_protocol"`
+	CredentialStored    bool        `json:"credential_stored"`
+	CredentialRef       string      `json:"credential_ref,omitempty"` // Vault path only
+	LastRotatedAt       *time.Time  `json:"last_rotated_at,omitempty"`
+	RotationPolicyDays  int         `json:"rotation_policy_days"`
+	AutoRotate          bool        `json:"auto_rotate"`
+	RequiresApproval    bool        `json:"requires_approval"`
+	MaxSessionMinutes   int         `json:"max_session_minutes"`
+	AllowedRoles        []string    `json:"allowed_roles"`
+	IsActive            bool        `json:"is_active"`
+	LastUsedAt          *time.Time  `json:"last_used_at,omitempty"`
+	UseCount            int         `json:"use_count"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 // AccessRequest is a JIT privileged access request.

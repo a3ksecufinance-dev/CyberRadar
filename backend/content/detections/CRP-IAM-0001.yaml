@@ -1,0 +1,57 @@
+# CRP-IAM-0001 — Bourrage d'identifiants depuis une même adresse
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-IAM-0001
+title: Bourrage d'identifiants depuis une même adresse
+description: Cinq échecs d'authentification ou plus depuis une même adresse source en cinq
+  minutes.
+category: IAM
+severity: HIGH
+mitre:
+  tactic: TA0006
+  technique: T1110.004
+conditions:
+  threshold:
+    count: 5
+    group_by:
+    - ip_source
+    window_seconds: 300
+  field_matches:
+  - op: eq
+    field: category
+    value: IAM
+  - op: eq
+    field: outcome
+    value: failure
+actions:
+- type: notify
+dedup_window_s: 300
+rationale: >-
+  Un attaquant qui essaie une liste d'identifiants volés produit beaucoup d'échecs depuis
+  peu d'adresses. C'est la première étape de la grande majorité des compromissions de comptes
+  clients.
+false_positives: >-
+  Un portail dont la session expire mal, un client mobile qui réessaie en boucle, un test
+  de charge. Regarder si les noms d'utilisateur varient : un seul compte qui échoue vingt
+  fois est un utilisateur en difficulté, vingt comptes depuis une adresse ne l'est pas.
+response: >-
+  Limiter le débit sur l'adresse au niveau du pare-feu applicatif. Vérifier si l'un des comptes
+  visés a fini par réussir — c'est cela qui transforme l'incident.
+frameworks:
+- DORA
+- PCIDSS
+- ISO27001
+controls:
+- DORA-10.3
+- PCI-10.4.1
+- A.8.16
+requires: []
+enabled_by_default: true
+tags:
+- authentification
+- standard

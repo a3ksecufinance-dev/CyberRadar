@@ -34,6 +34,26 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 		tags = req.Tags
 	}
 
+	// ip_addresses, mac_addresses and metadata are NOT NULL with a default,
+	// and a nil here is sent as NULL rather than left out — so every create
+	// that omitted an optional field failed on a constraint the API never
+	// said it had. The columns want "empty", which is what absent means.
+	ips := req.IPAddresses
+	if ips == nil {
+		ips = []string{}
+	}
+	macs := req.MACAddresses
+	if macs == nil {
+		macs = []string{}
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	metadata := req.Metadata
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+
 	const q = `
 		INSERT INTO assets (
 			id, tenant_id, name, hostname, fqdn,
@@ -51,12 +71,12 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 
 	row := r.db.QueryRow(ctx, q,
 		id, tenantID, req.Name, nvlStr(req.Hostname), nvlStr(req.FQDN),
-		req.IPAddresses, req.MACAddresses,
+		ips, macs,
 		req.AssetType, nvlStr(req.OS), nvlStr(req.OSVersion),
 		req.Criticality, env,
 		req.OwnerID, nvlStr(req.Department), nvlStr(req.Location), nvlStr(req.BusinessService),
 		req.IsCBSConnected, req.IsSWIFTConnected, req.IsPCIScope,
-		tags, req.Metadata, "manual",
+		tags, metadata, "manual",
 	)
 
 	var createdAt, updatedAt, firstSeen time.Time
@@ -66,6 +86,13 @@ func (r *AssetRepository) Create(ctx context.Context, tenantID uuid.UUID, req *m
 
 	return r.GetByID(ctx, tenantID, id)
 }
+
+// The reads below select from asset_risk, not from assets.
+//
+// The view is the table plus the two things that cannot be stored without
+// going stale: the counts of open findings by severity, and the risk score
+// derived from them. They used to be columns, and nothing ever wrote them —
+// so every asset scored as though it had no vulnerabilities at all.
 
 // GetByID fetches a single asset by ID, enforcing tenant isolation.
 func (r *AssetRepository) GetByID(ctx context.Context, tenantID, assetID uuid.UUID) (*model.Asset, error) {
@@ -77,9 +104,10 @@ func (r *AssetRepository) GetByID(ctx context.Context, tenantID, assetID uuid.UU
 		       owner_id, department, location, business_service,
 		       is_cbs_connected, is_swift_connected, is_pci_scope,
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
+		       risk_profile_code,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
-		FROM assets
+		FROM asset_risk
 		WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`
 
 	row := r.db.QueryRow(ctx, q, assetID, tenantID)
@@ -154,7 +182,7 @@ func (r *AssetRepository) List(ctx context.Context, f model.AssetFilter) (*model
 	whereClause := strings.Join(where, " AND ")
 
 	// Count query
-	countQ := fmt.Sprintf("SELECT COUNT(*) FROM assets WHERE %s", whereClause)
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM asset_risk WHERE %s", whereClause)
 	var total int
 	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("asset list count: %w", err)
@@ -169,9 +197,10 @@ func (r *AssetRepository) List(ctx context.Context, f model.AssetFilter) (*model
 		       owner_id, department, location, business_service,
 		       is_cbs_connected, is_swift_connected, is_pci_scope,
 		       risk_score, vuln_critical, vuln_high, vuln_medium, vuln_low,
+		       risk_profile_code,
 		       tags, metadata, discovered_by,
 		       last_seen_at, first_seen_at, created_at, updated_at
-		FROM assets WHERE %s
+		FROM asset_risk WHERE %s
 		ORDER BY risk_score DESC, criticality DESC, created_at DESC
 		LIMIT $%d OFFSET $%d`, whereClause, n, n+1)
 	args = append(args, limit, offset)
@@ -293,11 +322,34 @@ func (r *AssetRepository) SoftDelete(ctx context.Context, tenantID, assetID uuid
 	return nil
 }
 
-// UpdateRiskScore refreshes the computed risk score of an asset.
-func (r *AssetRepository) UpdateRiskScore(ctx context.Context, tenantID, assetID uuid.UUID, score float64) error {
-	const q = `UPDATE assets SET risk_score = $1 WHERE id = $2 AND tenant_id = $3`
-	_, err := r.db.Exec(ctx, q, score, assetID, tenantID)
-	return err
+// RiskProfile is the risk appetite in force for a tenant.
+//
+// It reads tenant_risk_profile, which falls back to the standard profile for a
+// tenant that has not chosen one — so a fresh install scores with the values
+// the platform documents rather than with nothing.
+func (r *AssetRepository) RiskProfile(ctx context.Context, tenantID uuid.UUID) (*model.RiskProfile, error) {
+	const q = `
+		SELECT profile_id, code, name, version, is_tenant_profile, COALESCE(based_on, ''),
+		       criticality_step, criticality_cap,
+		       vuln_critical, vuln_high, vuln_medium, vuln_low, vuln_cap,
+		       cbs_connected, swift_connected, pci_scope, exposure_cap,
+		       never_seen, critical_production, banking_type, context_cap,
+		       total_cap, high_risk_threshold
+		FROM tenant_risk_profile WHERE tenant_id = $1`
+
+	var p model.RiskProfile
+	err := r.db.QueryRow(ctx, q, tenantID).Scan(
+		&p.ID, &p.Code, &p.Name, &p.Version, &p.IsTenantProfile, &p.BasedOn,
+		&p.CriticalityStep, &p.CriticalityCap,
+		&p.VulnCritical, &p.VulnHigh, &p.VulnMedium, &p.VulnLow, &p.VulnCap,
+		&p.CBSConnected, &p.SWIFTConnected, &p.PCIScope, &p.ExposureCap,
+		&p.NeverSeen, &p.CriticalProduction, &p.BankingType, &p.ContextCap,
+		&p.TotalCap, &p.HighRiskThreshold,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("risk profile: %w", err)
+	}
+	return &p, nil
 }
 
 // UpdateLastSeen touches the last_seen_at timestamp.
@@ -366,13 +418,14 @@ func (r *AssetRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 	// Total + risk/flag counts
 	const q1 = `
 		SELECT COUNT(*),
-		       COUNT(*) FILTER (WHERE risk_score >= 7),
+		       -- What counts as high risk is the tenant's own line, not ours.
+		       COUNT(*) FILTER (WHERE risk_score >= risk_high_threshold),
 		       COUNT(*) FILTER (WHERE is_cbs_connected),
 		       COUNT(*) FILTER (WHERE is_swift_connected),
 		       COUNT(*) FILTER (WHERE is_pci_scope),
 		       COUNT(*) FILTER (WHERE last_seen_at IS NULL),
 		       COUNT(*) FILTER (WHERE last_seen_at < NOW() - INTERVAL '30 days')
-		FROM assets WHERE tenant_id = $1 AND deleted_at IS NULL`
+		FROM asset_risk WHERE tenant_id = $1 AND deleted_at IS NULL`
 
 	if err := r.db.QueryRow(ctx, q1, tenantID).Scan(
 		&stats.Total, &stats.HighRisk, &stats.CBSConnected,
@@ -501,11 +554,11 @@ type scannable interface {
 func scanAsset(row scannable) (*model.Asset, error) {
 	a := &model.Asset{}
 	var (
-		hostname, fqdn, os, osVer           *string
-		dept, loc, bizSvc, discoveredBy     *string
-		ownerID                             *uuid.UUID
-		lastSeen                            *time.Time
-		metadata                            map[string]any
+		hostname, fqdn, os, osVer       *string
+		dept, loc, bizSvc, discoveredBy *string
+		ownerID                         *uuid.UUID
+		lastSeen                        *time.Time
+		metadata                        map[string]any
 	)
 	err := row.Scan(
 		&a.ID, &a.TenantID, &a.Name, &hostname, &fqdn,
@@ -515,6 +568,7 @@ func scanAsset(row scannable) (*model.Asset, error) {
 		&ownerID, &dept, &loc, &bizSvc,
 		&a.IsCBSConnected, &a.IsSWIFTConnected, &a.IsPCIScope,
 		&a.RiskScore, &a.VulnCritical, &a.VulnHigh, &a.VulnMedium, &a.VulnLow,
+		&a.RiskProfileCode,
 		&a.Tags, &metadata, &discoveredBy,
 		&lastSeen, &a.FirstSeenAt, &a.CreatedAt, &a.UpdatedAt,
 	)

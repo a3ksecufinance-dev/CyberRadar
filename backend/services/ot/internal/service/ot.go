@@ -100,13 +100,13 @@ func (s *OTService) CreateVulnerability(ctx context.Context, tenantID uuid.UUID,
 	}
 	if v.Severity == "critical" || v.AffectsSafety {
 		go s.publish("ot.critical_vulnerability", map[string]any{
-			"vuln_id":         v.ID,
-			"tenant_id":       v.TenantID,
-			"asset_id":        v.AssetID,
-			"severity":        v.Severity,
-			"affects_safety":  v.AffectsSafety,
-			"cve_id":          v.CVEID,
-			"ics_cert_id":     v.ICSCertID,
+			"vuln_id":        v.ID,
+			"tenant_id":      v.TenantID,
+			"asset_id":       v.AssetID,
+			"severity":       v.Severity,
+			"affects_safety": v.AffectsSafety,
+			"cve_id":         v.CVEID,
+			"ics_cert_id":    v.ICSCertID,
 		})
 	}
 	return v, nil

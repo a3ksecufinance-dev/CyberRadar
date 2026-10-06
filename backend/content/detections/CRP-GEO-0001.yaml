@@ -1,0 +1,50 @@
+# CRP-GEO-0001 — Accès depuis un pays sous sanctions
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-GEO-0001
+title: Accès depuis un pays sous sanctions
+description: Une authentification depuis un pays que la plateforme classe comme sous sanctions.
+category: IAM
+severity: CRITICAL
+mitre:
+  tactic: TA0001
+  technique: T1078
+conditions:
+  field_matches:
+  - op: eq
+    field: geo_anomaly
+    value: 'true'
+  - op: eq
+    field: category
+    value: IAM
+actions:
+- type: notify
+- type: create_case
+dedup_window_s: 300
+rationale: >-
+  Un accès depuis une juridiction sous sanctions est à la fois un signal de compromission
+  et un sujet de conformité en soi.
+false_positives: >-
+  Un collaborateur en déplacement, un VPN mal choisi. La résolution géographique se trompe
+  aussi.
+response: >-
+  Confirmer la localisation par un second moyen avant d'agir : bloquer un dirigeant en déplacement
+  coûte cher.
+frameworks:
+- DORA
+- ISO27001
+controls:
+- DORA-10.3
+- A.5.7
+requires:
+- 'Base GeoIP MaxMind (GEOIP_DATABASE_PATH) : sans elle l''enrichissement ne résout aucun
+  pays et la règle ne peut pas déclencher.'
+enabled_by_default: false
+tags:
+- géographie
+- standard

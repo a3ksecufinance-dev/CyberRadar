@@ -55,11 +55,11 @@ const (
 // ─── Case statuses ────────────────────────────────────────────────────────────
 
 const (
-	CaseStatusOpen               = "open"
-	CaseStatusUnderReview        = "under_review"
-	CaseStatusEscalated          = "escalated"
-	CaseStatusSARFiled           = "sar_filed"
-	CaseStatusClosedConfirmed    = "closed_confirmed"
+	CaseStatusOpen                = "open"
+	CaseStatusUnderReview         = "under_review"
+	CaseStatusEscalated           = "escalated"
+	CaseStatusSARFiled            = "sar_filed"
+	CaseStatusClosedConfirmed     = "closed_confirmed"
 	CaseStatusClosedFalsePositive = "closed_false_positive"
 )
 
@@ -75,11 +75,11 @@ const (
 // ─── Watchlist types ──────────────────────────────────────────────────────────
 
 const (
-	WatchlistInternal    = "internal"
-	WatchlistSanctions   = "sanctions"
-	WatchlistPEP         = "pep"
+	WatchlistInternal     = "internal"
+	WatchlistSanctions    = "sanctions"
+	WatchlistPEP          = "pep"
 	WatchlistAdverseMedia = "adverse_media"
-	WatchlistCustom      = "custom"
+	WatchlistCustom       = "custom"
 )
 
 // ─── Core structs ─────────────────────────────────────────────────────────────
@@ -135,23 +135,23 @@ type FraudSignal struct {
 }
 
 type FraudCase struct {
-	ID             uuid.UUID    `json:"id"`
-	TenantID       uuid.UUID    `json:"tenant_id"`
-	CaseNumber     string       `json:"case_number"`
-	Title          string       `json:"title"`
-	Category       string       `json:"category"`
-	Severity       string       `json:"severity"`
-	Status         string       `json:"status"`
-	AssignedTo     *uuid.UUID   `json:"assigned_to,omitempty"`
-	TransactionIDs []uuid.UUID  `json:"transaction_ids"`
-	TotalAmount    float64      `json:"total_amount"`
-	Currency       string       `json:"currency"`
-	SARRequired    bool         `json:"sar_required"`
-	SARFiledAt     *time.Time   `json:"sar_filed_at,omitempty"`
-	Notes          string       `json:"notes,omitempty"`
-	ResolvedAt     *time.Time   `json:"resolved_at,omitempty"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
+	ID             uuid.UUID   `json:"id"`
+	TenantID       uuid.UUID   `json:"tenant_id"`
+	CaseNumber     string      `json:"case_number"`
+	Title          string      `json:"title"`
+	Category       string      `json:"category"`
+	Severity       string      `json:"severity"`
+	Status         string      `json:"status"`
+	AssignedTo     *uuid.UUID  `json:"assigned_to,omitempty"`
+	TransactionIDs []uuid.UUID `json:"transaction_ids"`
+	TotalAmount    float64     `json:"total_amount"`
+	Currency       string      `json:"currency"`
+	SARRequired    bool        `json:"sar_required"`
+	SARFiledAt     *time.Time  `json:"sar_filed_at,omitempty"`
+	Notes          string      `json:"notes,omitempty"`
+	ResolvedAt     *time.Time  `json:"resolved_at,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
 }
 
 type FraudWatchlistEntry struct {
@@ -169,16 +169,16 @@ type FraudWatchlistEntry struct {
 }
 
 type FraudStats struct {
-	TotalTransactions    int                `json:"total_transactions"`
-	FlaggedTransactions  int                `json:"flagged_transactions"`
-	BlockedTransactions  int                `json:"blocked_transactions"`
-	OpenCases            int                `json:"open_cases"`
-	SARRequired          int                `json:"sar_required"`
-	WatchlistEntries     int                `json:"watchlist_entries"`
-	TotalSuspiciousAmt   float64            `json:"total_suspicious_amount"`
-	TransactionsByStatus map[string]int     `json:"transactions_by_status"`
-	CasesByCategory      map[string]int     `json:"cases_by_category"`
-	TopRules             []*RuleStats       `json:"top_rules"`
+	TotalTransactions    int            `json:"total_transactions"`
+	FlaggedTransactions  int            `json:"flagged_transactions"`
+	BlockedTransactions  int            `json:"blocked_transactions"`
+	OpenCases            int            `json:"open_cases"`
+	SARRequired          int            `json:"sar_required"`
+	WatchlistEntries     int            `json:"watchlist_entries"`
+	TotalSuspiciousAmt   float64        `json:"total_suspicious_amount"`
+	TransactionsByStatus map[string]int `json:"transactions_by_status"`
+	CasesByCategory      map[string]int `json:"cases_by_category"`
+	TopRules             []*RuleStats   `json:"top_rules"`
 }
 
 type RuleStats struct {
@@ -236,10 +236,10 @@ type CreateCaseRequest struct {
 }
 
 type UpdateCaseRequest struct {
-	Status     string     `json:"status"`
-	AssignedTo *uuid.UUID `json:"assigned_to"`
-	SARRequired *bool     `json:"sar_required"`
-	Notes      string     `json:"notes"`
+	Status      string     `json:"status"`
+	AssignedTo  *uuid.UUID `json:"assigned_to"`
+	SARRequired *bool      `json:"sar_required"`
+	Notes       string     `json:"notes"`
 }
 
 type AddWatchlistRequest struct {

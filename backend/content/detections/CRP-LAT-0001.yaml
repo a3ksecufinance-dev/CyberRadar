@@ -1,0 +1,47 @@
+# CRP-LAT-0001 — Déplacement latéral par service distant
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-LAT-0001
+title: Déplacement latéral par service distant
+description: Une action que l'enrichissement classe en déplacement latéral (RDP, SSH, WMI,
+  PsExec).
+category: Network
+severity: HIGH
+mitre:
+  tactic: TA0008
+  technique: T1021
+conditions:
+  field_matches:
+  - op: eq
+    field: mitre_technique
+    value: T1021
+actions:
+- type: notify
+dedup_window_s: 600
+rationale: >-
+  Le déplacement latéral est ce qui transforme un poste compromis en incident de cœur bancaire.
+  La règle s'appuie sur la classification ATT&CK de l'enrichissement plutôt que sur une liste
+  de verbes, afin de couvrir les quatre protocoles d'un coup.
+false_positives: >-
+  L'administration quotidienne en produit énormément. À affiner sur les zones : un flux d'administration
+  vers la zone de paiement est une autre affaire qu'un flux au sein d'un même segment bureautique.
+response: >-
+  Rapprocher des zones source et destination. Un franchissement de zone est l'écart à instruire.
+frameworks:
+- DORA
+- SWIFTCSP
+- ISO27001
+controls:
+- DORA-10.3
+- CSCF-1.1
+- A.8.22
+requires: []
+enabled_by_default: true
+tags:
+- latéral
+- standard

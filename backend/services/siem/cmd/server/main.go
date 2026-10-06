@@ -11,15 +11,21 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/cache"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/internal/pkg/event"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/kpi"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/siem/internal/handler"
 	"github.com/cyberradar/platform/services/siem/internal/repository"
 	"github.com/cyberradar/platform/services/siem/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -28,11 +34,24 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "siem-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8008")
-	jwtSecret := mustEnv("JWT_SECRET")
-	dbURL     := mustEnv("DATABASE_URL")
-	chDSN     := mustEnv("CLICKHOUSE_DSN")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"siem-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8008")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	dbURL := mustEnv("DATABASE_URL")
+	chDSN := mustEnv("CLICKHOUSE_DSN")
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -43,6 +62,14 @@ func main() {
 		logger.Fatal().Err(err).Msg("postgres connect failed")
 	}
 	defer pool.Close()
+
+	// The web interface signs users in against an external provider and sends
+	// that provider's token. Without this the service accepts only tokens
+	// signed by identity-service and answers every call from a browser 401.
+	providerOpt, err := authmw.ProviderFromEnv(ctx, pool, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("identity provider")
+	}
 
 	// ── ClickHouse ────────────────────────────────────────────────────────────
 	opts, err := clickhouse.ParseDSN(chDSN)
@@ -56,22 +83,57 @@ func main() {
 	}
 	defer chConn.Close()
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	// Threshold rules count across every replica, not inside one process.
+	redisClient, err := cache.NewFromURL(ctx, os.Getenv("REDIS_URL"), logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("redis url invalid")
+	}
+	if redisClient != nil {
+		defer redisClient.Close()
+	}
+	thresholds := cache.NewWindow(redisClient, "siem:threshold", logger)
+
 	// ── Repositories ──────────────────────────────────────────────────────────
-	ruleRepo  := repository.NewRuleRepository(pool)
+	ruleRepo := repository.NewRuleRepository(pool)
 	alertRepo := repository.NewAlertRepository(chConn)
-	caseRepo  := repository.NewCaseRepository(pool)
+	caseRepo := repository.NewCaseRepository(pool)
 
 	// ── SIEM service ──────────────────────────────────────────────────────────
-	siemSvc     := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
+	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
+	// The detection content the platform ships, and the lineage from a tenant's
+	// rules back to it. A detection engine with an empty rule table detects
+	// nothing, and every customer writing the same fifteen rules from memory is
+	// how nobody can say what the platform covers.
+	libraryRepo := repository.NewLibraryRepository(pool)
+	librarySvc := service.NewLibraryService(libraryRepo, ruleRepo, logger)
+	libraryHandler := handler.NewLibraryHandler(librarySvc)
+
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────
-	ruleConsumer := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
-		Brokers:     brokers,
-		Topic:       event.TopicEnriched,
-		GroupID:     "crp-siem-rule-engine",
-		StartOffset: -1,
+	ruleConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
+		Brokers: brokers,
+		Topic:   event.TopicEnriched,
+		GroupID: "crp-siem-rule-engine",
+		// From the beginning, not from the end. This carried -1, which means
+		// "skip whatever arrived while the engine was not running": restart the
+		// SIEM during an attack and the attack is invisible, with nothing
+		// logged to say so. The pipeline worker next to it already read from
+		// the beginning — the service that only stores events was careful with
+		// them and the one that decides whether to raise an alert was not.
+		//
+		// It applies only when the group has no committed offset, so steady
+		// state is unchanged: the engine resumes where it stopped. What changes
+		// is a fresh installation, where it now evaluates the retained history
+		// instead of ignoring it — and the deduplication key (rule, entity,
+		// tenant) is what stops that replay raising the same alert twice.
+		StartOffset: pkgkafka.FromTheBeginning,
+		DLQTopic:    event.TopicDLQ,
 	}, logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("kafka consumer")
+	}
 
 	alertPublisher := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,
@@ -79,7 +141,7 @@ func main() {
 	}, logger)
 	defer alertPublisher.Close()
 
-	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, logger)
+	ruleEngine := service.NewRuleEngine(ruleRepo, alertRepo, caseRepo, ruleConsumer, alertPublisher, thresholds, logger)
 	go func() {
 		if err := ruleEngine.Run(ctx); err != nil {
 			logger.Error().Err(err).Msg("rule_engine_error")
@@ -87,20 +149,41 @@ func main() {
 	}()
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
+	// ── Report this domain's KPIs to the dashboard ────────────────────────────
+	// PlatformOverview is assembled from the latest snapshot each domain
+	// published. Nothing published any, so the overview answered zero for every
+	// tenant — see internal/pkg/kpi.
+	kpi.Start(ctx, kpi.Config{
+		Brokers: brokers,
+		Domain:  "siem",
+		Tenants: kpi.TenantsFromPostgres(pool),
+		Source:  siemSvc.KPISamples,
+	}, logger)
+
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
+	r.Use(observe.Middleware("siem-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"siem-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		r.Use(authmw.RequireJWT(jwtVerifier, logger, providerOpt))
 		siemHandler.RegisterRoutes(r)
+		libraryHandler.RegisterRoutes(r)
 	})
 
 	srv := &http.Server{
@@ -127,42 +210,6 @@ func main() {
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
 	logger.Info().Msg("siem-service stopped")
-}
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
 }
 
 func mustEnv(key string) string {

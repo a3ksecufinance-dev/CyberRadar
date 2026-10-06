@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>CyberRadar — Présentation</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  :root{
+    --ink:#0B1220; --ink-2:#1C2535; --muted:#5B6472; --faint:#8B94A3;
+    --line:#E4E7EC; --surface:#FFFFFF; --wash:#F6F8FB;
+    --accent:#1D4ED8; --accent-soft:#E8EEFD;
+    --ok:#047857; --caution:#B45309; --bad:#B91C1C;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{
+    font-family:"DejaVu Sans","Liberation Sans",Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--surface);
+    font-variant-numeric:tabular-nums;
+  }
+  .slide{
+    width:1280px; height:720px; page-break-after:always; position:relative;
+    padding:68px 84px 64px; overflow:hidden; background:var(--surface);
+  }
+  .slide:last-child{page-break-after:auto;}
+
+  /* ── furniture ─────────────────────────────────────────── */
+  .eyebrow{
+    font-size:13px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent); font-weight:700; margin-bottom:18px;
+  }
+  h1{font-size:62px; line-height:1.04; letter-spacing:-.025em; font-weight:700;}
+  h2{font-size:41px; line-height:1.1; letter-spacing:-.02em; font-weight:700; margin-bottom:10px;}
+  .sub{font-size:20px; line-height:1.45; color:var(--muted); max-width:66ch;}
+  .foot{
+    position:absolute; left:84px; right:84px; bottom:30px;
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12.5px; color:var(--faint); border-top:1px solid var(--line);
+    padding-top:12px; letter-spacing:.04em;
+  }
+  .foot b{color:var(--muted); font-weight:600;}
+
+  /* ── dark slides ───────────────────────────────────────── */
+  .dark{background:var(--ink); color:#fff;}
+  .dark .sub{color:#A9B4C6;} .dark .eyebrow{color:#7FA0F5;}
+  .dark .foot{color:#6B7689; border-top-color:#232E42;}
+  .dark .foot b{color:#9AA6BA;}
+
+  /* ── layout helpers ────────────────────────────────────── */
+  .cols{display:grid; gap:34px; margin-top:34px;}
+  .c2{grid-template-columns:1fr 1fr;} .c3{grid-template-columns:repeat(3,1fr);}
+  .c4{grid-template-columns:repeat(4,1fr);}
+  .c23{grid-template-columns:1.25fr 1fr;}
+  .stack>*+*{margin-top:14px;}
+
+  /* ── figures ───────────────────────────────────────────── */
+  .fig{border-top:3px solid var(--accent); padding-top:14px;}
+  .fig .n{font-size:49px; font-weight:700; letter-spacing:-.03em; line-height:1;}
+  .fig .l{font-size:14.5px; color:var(--muted); margin-top:9px; line-height:1.38;}
+  .fig.warn{border-top-color:var(--caution);} .fig.warn .n{color:var(--caution);}
+  .fig.good{border-top-color:var(--ok);} .fig.good .n{color:var(--ok);}
+  .dark .fig{border-top-color:#7FA0F5;} .dark .fig .l{color:#A9B4C6;}
+
+  /* ── cards ─────────────────────────────────────────────── */
+  .card{background:var(--wash); border:1px solid var(--line); border-radius:10px; padding:22px 24px;}
+  .card h3{font-size:17.5px; font-weight:700; margin-bottom:9px;}
+  .card p{font-size:14.5px; line-height:1.5; color:var(--muted);}
+  .card.flag{background:var(--accent-soft); border-color:#C9D7FA;}
+
+  /* ── lists ─────────────────────────────────────────────── */
+  ul{list-style:none;}
+  li{font-size:17px; line-height:1.5; padding-left:26px; position:relative; margin-bottom:13px;}
+  li:before{
+    content:""; position:absolute; left:0; top:9px; width:9px; height:9px;
+    border-radius:2px; background:var(--accent);
+  }
+  li.ok:before{background:var(--ok);} li.no:before{background:var(--bad);}
+  li.part:before{background:var(--caution);}
+  li b{font-weight:700;}
+  li span{color:var(--muted);}
+
+  /* ── table ─────────────────────────────────────────────── */
+  table{width:100%; border-collapse:collapse; font-size:16px;}
+  th{
+    text-align:left; font-size:12px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--faint); font-weight:700; padding:0 12px 10px 0; border-bottom:1px solid var(--line);
+  }
+  td{padding:13px 12px 13px 0; border-bottom:1px solid var(--line); vertical-align:top;}
+  td.num{font-weight:700; white-space:nowrap;}
+  td small{display:block; color:var(--muted); font-size:13.5px; margin-top:3px; line-height:1.4;}
+  table.tight td{padding:10px 12px 10px 0;}
+  table.dense td{padding:7.5px 12px 7.5px 0;}
+  table.tight td small{margin-top:2px; font-size:12.5px;}
+  .t-ok{color:var(--ok);} .t-no{color:var(--bad);} .t-part{color:var(--caution);}
+
+  /* ── flow ──────────────────────────────────────────────── */
+  .flow{display:flex; align-items:stretch; gap:0; margin-top:30px;}
+  .step{
+    flex:1; border:1px solid var(--line); border-right:none; padding:16px 15px;
+    background:var(--surface);
+  }
+  .step:last-child{border-right:1px solid var(--line);}
+  .step:first-child{border-radius:9px 0 0 9px;} .step:last-child{border-radius:0 9px 9px 0;}
+  .step .k{font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); font-weight:700;}
+  .step .v{font-size:15.5px; font-weight:700; margin-top:7px; line-height:1.3;}
+  .step .t{font-size:13px; color:var(--muted); margin-top:7px; font-weight:600;}
+
+  /* ── bars ──────────────────────────────────────────────── */
+  .bar{margin-bottom:17px;}
+  .bar .top{display:flex; justify-content:space-between; font-size:15px; margin-bottom:7px;}
+  .bar .top b{font-weight:700;}
+  .bar .track{height:9px; background:var(--line); border-radius:5px; overflow:hidden;}
+  .bar .fill{height:100%; background:var(--accent); border-radius:5px;}
+  .bar .fill.warn{background:var(--caution);} .bar .fill.good{background:var(--ok);}
+  .bar .fill.none{background:var(--bad);}
+
+  .note{
+    margin-top:26px; border-left:3px solid var(--accent); padding:4px 0 4px 18px;
+    font-size:16px; line-height:1.5; color:var(--ink-2); max-width:84ch;
+  }
+  .note.warn{border-left-color:var(--caution);}
+  .dark .note{border-left-color:#7FA0F5; color:#D5DDE9;}
+  code{font-family:"DejaVu Sans Mono","Liberation Mono",monospace; font-size:.9em;
+       background:var(--wash); padding:2px 6px; border-radius:4px; border:1px solid var(--line);}
+  .dark code{background:#17202F; border-color:#2A3650; color:#CBD5E6;}
+</style>
+</head>
+<body>
+
+<!-- 1 ───────────────────────────────────────── couverture -->
+<section class="slide dark">
+  <div class="eyebrow">Plateforme de cybersécurité unifiée</div>
+  <h1>CyberRadar</h1>
+  <p class="sub" style="margin-top:26px; font-size:23px; max-width:74ch;">
+    Voir, détecter, répondre et prouver — dans une seule plateforme,
+    conçue pour les exigences du Royaume.
+  </p>
+  <div class="cols c4" style="margin-top:132px;">
+    <div class="fig"><div class="n">25</div><div class="l">domaines de sécurité couverts</div></div>
+    <div class="fig"><div class="n">1</div><div class="l">chaîne continue, de l'événement à la preuve</div></div>
+    <div class="fig"><div class="n">5</div><div class="l">référentiels, dont la DNSSI et la loi 09-08</div></div>
+    <div class="fig"><div class="n">0</div><div class="l">flux sortant nécessaire : vos données restent chez vous</div></div>
+  </div>
+  <div class="foot"><b>AUSIM 2026 — 7 au 9 octobre</b><span>Direction générale · DSI · RSSI · Intégrateurs</span></div>
+</section>
+
+<!-- 2 ───────────────────────────────────────── le constat -->
+<section class="slide">
+  <div class="eyebrow">Le constat</div>
+  <h2>Le problème n'est plus de voir.<br>Il est de relier.</h2>
+  <p class="sub">
+    Un établissement financier marocain exploite aujourd'hui entre quatre et huit outils de
+    sécurité, chacun excellent dans son domaine, aucun ne parlant au suivant.
+  </p>
+  <div class="cols c3" style="margin-top:38px;">
+    <div class="card"><h3>L'information se perd aux jointures</h3>
+      <p>Le SIEM détecte, l'analyste recopie dans l'outil de ticketing, l'ingénieur réseau
+      applique le blocage à la main, et l'auditeur reconstitue la chronologie six mois plus
+      tard à partir de trois exports.</p></div>
+    <div class="card"><h3>Personne ne tient le chiffre</h3>
+      <p>Chaque outil mesure son propre délai. Aucun ne mesure celui qui compte : le temps
+      écoulé entre l'intrusion et le confinement effectif.</p></div>
+    <div class="card"><h3>La conformité est un travail séparé</h3>
+      <p>Les contrôles DNSSI, PCI DSS ou SWIFT se démontrent à partir de captures d'écran et
+      de tableurs, reconstitués à chaque audit.</p></div>
+  </div>
+  <div class="note">
+    Le coût réel n'est pas le prix des licences. C'est le délai de réaction, les équivalents
+    temps plein consacrés à la recopie, et l'impossibilité de répondre simplement à
+    « montrez-moi ».
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>2 / 20</span></div>
+</section>
+
+<!-- 3 ───────────────────────────────────────── la proposition -->
+<section class="slide dark">
+  <div class="eyebrow">La proposition</div>
+  <h1 style="font-size:50px;">Une plateforme, pas une suite</h1>
+  <p class="sub" style="margin-top:22px; max-width:78ch;">
+    Vingt-cinq domaines de sécurité partagent le même inventaire d'actifs, le même modèle
+    d'identité, le même journal d'audit et le même référentiel de conformité. Ce ne sont pas
+    des produits intégrés après coup : c'est un seul produit.
+  </p>
+  <div class="cols c4" style="margin-top:62px;">
+    <div class="fig"><div class="n">Voir</div><div class="l">Ingestion, inventaire, exposition externe, graphe de connaissance</div></div>
+    <div class="fig"><div class="n">Détecter</div><div class="l">SIEM, analyse comportementale, renseignement, chemins d'attaque</div></div>
+    <div class="fig"><div class="n">Répondre</div><div class="l">Automatisation, réponse à incident, action réseau et applicative</div></div>
+    <div class="fig"><div class="n">Prouver</div><div class="l">Journal d'audit, conformité, risque, gouvernance des accès</div></div>
+  </div>
+  <div class="note">
+    Un actif compromis est le même objet pour le moteur de détection, pour l'analyse de risque,
+    pour le contrôle de conformité et pour le journal d'audit. C'est ce partage qui permet la
+    phrase que personne ne peut écrire avec quatre outils : <b>« cette alerte, sur cet actif,
+    a déclenché cette action, et voici la preuve ».</b>
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>3 / 20</span></div>
+</section>
+
+<!-- 4 ───────────────────────────────────────── périmètre -->
+<section class="slide">
+  <div class="eyebrow">Périmètre fonctionnel</div>
+  <h2>Vingt-cinq domaines, sept familles</h2>
+  <div class="cols c4" style="margin-top:28px; gap:22px;">
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Socle</h3>
+      <p style="font-size:13.5px;">Multi-client · Identité, MFA, habilitations · Journal d'audit · Notifications</p></div>
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Visibilité</h3>
+      <p style="font-size:13.5px;">Ingestion syslog et API · Inventaire d'actifs · Surface d'exposition externe · Graphe de connaissance</p></div>
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Détection</h3>
+      <p style="font-size:13.5px;">SIEM et XDR · Analyse comportementale · Renseignement sur la menace · Chemins d'attaque</p></div>
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Réponse</h3>
+      <p style="font-size:13.5px;">Automatisation et playbooks · Réponse à incident · Sécurité réseau · Pare-feu d'API</p></div>
+  </div>
+  <div class="cols c3" style="margin-top:22px; gap:22px;">
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Exposition</h3>
+      <p style="font-size:13.5px;">Vulnérabilités · Posture cloud · Posture des données · Chaîne logicielle · Mobile · Systèmes industriels</p></div>
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Gouvernance</h3>
+      <p style="font-size:13.5px;">Conformité réglementaire · Registre des risques · Gouvernance des accès · Comptes à privilèges · Fuite de données · Fraude</p></div>
+    <div class="card" style="padding:18px 20px;"><h3 style="font-size:15.5px;">Pilotage</h3>
+      <p style="font-size:13.5px;">Tableaux de bord et indicateurs · Assistant d'investigation en langage naturel</p></div>
+  </div>
+  <div class="note">
+    Une organisation n'active pas les vingt-cinq le premier jour. Le socle, la visibilité et la
+    détection constituent le démarrage naturel ; le reste s'ouvre sans nouvelle installation,
+    parce que c'est la même plateforme.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>4 / 20</span></div>
+</section>
+
+<!-- 5 ───────────────────────────────────────── la chaîne -->
+<section class="slide">
+  <div class="eyebrow">Ce qui distingue la plateforme</div>
+  <h2>La chaîne continue, de l'événement à la preuve</h2>
+  <p class="sub">Six passages, et c'est à ces six endroits qu'un ensemble d'outils perd l'information.</p>
+  <div class="flow">
+    <div class="step"><div class="k">1 · Ingestion</div><div class="v">Le journal arrive</div><div class="t">syslog, API, normalisation</div></div>
+    <div class="step"><div class="k">2 · Détection</div><div class="v">La règle correspond</div><div class="t">corrélation, seuils, UEBA</div></div>
+    <div class="step"><div class="k">3 · Qualification</div><div class="v">Le cas est ouvert</div><div class="t">alerte enrichie du contexte d'actif</div></div>
+    <div class="step"><div class="k">4 · Décision</div><div class="v">Le playbook s'applique</div><div class="t">manuel ou automatique</div></div>
+    <div class="step"><div class="k">5 · Action</div><div class="v">L'adresse est bloquée</div><div class="t">politique réseau, compte, session</div></div>
+    <div class="step"><div class="k">6 · Preuve</div><div class="v">L'audit nomme l'auteur</div><div class="t">playbook, acteur, ressource, horodatage</div></div>
+  </div>
+  <div class="cols c2" style="margin-top:34px;">
+    <div class="card flag"><h3>Le chiffre qu'aucun outil isolé ne produit</h3>
+      <p>Le délai entre la première tentative et le confinement effectif, mesuré étape par
+      étape. C'est la réponse à la question d'un régulateur, et c'est le seul indicateur
+      qu'une direction générale puisse suivre.</p></div>
+    <div class="card"><h3>Mesuré en continu, pas une fois</h3>
+      <p>Ce parcours s'exécute automatiquement à chaque modification du produit, contre une
+      plateforme réelle. Une rupture entre deux étapes arrête la livraison.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>5 / 20</span></div>
+</section>
+
+<!-- 6 ───────────────────────────────────────── le parcours -->
+<section class="slide">
+  <div class="eyebrow">Fonctionnement</div>
+  <h2>Le parcours d'un événement</h2>
+  <table style="margin-top:26px;" class="tight">
+    <tr><th>Étape</th><th>Ce qui se passe</th><th>Ce que cela apporte</th></tr>
+    <tr><td><b>Collecte</b></td><td>Journaux syslog (RFC 3164, RFC 5424, CEF) ou appels d'API</td><td>Une seule porte d'entrée, quel que soit l'équipement</td></tr>
+    <tr><td><b>Normalisation</b></td><td>Traduction vers une taxonomie unique : acteur, action, actif, résultat</td><td>Une règle écrite une fois s'applique à toutes les sources</td></tr>
+    <tr><td><b>Enrichissement</b></td><td>Géolocalisation, correspondance avec les indicateurs connus, score de risque</td><td>La décision tient compte du contexte, pas seulement du journal</td></tr>
+    <tr><td><b>Corrélation</b></td><td>Règles à seuil et à fenêtre, comptage partagé entre répliques</td><td>Une attaque lente et répartie reste détectée</td></tr>
+    <tr><td><b>Qualification</b></td><td>L'alerte porte l'actif, sa criticité, son exposition et ses dépendances</td><td>L'analyste décide sans ouvrir trois autres outils</td></tr>
+    <tr><td style="border-bottom:none;"><b>Action et trace</b></td><td style="border-bottom:none;">Playbook exécuté contre les API réelles, puis journal d'audit</td><td style="border-bottom:none;">Ce qui a été fait est opposable</td></tr>
+  </table>
+  <div class="note">
+    L'enrichissement a lieu <b>avant</b> la détection, et non à côté. Un indicateur reconnu au
+    moment de l'ingestion influence la règle ; reconnu après, il n'aurait rien changé.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>6 / 20</span></div>
+</section>
+
+<!-- 7 ───────────────────────────────────────── architecture -->
+<section class="slide dark">
+  <div class="eyebrow">Architecture</div>
+  <h1 style="font-size:50px;">Conçue pour durer et pour s'exploiter</h1>
+  <div class="cols c4" style="margin-top:46px;">
+    <div class="fig"><div class="n">Go</div><div class="l">services compilés, empreinte mémoire basse, pas de machine virtuelle à régler</div></div>
+    <div class="fig"><div class="n">Kafka</div><div class="l">bus d'événements : une coupure ne fait pas perdre la détection</div></div>
+    <div class="fig"><div class="n">2</div><div class="l">bases : PostgreSQL pour l'état, ClickHouse pour l'historique volumineux</div></div>
+    <div class="fig"><div class="n">REST</div><div class="l">tout ce que fait l'interface passe par une API documentée</div></div>
+  </div>
+  <div class="cols c3" style="margin-top:42px;">
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Chaque domaine est indépendant</h3>
+      <p style="color:#A9B4C6;">Un domaine se met à jour, redémarre ou monte en charge sans
+      toucher aux autres. Une panne reste locale.</p></div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Rien n'est perdu en silence</h3>
+      <p style="color:#A9B4C6;">File d'attente de rejet, reprise automatique après coupure du
+      bus, reprise des événements arrivés pendant un redémarrage.</p></div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Observable</h3>
+      <p style="color:#A9B4C6;">Traces distribuées, métriques exportables vers vos outils de
+      supervision, journaux structurés.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar · Architecture</b><span>7 / 20</span></div>
+</section>
+
+<!-- 8 ───────────────────────────────────────── souveraineté -->
+<section class="slide">
+  <div class="eyebrow">Souveraineté</div>
+  <h2>Vos données restent où vous les mettez</h2>
+  <div class="cols c2" style="margin-top:30px;">
+    <ul>
+      <li class="ok"><b>Hébergement de votre choix.</b> <span>Vos serveurs, votre centre de données, un hébergeur marocain. La plateforme n'appelle aucun service extérieur pour fonctionner.</span></li>
+      <li class="ok"><b>Aucun flux sortant nécessaire au fonctionnement.</b> <span>Pas de télémétrie, pas d'envoi de journaux vers un éditeur, pas de licence à valider en ligne. Un seul composant du produit appelle l'extérieur, et il est optionnel.</span></li>
+      <li class="ok"><b>Transferts hors du Royaume maîtrisés.</b> <span>La loi 09-08 impose une autorisation préalable de la CNDP. La plateforme n'en crée aucun de son fait.</span></li>
+    </ul>
+    <div class="stack">
+      <div class="card flag"><h3>Pourquoi c'est un sujet ici</h3>
+        <p>La plupart des plateformes de sécurité modernes sont des services hébergés à
+        l'étranger : vos journaux d'authentification, vos adresses internes et votre
+        cartographie d'actifs y transitent par construction. Pour un établissement soumis à
+        la DNSSI, c'est une question qui se pose avant toute discussion technique.</p></div>
+      <div class="card"><h3>Les deux exceptions, et ce qu'elles valent</h3>
+        <p><b>L'assistant d'investigation</b> s'appuie sur un modèle externe : il se désactive,
+        et la plateforme fonctionne entièrement sans lui. <b>Les livraisons de contenu de
+        détection</b> arrivent par un canal signé — comme une mise à jour logicielle, à votre
+        rythme, et le paquet s'installe aussi depuis un fichier.</p></div>
+    </div>
+  </div>
+  <div class="foot"><b>CyberRadar · Souveraineté</b><span>8 / 20</span></div>
+</section>
+
+<!-- 9 ───────────────────────────────────────── sécurité -->
+<section class="slide">
+  <div class="eyebrow">Sécurité de la plateforme</div>
+  <h2>Une plateforme de sécurité est jugée d'abord sur la sienne</h2>
+  <div class="cols c2" style="margin-top:28px;">
+    <ul>
+      <li class="ok"><b>Cloisonnement multi-client strict.</b> <span>Chaque écriture vérifie que l'objet visé appartient bien à l'organisation appelante, avant d'écrire.</span></li>
+      <li class="ok"><b>Habilitations appliquées à l'exécution.</b> <span>Chaque opération exige une permission nommée, résolue depuis les rôles de la personne — pas un masquage de bouton dans l'interface.</span></li>
+      <li class="ok"><b>Jetons à signature asymétrique.</b> <span>La clé privée n'existe que dans le service qui émet. Aucun secret partagé entre composants.</span></li>
+    </ul>
+    <ul>
+      <li class="ok"><b>Les actions automatiques sont tracées.</b> <span>Un pare-feu modifié par un playbook laisse une trace nommant le playbook, l'automate et la ressource. Un robot n'agit pas anonymement.</span></li>
+      <li class="ok"><b>Double authentification.</b> <span>TOTP, et des comptes de service distincts des comptes de personnes.</span></li>
+      <li class="ok"><b>Dépendances surveillées en continu.</b> <span>Une vulnérabilité connue dans une bibliothèque arrête la livraison ; les dérogations sont datées et expirent d'elles-mêmes.</span></li>
+    </ul>
+  </div>
+  <div class="note">
+    Ces points ne sont pas déclaratifs : chacun est tenu par des tests exécutés à chaque
+    modification, et nous pouvons les montrer.
+  </div>
+  <div class="foot"><b>CyberRadar · Sécurité</b><span>9 / 20</span></div>
+</section>
+
+<!-- 10 ──────────────────────────────────────── conformité -->
+<section class="slide">
+  <div class="eyebrow">Conformité</div>
+  <h2>Les référentiels qui obligent au Maroc</h2>
+  <div class="cols c23" style="margin-top:26px;">
+    <table class="tight" style="font-size:15px;">
+      <tr><th>Référentiel</th><th>Portée</th></tr>
+      <tr><td><b>DNSSI</b><small>Directive Nationale de la Sécurité des Systèmes d'Information — DGSSI</small></td><td>Infrastructures d'importance vitale</td></tr>
+      <tr><td><b>Loi 09-08</b><small>Protection des données à caractère personnel — CNDP</small></td><td>Données personnelles, transferts hors du Royaume</td></tr>
+      <tr><td><b>PCI DSS 4.0</b><small>Industrie des cartes de paiement</small></td><td>Monétique, réseau de distributeurs</td></tr>
+      <tr><td><b>SWIFT CSP</b><small>Customer Security Controls Framework</small></td><td>Paiements internationaux</td></tr>
+      <tr><td style="border-bottom:none;"><b>ISO/IEC 27001:2022</b><small>Management de la sécurité de l'information</small></td><td style="border-bottom:none;">Transverse</td></tr>
+    </table>
+    <div class="stack">
+      <div class="card flag"><h3>Un contrôle relié à des actifs réels</h3>
+        <p>Un contrôle ne porte pas une case à cocher : il porte les actifs concernés, un score,
+        et la preuve qui l'étaye. L'écart se lit, il ne se reconstitue pas.</p></div>
+      <div class="card"><h3>Le référentiel que vous apportez</h3>
+        <p>Un référentiel interne, sectoriel ou imposé par un correspondant s'enregistre comme
+        les cinq autres. La liste n'est pas fermée.</p></div>
+    </div>
+  </div>
+  <div class="note">
+    DORA n'y figure pas : c'est un règlement européen, qui n'oblige pas un établissement de
+    droit marocain. Nous présentons ce qui s'applique ici.
+  </div>
+  <div class="foot"><b>CyberRadar · Conformité</b><span>10 / 20</span></div>
+</section>
+
+<!-- 11 ──────────────────────────────────────── DG -->
+<section class="slide dark">
+  <div class="eyebrow">Pour la direction générale</div>
+  <h1 style="font-size:46px;">Trois questions, trois réponses</h1>
+  <div class="cols c3" style="margin-top:50px;">
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">« Sommes-nous exposés ? »</h3>
+      <p style="color:#A9B4C6;">Une cartographie unique : les actifs, leur criticité métier,
+      leur exposition, et les chemins qu'un attaquant peut emprunter pour atteindre le cœur
+      bancaire. Une seule page, pas un rapprochement de tableurs.</p></div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">« Combien de temps pour réagir ? »</h3>
+      <p style="color:#A9B4C6;">Le délai entre la première tentative et le confinement
+      effectif, mesuré de bout en bout. C'est l'indicateur qu'un conseil d'administration
+      peut suivre, et celui qu'un régulateur demande.</p></div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">« Sommes-nous en règle ? »</h3>
+      <p style="color:#A9B4C6;">L'état des contrôles DNSSI, loi 09-08, PCI DSS et SWIFT, relié
+      aux actifs réels et à leur preuve. L'audit se prépare en continu, pas en trois semaines
+      avant la visite.</p></div>
+  </div>
+  <div class="note">
+    <b>Ce que cela change dans l'organisation :</b> une équipe de sécurité passe un temps
+    considérable à recopier d'un outil à l'autre. Ce temps revient à l'analyse. C'est le gain
+    le plus concret, et le plus difficile à obtenir autrement.
+  </div>
+  <div class="foot"><b>CyberRadar · Direction générale</b><span>11 / 20</span></div>
+</section>
+
+<!-- 12 ──────────────────────────────────────── DSI -->
+<section class="slide">
+  <div class="eyebrow">Pour la direction des systèmes d'information</div>
+  <h2>Exploitable par une équipe réelle</h2>
+  <div class="cols c2" style="margin-top:28px;">
+    <ul>
+      <li><b>Installation en une commande.</b> <span>Conteneurs ou binaires. Infrastructure, schéma, contenu, identités, services : des étapes séparables, chacune reprenant où elle s'est arrêtée.</span></li>
+      <li><b>Mises à jour sans interruption de service.</b> <span>Le schéma évolue par migrations versionnées, appliquées une seule fois, sur une base en production — sans la détruire.</span></li>
+      <li><b>Pas de dépendance propriétaire.</b> <span>PostgreSQL, Kafka, Redis, ClickHouse : des briques connues, que vos équipes savent exploiter et sauvegarder.</span></li>
+    </ul>
+    <ul>
+      <li><b>Supervision par vos outils.</b> <span>Métriques Prometheus, traces OpenTelemetry, journaux structurés : la plateforme s'intègre à votre supervision, elle ne la remplace pas.</span></li>
+      <li><b>Montée en charge par domaine.</b> <span>Le domaine qui sature se double, sans toucher aux autres. Les compteurs sont partagés, donc deux instances comptent ensemble.</span></li>
+      <li><b>Un contrôle avant mise en service.</b> <span>Une commande vérifie magasins, schéma, services, données et la chaîne complète, puis rend un verdict.</span></li>
+    </ul>
+  </div>
+  <div class="note">
+    <b>Dimensionnement d'un démarrage :</b> une machine de huit cœurs et trente-deux gigaoctets
+    porte l'ensemble pour un pilote. La croissance se fait par domaine, pas par refonte.
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>12 / 20</span></div>
+</section>
+
+<!-- 13 ──────────────────────────────────────── RSSI -->
+<section class="slide">
+  <div class="eyebrow">Pour le RSSI</div>
+  <h2>Du signal à la preuve, sans rupture</h2>
+  <div class="cols c3" style="margin-top:28px;">
+    <div class="card"><h3>Détection</h3>
+      <p>Règles à seuil et à fenêtre, analyse comportementale par profil, correspondance avec
+      les indicateurs connus <b>avant</b> la décision. Couverture ATT&amp;CK lisible, et
+      l'écart de couverture assumé plutôt que masqué.</p></div>
+    <div class="card"><h3>Réponse</h3>
+      <p>Playbooks exécutés contre les API réelles : blocage d'adresse, désactivation de
+      compte, isolement d'actif, ouverture de cas. Manuels ou automatiques, avec le même
+      niveau de trace.</p></div>
+    <div class="card"><h3>Preuve</h3>
+      <p>Un journal d'audit qui nomme l'auteur de chaque action — personne ou automate — la
+      ressource touchée et le résultat. C'est ce qui transforme « nous avons réagi » en
+      élément opposable.</p></div>
+  </div>
+  <div class="cols c2" style="margin-top:26px;">
+    <div class="card flag"><h3>Le catalogue de détection vous appartient</h3>
+      <p>La plateforme livre un catalogue de détections signé. Vous adoptez celles qui vous
+      conviennent, vous les ajustez, et <b>l'écart par rapport au standard reste tracé</b> :
+      c'est ce que vous défendez devant un auditeur qui demande pourquoi un seuil est à trois
+      et non à cinq.</p></div>
+    <div class="card"><h3>Les seuils sont les vôtres</h3>
+      <p>Seuils comportementaux, délais de remédiation par criticité, pondérations des chemins
+      d'attaque : paramétrables par votre équipe, sans livraison de code et sans nous.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar · RSSI</b><span>13 / 20</span></div>
+</section>
+
+<!-- 14 ──────────────────────────────────────── intégrateur -->
+<section class="slide">
+  <div class="eyebrow">Pour l'intégrateur</div>
+  <h2>Une plateforme à intégrer, pas une boîte noire</h2>
+  <div class="cols c4" style="margin-top:28px;">
+    <div class="fig"><div class="n">455</div><div class="l">routes d'API documentées : tout ce que fait l'interface, vous pouvez le faire</div></div>
+    <div class="fig"><div class="n">22</div><div class="l">chapitres de documentation, dont une référence d'API générée depuis le code</div></div>
+    <div class="fig"><div class="n">0</div><div class="l">fonction réservée à l'éditeur : il n'y a pas d'API privée</div></div>
+    <div class="fig"><div class="n">1</div><div class="l">commande pour vérifier une installation avant de la livrer</div></div>
+  </div>
+  <div class="cols c3" style="margin-top:34px;">
+    <div class="card"><h3>Ce que vous déployez</h3>
+      <p>Une installation conteneurisée, des identifiants générés, des clés de signature
+      propres au client. Le durcissement est scripté et dit ce qu'il ne fait pas.</p></div>
+    <div class="card"><h3>Ce que vous branchez</h3>
+      <p>Les sources du client par syslog ou par API. Les comptes de service obtiennent leurs
+      jetons par échange d'identifiants, avec les permissions de leur rôle et rien de plus.</p></div>
+    <div class="card"><h3>Ce que vous pouvez vendre</h3>
+      <p>Vos propres détections, signées de votre clé et livrées à vos clients par le même
+      mécanisme que les nôtres. Le format et l'outil de validation sont documentés.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar · Intégrateur</b><span>14 / 20</span></div>
+</section>
+
+<!-- 15 ──────────────────────────────────────── contenu -->
+<section class="slide">
+  <div class="eyebrow">Ce qui distingue la plateforme</div>
+  <h2>La couverture de détection est un objet, pas une promesse</h2>
+  <p class="sub">Chez la plupart des éditeurs, les règles sont dans le produit : les faire évoluer demande une montée de version.</p>
+  <div class="flow">
+    <div class="step"><div class="k">Catalogue</div><div class="v">Des détections versionnées</div><div class="t">des fichiers, pas du code</div></div>
+    <div class="step"><div class="k">Signature</div><div class="v">Paquet signé</div><div class="t">empreinte vérifiable</div></div>
+    <div class="step"><div class="k">Publication</div><div class="v">Canal indépendant</div><div class="t">rotation et révocation des clés</div></div>
+    <div class="step"><div class="k">Adoption</div><div class="v">Vous prenez ce qui convient</div><div class="t">et vous l'ajustez</div></div>
+    <div class="step"><div class="k">Généalogie</div><div class="v">L'écart reste tracé</div><div class="t">et défendable en audit</div></div>
+  </div>
+  <div class="cols c2" style="margin-top:32px;">
+    <div class="card flag"><h3>Ce que cela permet</h3>
+      <p>Une nouvelle famille d'attaque est couverte par une livraison de contenu, en heures,
+      sans toucher à la plateforme ni planifier une fenêtre de maintenance.</p></div>
+    <div class="card"><h3>Et pour un intégrateur</h3>
+      <p>Une offre de contenu propre : vos détections sectorielles, signées, livrées à votre
+      parc de clients indépendamment de nos versions.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>15 / 20</span></div>
+</section>
+
+<!-- 16 ──────────────────────────────────────── paramétrage -->
+<section class="slide">
+  <div class="eyebrow">Ce qui distingue la plateforme</div>
+  <h2>Ce qui relève de la politique de sécurité ne doit pas être dans le code</h2>
+  <table style="margin-top:28px;" class="tight">
+    <tr><th>Décision</th><th>Qui la prend</th><th>Comment</th></tr>
+    <tr><td><b>À partir de combien de tentatives un compte est-il suspect ?</b></td><td>Le RSSI</td><td>Seuils comportementaux, par organisation</td></tr>
+    <tr><td><b>En combien de jours une vulnérabilité critique doit-elle être corrigée ?</b></td><td>Le RSSI, avec la DSI</td><td>Délais de remédiation par criticité</td></tr>
+    <tr><td><b>Quel chemin d'attaque est le plus préoccupant ?</b></td><td>Le RSSI</td><td>Pondérations du calcul de chemins</td></tr>
+    <tr><td style="border-bottom:none;"><b>Quelle détection activer, et avec quel ajustement ?</b></td><td style="border-bottom:none;">Le RSSI</td><td style="border-bottom:none;">Adoption depuis le catalogue, avec traçabilité de l'écart</td></tr>
+  </table>
+  <div class="note">
+    Aucune de ces quatre décisions ne demande une livraison, un ticket chez l'éditeur ou une
+    fenêtre de maintenance. Une politique de sécurité qui exige une montée de version pour
+    changer un seuil n'est pas une politique : c'est une demande d'évolution.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>16 / 20</span></div>
+</section>
+
+<!-- 17 ──────────────────────────────────────── interface -->
+<section class="slide">
+  <div class="eyebrow">L'interface</div>
+  <h2>Pensée pour l'analyste, lisible par le comité</h2>
+  <div class="cols c3" style="margin-top:30px;">
+    <div class="card"><h3>Le quotidien de l'analyste</h3>
+      <p>Alertes, cas, incidents, actifs, vulnérabilités, chemins d'attaque. L'alerte porte
+      déjà le contexte de l'actif : criticité, exposition, dépendances, vulnérabilités
+      ouvertes.</p></div>
+    <div class="card"><h3>La vue du responsable</h3>
+      <p>Tableaux de bord, posture de conformité par référentiel, registre des risques,
+      profil de risque de l'organisation. Les chiffres viennent des mêmes données que les
+      écrans d'analyse.</p></div>
+    <div class="card"><h3>L'assistant d'investigation</h3>
+      <p>Une question en langage naturel — « quels actifs exposés portent une vulnérabilité
+      exploitée ? » — et la plateforme interroge ses propres données pour répondre. Optionnel
+      et désactivable.</p></div>
+  </div>
+  <div class="cols c3" style="margin-top:26px;">
+    <div class="fig"><div class="n">Bilingue</div><div class="l">interface en français et en anglais, extensible</div></div>
+    <div class="fig"><div class="n">Rôles</div><div class="l">ce qui s'affiche suit les habilitations, écran par écran</div></div>
+    <div class="fig"><div class="n">Web</div><div class="l">aucun client lourd à déployer sur les postes</div></div>
+  </div>
+  <div class="foot"><b>CyberRadar · Interface</b><span>17 / 20</span></div>
+</section>
+
+<!-- 18 ──────────────────────────────────────── trajectoire -->
+<section class="slide">
+  <div class="eyebrow">Trajectoire</div>
+  <h2>Où en est le projet, et où il va</h2>
+  <table style="margin-top:26px;" class="tight">
+    <tr><th>Horizon</th><th>Contenu</th><th>État</th></tr>
+    <tr><td><b>Socle et chaîne</b><small>Ingestion, détection, réponse, audit, conformité, interface</small></td><td>Les 25 domaines, la chaîne continue, le catalogue signé, le paramétrage</td><td class="t-ok">Opérationnel, démontrable aujourd'hui</td></tr>
+    <tr><td><b>Connecteurs natifs</b><small>Sources du client sans développement</small></td><td>Annuaires, pare-feu, cloud public, postes de travail</td><td class="t-part">Prochaine étape</td></tr>
+    <tr><td><b>Mesure en charge</b><small>Les indicateurs sur volume réel</small></td><td>Délai de détection, délai de réponse, débit d'ingestion, tenue en charge</td><td class="t-part">Premier livrable d'un pilote</td></tr>
+    <tr><td style="border-bottom:none;"><b>Industrialisation</b><small>Exploitation à grande échelle</small></td><td style="border-bottom:none;">Haute disponibilité, reprise après sinistre, regroupement des composants</td><td class="t-part" style="border-bottom:none;">Planifié</td></tr>
+  </table>
+  <div class="note">
+    <b>Notre position sur les chiffres.</b> Nous ne citons pas de délai de détection moyen tant
+    que nous ne l'avons pas mesuré sur un volume réel. C'est le premier livrable que nous
+    proposons dans un pilote — chez vous, sur vos données, avec vos équipes.
+  </div>
+  <div class="foot"><b>CyberRadar · Trajectoire</b><span>18 / 20</span></div>
+</section>
+
+<!-- 19 ──────────────────────────────────────── modalités -->
+<section class="slide">
+  <div class="eyebrow">Modalités</div>
+  <h2>Comment cela se met en place</h2>
+  <div class="cols c4" style="margin-top:30px;">
+    <div class="card"><h3>1 · Atelier de cadrage</h3>
+      <p>Le périmètre du pilote, les sources à raccorder, les référentiels à suivre. Une
+      journée.</p><p style="margin-top:12px; color:var(--accent); font-weight:700;">Semaine 1</p></div>
+    <div class="card"><h3>2 · Installation</h3>
+      <p>Sur votre infrastructure, avec vos équipes. Durcissement, clés propres, contrôle de
+      mise en service.</p><p style="margin-top:12px; color:var(--accent); font-weight:700;">Semaine 2</p></div>
+    <div class="card"><h3>3 · Raccordement</h3>
+      <p>Les premières sources, l'inventaire d'actifs, le catalogue de détection adopté et
+      ajusté avec le RSSI.</p><p style="margin-top:12px; color:var(--accent); font-weight:700;">Semaines 3 à 6</p></div>
+    <div class="card"><h3>4 · Mesure</h3>
+      <p>Les indicateurs sur vos volumes, et la revue de conformité sur votre référentiel.
+      Le bilan du pilote.</p><p style="margin-top:12px; color:var(--accent); font-weight:700;">Semaines 7 et 8</p></div>
+  </div>
+  <div class="cols c2" style="margin-top:30px;">
+    <div class="card flag"><h3>Ce que nous apportons</h3>
+      <p>La plateforme, le catalogue de détection, la documentation et l'accompagnement du
+      cadrage à la mesure.</p></div>
+    <div class="card"><h3>Ce que l'intégrateur apporte</h3>
+      <p>La connaissance du système d'information du client, le raccordement des sources et
+      l'exploitation dans la durée.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar · Modalités</b><span>19 / 20</span></div>
+</section>
+
+<!-- 20 ──────────────────────────────────────── clôture -->
+<section class="slide dark">
+  <div class="eyebrow">En résumé</div>
+  <h1 style="font-size:46px;">Une plateforme, quatre promesses</h1>
+  <div class="cols c2" style="margin-top:42px;">
+    <ul>
+      <li class="ok"><b>Voir en un seul endroit.</b> <span>Vingt-cinq domaines qui partagent le même inventaire d'actifs, le même modèle d'identité et le même journal.</span></li>
+      <li class="ok"><b>Réagir sans rupture.</b> <span>De l'événement au confinement et à sa preuve, sans recopie d'un outil à l'autre — et le délai est mesuré.</span></li>
+    </ul>
+    <ul>
+      <li class="ok"><b>Prouver en continu.</b> <span>DNSSI, loi 09-08, PCI DSS, SWIFT CSP, ISO 27001, et le référentiel que vous apportez.</span></li>
+      <li class="ok"><b>Rester chez vous.</b> <span>Vos données sur votre infrastructure, sans flux sortant obligatoire ni dépendance étrangère.</span></li>
+    </ul>
+  </div>
+  <div class="note" style="margin-top:46px;">
+    <b>La prochaine étape que nous proposons :</b> un pilote de huit semaines sur un périmètre
+    restreint, chez vous, avec la mesure de vos propres indicateurs comme livrable final.
+    Et d'ici là, une démonstration de vingt minutes où une attaque traverse la plateforme
+    devant vous.
+  </div>
+  <div class="foot"><b>CyberRadar · AUSIM 2026</b><span>20 / 20</span></div>
+</section>
+
+</body>
+</html>

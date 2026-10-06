@@ -20,8 +20,8 @@ type Config struct {
 	TLSAddr   string // e.g. ":6514"
 	TLSConfig *tls.Config
 
-	TenantID      string // default tenant for messages without tenant info
-	MaxMessageSize int   // bytes, default 64 KiB
+	TenantID       string // default tenant for messages without tenant info
+	MaxMessageSize int    // bytes, default 64 KiB
 	ReadTimeout    time.Duration
 
 	Publisher *publisher.Publisher

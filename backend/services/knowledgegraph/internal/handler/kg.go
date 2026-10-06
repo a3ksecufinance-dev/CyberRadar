@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/knowledgegraph/internal/model"
 	"github.com/cyberradar/platform/services/knowledgegraph/internal/service"
@@ -82,7 +83,7 @@ func (h *KGHandler) ListEntities(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"entities": entities, "total": total})
+	response.OKWithMeta(w, entities, &response.Meta{Total: int64(total)})
 }
 
 func (h *KGHandler) UpsertEntity(w http.ResponseWriter, r *http.Request) {
@@ -204,7 +205,7 @@ func (h *KGHandler) ListRelationships(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"relationships": rels, "total": len(rels)})
+	response.OKWithMeta(w, rels, &response.Meta{Total: int64(len(rels))})
 }
 
 // ─── Graph traversal ──────────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ func (h *KGHandler) Neighbors(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"neighbors": neighbors, "total": len(neighbors)})
+	response.OKWithMeta(w, neighbors, &response.Meta{Total: int64(len(neighbors))})
 }
 
 func (h *KGHandler) Subgraph(w http.ResponseWriter, r *http.Request) {
@@ -306,7 +307,7 @@ func (h *KGHandler) Timeline(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"observations": obs, "total": total})
+	response.OKWithMeta(w, obs, &response.Meta{Total: int64(total)})
 }
 
 // ─── Enrichment ───────────────────────────────────────────────────────────────
@@ -343,9 +344,7 @@ func (h *KGHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -359,16 +358,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

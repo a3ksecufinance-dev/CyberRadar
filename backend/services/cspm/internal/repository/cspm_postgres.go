@@ -25,8 +25,9 @@ func NewCSPMRepository(pool *pgxpool.Pool) *CSPMRepository {
 // ─── Accounts ─────────────────────────────────────────────────────────────────
 
 const accountSelect = `
-SELECT id, tenant_id, name, description, provider, account_id, region, environment,
-       status, posture_score, critical_count, high_count, medium_count, low_count,
+SELECT id, tenant_id, name, COALESCE(description,''), provider, account_id,
+       COALESCE(region,''), COALESCE(environment,''), COALESCE(status,''),
+       posture_score, critical_count, high_count, medium_count, low_count,
        resource_count, last_scanned_at, metadata, created_at, updated_at
 FROM cspm_accounts`
 
@@ -111,22 +112,34 @@ func (r *CSPMRepository) UpdateAccount(ctx context.Context, tenantID, accountID 
 	args := []any{}
 	n := 1
 	if req.Name != "" {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, req.Name)
+		n++
 	}
 	if req.Description != "" {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
 	}
 	if req.Region != "" {
-		sets = append(sets, fmt.Sprintf("region=$%d", n)); args = append(args, req.Region); n++
+		sets = append(sets, fmt.Sprintf("region=$%d", n))
+		args = append(args, req.Region)
+		n++
 	}
 	if req.Environment != "" {
-		sets = append(sets, fmt.Sprintf("environment=$%d", n)); args = append(args, req.Environment); n++
+		sets = append(sets, fmt.Sprintf("environment=$%d", n))
+		args = append(args, req.Environment)
+		n++
 	}
 	if req.Status != "" {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, req.Status)
+		n++
 	}
 	if req.Metadata != nil {
-		sets = append(sets, fmt.Sprintf("metadata=$%d", n)); args = append(args, req.Metadata); n++
+		sets = append(sets, fmt.Sprintf("metadata=$%d", n))
+		args = append(args, req.Metadata)
+		n++
 	}
 	args = append(args, accountID, tenantID)
 	_, err := r.pool.Exec(ctx,
@@ -141,8 +154,10 @@ func (r *CSPMRepository) UpdateAccount(ctx context.Context, tenantID, accountID 
 // ─── Rules ────────────────────────────────────────────────────────────────────
 
 const ruleSelect = `
-SELECT id, tenant_id, rule_id, title, description, rationale, remediation,
-       provider, resource_type, framework, framework_section, severity, is_active, created_at
+SELECT id, tenant_id, rule_id, title, COALESCE(description,''),
+       COALESCE(rationale,''), COALESCE(remediation,''),
+       provider, resource_type, framework, COALESCE(framework_section,''),
+       severity, is_active, created_at
 FROM cspm_rules`
 
 func scanRule(row pgx.Row) (*model.CSPMRule, error) {
@@ -179,19 +194,29 @@ func (r *CSPMRepository) ListRules(ctx context.Context, tenantID uuid.UUID, prov
 	args := []any{tenantID}
 	n := 2
 	if provider != "" {
-		conditions = append(conditions, fmt.Sprintf("provider=$%d", n)); args = append(args, provider); n++
+		conditions = append(conditions, fmt.Sprintf("provider=$%d", n))
+		args = append(args, provider)
+		n++
 	}
 	if framework != "" {
-		conditions = append(conditions, fmt.Sprintf("framework=$%d", n)); args = append(args, framework); n++
+		conditions = append(conditions, fmt.Sprintf("framework=$%d", n))
+		args = append(args, framework)
+		n++
 	}
 	if severity != "" {
-		conditions = append(conditions, fmt.Sprintf("severity=$%d", n)); args = append(args, severity); n++
+		conditions = append(conditions, fmt.Sprintf("severity=$%d", n))
+		args = append(args, severity)
+		n++
 	}
 	where := "WHERE " + strings.Join(conditions, " AND ")
 	var total int
 	r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM cspm_rules `+where, args...).Scan(&total)
-	if page < 1 { page = 1 }
-	if pageSize < 1 || pageSize > 500 { pageSize = 100 }
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 500 {
+		pageSize = 100
+	}
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)
 	rows, err := r.pool.Query(ctx, ruleSelect+` `+where+fmt.Sprintf(` ORDER BY severity, framework, rule_id LIMIT $%d OFFSET $%d`, n, n+1), args...)
@@ -231,8 +256,9 @@ func (r *CSPMRepository) SeedCISRules(ctx context.Context, tenantID uuid.UUID, p
 // ─── Resources ────────────────────────────────────────────────────────────────
 
 const resourceSelect = `
-SELECT id, tenant_id, account_id, resource_uid, name, resource_type, service,
-       region, tags, risk_score, finding_count, is_public, last_seen_at, created_at, updated_at
+SELECT id, tenant_id, account_id, resource_uid, COALESCE(name,''), resource_type,
+       service, COALESCE(region,''), tags, risk_score, finding_count, is_public,
+       last_seen_at, created_at, updated_at
 FROM cspm_resources`
 
 func scanResource(row pgx.Row) (*model.CSPMResource, error) {
@@ -245,6 +271,10 @@ func scanResource(row pgx.Row) (*model.CSPMResource, error) {
 }
 
 func (r *CSPMRepository) UpsertResource(ctx context.Context, tenantID uuid.UUID, req *model.UpsertResourceRequest) (*model.CSPMResource, error) {
+	if err := r.accountBelongsTo(ctx, tenantID, req.AccountID); err != nil {
+		return nil, err
+	}
+
 	tags := req.Tags
 	if tags == nil {
 		tags = map[string]any{}
@@ -285,25 +315,39 @@ func (r *CSPMRepository) ListResources(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.AccountID != nil {
-		conditions = append(conditions, fmt.Sprintf("account_id=$%d", n)); args = append(args, *f.AccountID); n++
+		conditions = append(conditions, fmt.Sprintf("account_id=$%d", n))
+		args = append(args, *f.AccountID)
+		n++
 	}
 	if f.ResourceType != "" {
-		conditions = append(conditions, fmt.Sprintf("resource_type=$%d", n)); args = append(args, f.ResourceType); n++
+		conditions = append(conditions, fmt.Sprintf("resource_type=$%d", n))
+		args = append(args, f.ResourceType)
+		n++
 	}
 	if f.Service != "" {
-		conditions = append(conditions, fmt.Sprintf("service=$%d", n)); args = append(args, f.Service); n++
+		conditions = append(conditions, fmt.Sprintf("service=$%d", n))
+		args = append(args, f.Service)
+		n++
 	}
 	if f.IsPublic != nil {
-		conditions = append(conditions, fmt.Sprintf("is_public=$%d", n)); args = append(args, *f.IsPublic); n++
+		conditions = append(conditions, fmt.Sprintf("is_public=$%d", n))
+		args = append(args, *f.IsPublic)
+		n++
 	}
 	if f.MinRiskScore != nil {
-		conditions = append(conditions, fmt.Sprintf("risk_score>=$%d", n)); args = append(args, *f.MinRiskScore); n++
+		conditions = append(conditions, fmt.Sprintf("risk_score>=$%d", n))
+		args = append(args, *f.MinRiskScore)
+		n++
 	}
 	where := "WHERE " + strings.Join(conditions, " AND ")
 	var total int
 	r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM cspm_resources `+where, args...).Scan(&total)
-	if f.Page < 1 { f.Page = 1 }
-	if f.PageSize < 1 || f.PageSize > 200 { f.PageSize = 50 }
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 200 {
+		f.PageSize = 50
+	}
 	offset := (f.Page - 1) * f.PageSize
 	args = append(args, f.PageSize, offset)
 	rows, err := r.pool.Query(ctx, resourceSelect+` `+where+fmt.Sprintf(` ORDER BY risk_score DESC, last_seen_at DESC LIMIT $%d OFFSET $%d`, n, n+1), args...)
@@ -325,9 +369,11 @@ func (r *CSPMRepository) ListResources(ctx context.Context, tenantID uuid.UUID, 
 // ─── Findings ─────────────────────────────────────────────────────────────────
 
 const findingSelect = `
-SELECT id, tenant_id, account_id, resource_id, rule_id, rule_ref, title, severity, status,
-       resource_uid, resource_type, region, evidence, remediation,
-       first_seen_at, last_seen_at, resolved_at, suppressed_by, suppression_reason, scan_id, created_at
+SELECT id, tenant_id, account_id, resource_id, rule_id, rule_ref, title, severity,
+       COALESCE(status,''), COALESCE(resource_uid,''), COALESCE(resource_type,''),
+       COALESCE(region,''), evidence, COALESCE(remediation,''),
+       first_seen_at, last_seen_at, resolved_at, suppressed_by,
+       COALESCE(suppression_reason,''), scan_id, created_at
 FROM cspm_findings`
 
 func scanFinding(row pgx.Row) (*model.CSPMFinding, error) {
@@ -348,9 +394,14 @@ func scanFinding(row pgx.Row) (*model.CSPMFinding, error) {
 }
 
 func (r *CSPMRepository) ReportFinding(ctx context.Context, tenantID uuid.UUID, req *model.ReportFindingRequest) (*model.CSPMFinding, error) {
+	if err := r.accountBelongsTo(ctx, tenantID, req.AccountID); err != nil {
+		return nil, err
+	}
+
 	// Fetch rule details
 	var ruleRef, title, severity, remediation string
-	if err := r.pool.QueryRow(ctx, `SELECT rule_id, title, severity, COALESCE(remediation,'') FROM cspm_rules WHERE id=$1`, req.RuleID).
+	if err := r.pool.QueryRow(ctx, `SELECT rule_id, title, severity, COALESCE(remediation,'')
+		FROM cspm_rules WHERE id=$1 AND tenant_id=$2`, req.RuleID, tenantID).
 		Scan(&ruleRef, &title, &severity, &remediation); err != nil {
 		return nil, fmt.Errorf("rule not found: %w", err)
 	}
@@ -364,8 +415,9 @@ func (r *CSPMRepository) ReportFinding(ctx context.Context, tenantID uuid.UUID, 
 	var resourceID *uuid.UUID
 	if req.ResourceUID != "" {
 		var rid uuid.UUID
-		if err := r.pool.QueryRow(ctx, `SELECT id FROM cspm_resources WHERE account_id=$1 AND resource_uid=$2`,
-			req.AccountID, req.ResourceUID).Scan(&rid); err == nil {
+		if err := r.pool.QueryRow(ctx, `SELECT id FROM cspm_resources
+			WHERE tenant_id=$1 AND account_id=$2 AND resource_uid=$3`,
+			tenantID, req.AccountID, req.ResourceUID).Scan(&rid); err == nil {
 			resourceID = &rid
 		}
 	}
@@ -416,25 +468,39 @@ func (r *CSPMRepository) ListFindings(ctx context.Context, tenantID uuid.UUID, f
 	args := []any{tenantID}
 	n := 2
 	if f.AccountID != nil {
-		conditions = append(conditions, fmt.Sprintf("account_id=$%d", n)); args = append(args, *f.AccountID); n++
+		conditions = append(conditions, fmt.Sprintf("account_id=$%d", n))
+		args = append(args, *f.AccountID)
+		n++
 	}
 	if f.ResourceID != nil {
-		conditions = append(conditions, fmt.Sprintf("resource_id=$%d", n)); args = append(args, *f.ResourceID); n++
+		conditions = append(conditions, fmt.Sprintf("resource_id=$%d", n))
+		args = append(args, *f.ResourceID)
+		n++
 	}
 	if f.Severity != "" {
-		conditions = append(conditions, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		conditions = append(conditions, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		conditions = append(conditions, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	if f.Provider != "" {
-		conditions = append(conditions, fmt.Sprintf("rule_ref LIKE $%d", n)); args = append(args, strings.ToUpper(f.Provider)+"-%"); n++
+		conditions = append(conditions, fmt.Sprintf("rule_ref LIKE $%d", n))
+		args = append(args, strings.ToUpper(f.Provider)+"-%")
+		n++
 	}
 	where := "WHERE " + strings.Join(conditions, " AND ")
 	var total int
 	r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM cspm_findings `+where, args...).Scan(&total)
-	if f.Page < 1 { f.Page = 1 }
-	if f.PageSize < 1 || f.PageSize > 200 { f.PageSize = 50 }
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 200 {
+		f.PageSize = 50
+	}
 	offset := (f.Page - 1) * f.PageSize
 	args = append(args, f.PageSize, offset)
 	rows, err := r.pool.Query(ctx, findingSelect+` `+where+fmt.Sprintf(` ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, last_seen_at DESC LIMIT $%d OFFSET $%d`, n, n+1), args...)
@@ -461,9 +527,13 @@ func (r *CSPMRepository) UpdateFinding(ctx context.Context, tenantID, findingID,
 		sets = append(sets, "resolved_at=NOW()")
 	}
 	if req.Status == "suppressed" {
-		sets = append(sets, fmt.Sprintf("suppressed_by=$%d", n)); args = append(args, updatedBy); n++
+		sets = append(sets, fmt.Sprintf("suppressed_by=$%d", n))
+		args = append(args, updatedBy)
+		n++
 		if req.SuppressionReason != "" {
-			sets = append(sets, fmt.Sprintf("suppression_reason=$%d", n)); args = append(args, req.SuppressionReason); n++
+			sets = append(sets, fmt.Sprintf("suppression_reason=$%d", n))
+			args = append(args, req.SuppressionReason)
+			n++
 		}
 	}
 	args = append(args, findingID, tenantID)
@@ -483,6 +553,10 @@ func (r *CSPMRepository) UpdateFinding(ctx context.Context, tenantID, findingID,
 // ─── Scans ────────────────────────────────────────────────────────────────────
 
 func (r *CSPMRepository) CreateScan(ctx context.Context, tenantID, accountID uuid.UUID, scanType string, triggeredBy uuid.UUID) (*model.CSPMScan, error) {
+	if err := r.accountBelongsTo(ctx, tenantID, accountID); err != nil {
+		return nil, err
+	}
+
 	if scanType == "" {
 		scanType = "full"
 	}
@@ -499,9 +573,10 @@ func (r *CSPMRepository) GetScan(ctx context.Context, tenantID, scanID uuid.UUID
 	s := &model.CSPMScan{}
 	var triggeredBy *uuid.UUID
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, account_id, status, scan_type, resources_scanned,
-		       rules_evaluated, findings_new, findings_resolved, posture_score,
-		       error_message, started_at, completed_at, triggered_by, created_at
+		SELECT id, tenant_id, account_id, COALESCE(status,''), COALESCE(scan_type,''),
+		       resources_scanned, rules_evaluated, findings_new, findings_resolved,
+		       posture_score, COALESCE(error_message,''), started_at, completed_at,
+		       triggered_by, created_at
 		FROM cspm_scans WHERE id=$1 AND tenant_id=$2`, scanID, tenantID).Scan(
 		&s.ID, &s.TenantID, &s.AccountID, &s.Status, &s.ScanType, &s.ResourcesScanned,
 		&s.RulesEvaluated, &s.FindingsNew, &s.FindingsResolved, &s.PostureScore,
@@ -519,13 +594,18 @@ func (r *CSPMRepository) ListScans(ctx context.Context, tenantID, accountID uuid
 	args := []any{tenantID, accountID}
 	var total int
 	r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM cspm_scans `+where, args...).Scan(&total)
-	if page < 1 { page = 1 }
-	if pageSize < 1 || pageSize > 100 { pageSize = 20 }
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
 	offset := (page - 1) * pageSize
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, account_id, status, scan_type, resources_scanned,
-		       rules_evaluated, findings_new, findings_resolved, posture_score,
-		       error_message, started_at, completed_at, triggered_by, created_at
+		SELECT id, tenant_id, account_id, COALESCE(status,''), COALESCE(scan_type,''),
+		       resources_scanned, rules_evaluated, findings_new, findings_resolved,
+		       posture_score, COALESCE(error_message,''), started_at, completed_at,
+		       triggered_by, created_at
 		FROM cspm_scans `+where+` ORDER BY created_at DESC LIMIT $3 OFFSET $4`,
 		tenantID, accountID, pageSize, offset)
 	if err != nil {
@@ -589,6 +669,29 @@ func (r *CSPMRepository) UpdateAccountPosture(ctx context.Context, tenantID, acc
 	return err
 }
 
+// accountBelongsTo refuses an account identifier the caller's tenant does not
+// own.
+//
+// The account UUID arrives from the request, and every row written below carries
+// the caller's own tenant_id — so a tenant filter on the INSERT proves nothing:
+// the row is "theirs" whatever account it points at. Without this check a caller
+// who learns an account UUID in another customer's estate could attach a
+// resource to it, report a finding against it, or queue a scan on it, and the
+// neighbour would read all three: the lists that serve them filter on
+// account_id, and the posture recalculation counts whatever is attached.
+func (r *CSPMRepository) accountBelongsTo(ctx context.Context, tenantID, accountID uuid.UUID) error {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM cspm_accounts WHERE tenant_id=$1 AND id=$2)`,
+		tenantID, accountID).Scan(&exists); err != nil {
+		return fmt.Errorf("check account: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("account not found")
+	}
+	return nil
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 func (r *CSPMRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.CSPMStats, error) {
@@ -608,7 +711,8 @@ func (r *CSPMRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.
 	if sevRows != nil {
 		defer sevRows.Close()
 		for sevRows.Next() {
-			var s string; var c int
+			var s string
+			var c int
 			sevRows.Scan(&s, &c)
 			stats.FindingsBySeverity[s] = c
 		}
@@ -616,7 +720,8 @@ func (r *CSPMRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.
 
 	// Account postures
 	accRows, _ := r.pool.Query(ctx, `SELECT id, name, provider, posture_score,
-		(SELECT COUNT(*) FROM cspm_findings f WHERE f.account_id=a.id AND f.status='open')
+		(SELECT COUNT(*) FROM cspm_findings f
+		 WHERE f.tenant_id=a.tenant_id AND f.account_id=a.id AND f.status='open')
 		FROM cspm_accounts a WHERE tenant_id=$1 AND status='active' ORDER BY posture_score ASC LIMIT 10`, tenantID)
 	if accRows != nil {
 		defer accRows.Close()

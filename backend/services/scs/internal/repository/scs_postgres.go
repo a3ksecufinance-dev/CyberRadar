@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	
 	"github.com/cyberradar/platform/services/scs/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -60,6 +59,44 @@ func sbomRiskScore(critVulns, highVulns, eolCount, totalComponents int) int {
 		base = 100
 	}
 	return base
+}
+
+// ─── Ownership ────────────────────────────────────────────────────────────────
+
+// vendorBelongsTo and componentBelongsTo refuse an identifier the caller's
+// tenant does not own.
+//
+// A component attributed to a vendor, an assessment opened on one, an alert
+// raised against one: all three take the identifier from the request body, and
+// the row written carries the caller's own tenant_id — so the tenant filter on
+// the insert proves nothing about what the row points at. The foreign keys
+// reference scs_vendors(id) and scs_components(id) with no tenant of their own.
+// What a neighbour could do with that is write into another customer's supplier
+// file: the vendor's component count, assessment count and open-alert count are
+// subqueries over those tables, so a "vendor_breach" alert raised from outside
+// appears on that customer's screen as their own finding about their own
+// supplier.
+func (r *SCSRepository) vendorBelongsTo(ctx context.Context, tenantID, vendorID uuid.UUID) error {
+	return r.ownsRow(ctx, "scs_vendors", "vendor", tenantID, vendorID)
+}
+
+func (r *SCSRepository) componentBelongsTo(ctx context.Context, tenantID, componentID uuid.UUID) error {
+	return r.ownsRow(ctx, "scs_components", "component", tenantID, componentID)
+}
+
+// ownsRow asks the question for one table. The table name is a constant from
+// the callers above, never anything that came from a request.
+func (r *SCSRepository) ownsRow(ctx context.Context, table, what string, tenantID, id uuid.UUID) error {
+	var exists bool
+	if err := r.db.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM "+table+" WHERE tenant_id=$1 AND id=$2)",
+		tenantID, id).Scan(&exists); err != nil {
+		return fmt.Errorf("check %s: %w", what, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s not found", what)
+	}
+	return nil
 }
 
 // ─── Vendors ──────────────────────────────────────────────────────────────────
@@ -187,41 +224,67 @@ func (r *SCSRepository) UpdateVendor(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Website != nil {
-		sets = append(sets, fmt.Sprintf("website=$%d", n)); args = append(args, *req.Website); n++
+		sets = append(sets, fmt.Sprintf("website=$%d", n))
+		args = append(args, *req.Website)
+		n++
 	}
 	if req.RiskTier != nil {
-		sets = append(sets, fmt.Sprintf("risk_tier=$%d", n)); args = append(args, *req.RiskTier); n++
-		sets = append(sets, fmt.Sprintf("risk_level=$%d", n)); args = append(args, riskLevelFromTier(*req.RiskTier)); n++
+		sets = append(sets, fmt.Sprintf("risk_tier=$%d", n))
+		args = append(args, *req.RiskTier)
+		n++
+		sets = append(sets, fmt.Sprintf("risk_level=$%d", n))
+		args = append(args, riskLevelFromTier(*req.RiskTier))
+		n++
 	}
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 	}
 	if req.ContactName != nil {
-		sets = append(sets, fmt.Sprintf("contact_name=$%d", n)); args = append(args, *req.ContactName); n++
+		sets = append(sets, fmt.Sprintf("contact_name=$%d", n))
+		args = append(args, *req.ContactName)
+		n++
 	}
 	if req.ContactEmail != nil {
-		sets = append(sets, fmt.Sprintf("contact_email=$%d", n)); args = append(args, *req.ContactEmail); n++
+		sets = append(sets, fmt.Sprintf("contact_email=$%d", n))
+		args = append(args, *req.ContactEmail)
+		n++
 	}
 	if req.HasSOC2 != nil {
-		sets = append(sets, fmt.Sprintf("has_soc2=$%d", n)); args = append(args, *req.HasSOC2); n++
+		sets = append(sets, fmt.Sprintf("has_soc2=$%d", n))
+		args = append(args, *req.HasSOC2)
+		n++
 	}
 	if req.HasISO27001 != nil {
-		sets = append(sets, fmt.Sprintf("has_iso27001=$%d", n)); args = append(args, *req.HasISO27001); n++
+		sets = append(sets, fmt.Sprintf("has_iso27001=$%d", n))
+		args = append(args, *req.HasISO27001)
+		n++
 	}
 	if req.HasPCIDSS != nil {
-		sets = append(sets, fmt.Sprintf("has_pci_dss=$%d", n)); args = append(args, *req.HasPCIDSS); n++
+		sets = append(sets, fmt.Sprintf("has_pci_dss=$%d", n))
+		args = append(args, *req.HasPCIDSS)
+		n++
 	}
 	if req.NextAssessmentAt != nil {
-		sets = append(sets, fmt.Sprintf("next_assessment_at=$%d", n)); args = append(args, *req.NextAssessmentAt); n++
+		sets = append(sets, fmt.Sprintf("next_assessment_at=$%d", n))
+		args = append(args, *req.NextAssessmentAt)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
 	var v model.SCSVendor
@@ -243,6 +306,11 @@ func (r *SCSRepository) UpdateVendor(ctx context.Context, tenantID, id uuid.UUID
 // ─── Components ───────────────────────────────────────────────────────────────
 
 func (r *SCSRepository) CreateComponent(ctx context.Context, tenantID uuid.UUID, req *model.CreateComponentRequest) (*model.SCSComponent, error) {
+	if req.VendorID != nil {
+		if err := r.vendorBelongsTo(ctx, tenantID, *req.VendorID); err != nil {
+			return nil, err
+		}
+	}
 	tags := req.Tags
 	if tags == nil {
 		tags = []string{}
@@ -295,16 +363,24 @@ func (r *SCSRepository) ListComponents(ctx context.Context, tenantID uuid.UUID, 
 	args := []any{tenantID}
 	n := 2
 	if f.Ecosystem != "" {
-		cond = append(cond, fmt.Sprintf("ecosystem=$%d", n)); args = append(args, f.Ecosystem); n++
+		cond = append(cond, fmt.Sprintf("ecosystem=$%d", n))
+		args = append(args, f.Ecosystem)
+		n++
 	}
 	if f.HasVulns != nil {
-		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *f.HasVulns); n++
+		cond = append(cond, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *f.HasVulns)
+		n++
 	}
 	if f.IsEOL != nil {
-		cond = append(cond, fmt.Sprintf("is_end_of_life=$%d", n)); args = append(args, *f.IsEOL); n++
+		cond = append(cond, fmt.Sprintf("is_end_of_life=$%d", n))
+		args = append(args, *f.IsEOL)
+		n++
 	}
 	if f.IsDeprecated != nil {
-		cond = append(cond, fmt.Sprintf("is_deprecated=$%d", n)); args = append(args, *f.IsDeprecated); n++
+		cond = append(cond, fmt.Sprintf("is_deprecated=$%d", n))
+		args = append(args, *f.IsDeprecated)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -347,34 +423,89 @@ func (r *SCSRepository) UpdateComponent(ctx context.Context, tenantID, id uuid.U
 	n := 3
 
 	if req.IsDeprecated != nil {
-		sets = append(sets, fmt.Sprintf("is_deprecated=$%d", n)); args = append(args, *req.IsDeprecated); n++
+		sets = append(sets, fmt.Sprintf("is_deprecated=$%d", n))
+		args = append(args, *req.IsDeprecated)
+		n++
 	}
 	if req.IsEndOfLife != nil {
-		sets = append(sets, fmt.Sprintf("is_end_of_life=$%d", n)); args = append(args, *req.IsEndOfLife); n++
+		sets = append(sets, fmt.Sprintf("is_end_of_life=$%d", n))
+		args = append(args, *req.IsEndOfLife)
+		n++
 	}
 	if req.HasKnownVulns != nil {
-		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n)); args = append(args, *req.HasKnownVulns); n++
+		sets = append(sets, fmt.Sprintf("has_known_vulns=$%d", n))
+		args = append(args, *req.HasKnownVulns)
+		n++
 	}
 	if req.VulnCount != nil {
-		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n)); args = append(args, *req.VulnCount); n++
+		sets = append(sets, fmt.Sprintf("vuln_count=$%d", n))
+		args = append(args, *req.VulnCount)
+		n++
 	}
 	if req.CriticalVulnCount != nil {
-		sets = append(sets, fmt.Sprintf("critical_vuln_count=$%d", n)); args = append(args, *req.CriticalVulnCount); n++
+		sets = append(sets, fmt.Sprintf("critical_vuln_count=$%d", n))
+		args = append(args, *req.CriticalVulnCount)
+		n++
 	}
 	if req.License != nil {
-		sets = append(sets, fmt.Sprintf("license=$%d", n)); args = append(args, *req.License); n++
+		sets = append(sets, fmt.Sprintf("license=$%d", n))
+		args = append(args, *req.License)
+		n++
 	}
 	if req.UsedIn != nil {
-		sets = append(sets, fmt.Sprintf("used_in=$%d", n)); args = append(args, req.UsedIn); n++
+		sets = append(sets, fmt.Sprintf("used_in=$%d", n))
+		args = append(args, req.UsedIn)
+		n++
 	}
 	if req.Tags != nil {
-		sets = append(sets, fmt.Sprintf("tags=$%d", n)); args = append(args, req.Tags); n++
+		sets = append(sets, fmt.Sprintf("tags=$%d", n))
+		args = append(args, req.Tags)
+		n++
 	}
 
-	// Recompute risk score inline if vuln data changed
-	if req.CriticalVulnCount != nil || req.VulnCount != nil || req.IsEndOfLife != nil || req.IsDeprecated != nil {
-		// score computed as best-effort; actual value stored via trigger or explicit set
-		_ = 0
+	// The risk score, actually computed.
+	//
+	// What stood here was a placeholder — "actual value stored via trigger or
+	// explicit set", then `_ = 0` — and there is no trigger on this table. So
+	// componentRiskScore was dead code and risk_score stayed at 0 for every
+	// component, however many critical vulnerabilities were recorded against
+	// it: the inventory ranked by risk was a flat list of zeros.
+	//
+	// The score is a function of the four flags below, so it is recomputed
+	// whenever one of them moves, from the values after the update rather than
+	// the ones in the request (a request names only what it changes).
+	if req.CriticalVulnCount != nil || req.VulnCount != nil ||
+		req.IsEndOfLife != nil || req.IsDeprecated != nil {
+		current, err := r.GetComponent(ctx, tenantID, id)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			return nil, pgx.ErrNoRows
+		}
+		crit, total := current.CriticalVulnCount, current.VulnCount
+		eol, deprecated := current.IsEndOfLife, current.IsDeprecated
+		if req.CriticalVulnCount != nil {
+			crit = *req.CriticalVulnCount
+		}
+		if req.VulnCount != nil {
+			total = *req.VulnCount
+		}
+		if req.IsEndOfLife != nil {
+			eol = *req.IsEndOfLife
+		}
+		if req.IsDeprecated != nil {
+			deprecated = *req.IsDeprecated
+		}
+		// vuln_count is every vulnerability, critical_vuln_count the critical
+		// ones among them: the rest weigh as "high" in the published formula.
+		high := total - crit
+		if high < 0 {
+			high = 0
+		}
+		sets = append(sets, fmt.Sprintf("risk_score=$%d", n))
+		args = append(args, componentRiskScore(crit, high, 0, eol, deprecated))
+		n++
 	}
 
 	var c model.SCSComponent
@@ -404,22 +535,31 @@ func (r *SCSRepository) CreateSBOM(ctx context.Context, tenantID uuid.UUID, req 
 
 	// Process components first
 	var (
-		totalComps     int
-		directComps    int
+		totalComps      int
+		directComps     int
 		transitiveComps int
-		critVulns      int
-		highVulns      int
-		medVulns       int
-		lowVulns       int
-		deprecatedCnt  int
-		eolCnt         int
+		critVulns       int
+		highVulns       int
+		medVulns        int
+		lowVulns        int
+		deprecatedCnt   int
+		eolCnt          int
 	)
 
+	// Every component, or no SBOM.
+	//
+	// The error used to be swallowed with `continue`, so a component the
+	// database refused — an unknown component_type, a value too long, a
+	// connection lost halfway — vanished from the document while
+	// total_components counted only the survivors. An SBOM is an attestation
+	// of what ships; a number nobody can reconcile against the build is worse
+	// than a refused upload.
 	componentIDs := make([]uuid.UUID, 0, len(req.Components))
-	for _, compReq := range req.Components {
-		comp, err := r.CreateComponent(ctx, tenantID, &compReq)
+	for i := range req.Components {
+		compReq := req.Components[i]
+		comp, err := r.upsertComponent(ctx, tenantID, &compReq)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("component %s@%s: %w", compReq.Name, compReq.Version, err)
 		}
 		componentIDs = append(componentIDs, comp.ID)
 		totalComps++
@@ -534,9 +674,55 @@ func (r *SCSRepository) GetSBOM(ctx context.Context, tenantID, id uuid.UUID) (*m
 	return &s, err
 }
 
+// upsertComponent records a component the way an SBOM upload needs it: the same
+// library at the same version, seen again, is the same row.
+//
+// scs_components carries no unique constraint, so CreateComponent inserted a
+// new row every time — and an SBOM re-uploaded on each build grew the component
+// inventory by the size of the dependency tree, which every count built on it
+// then reported. The proper fix is a unique index on
+// (tenant_id, name, version, COALESCE(ecosystem,”)) and an ON CONFLICT; that
+// is a migration, and this repository's migrations are not replayable yet, so
+// it is deferred to the work package that makes them so. Until then the lookup
+// below keeps the inventory stable for the one path that uploads in bulk.
+func (r *SCSRepository) upsertComponent(ctx context.Context, tenantID uuid.UUID, req *model.CreateComponentRequest) (*model.SCSComponent, error) {
+	var id uuid.UUID
+	err := r.db.QueryRow(ctx,
+		`SELECT id FROM scs_components
+		 WHERE tenant_id=$1 AND name=$2 AND version=$3 AND COALESCE(ecosystem,'')=$4
+		 ORDER BY created_at LIMIT 1`,
+		tenantID, req.Name, req.Version, req.Ecosystem).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return r.CreateComponent(ctx, tenantID, req)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Seen again: the facts that can change between two builds are the ones a
+	// request carries, and the rest stays as the inventory has it.
+	usedIn := req.UsedIn
+	if usedIn == nil {
+		usedIn = []string{}
+	}
+	return r.UpdateComponent(ctx, tenantID, id, &model.UpdateComponentRequest{
+		License: &req.License, UsedIn: usedIn, Tags: req.Tags,
+	})
+}
+
 // ─── Assessments ──────────────────────────────────────────────────────────────
 
 func (r *SCSRepository) CreateAssessment(ctx context.Context, tenantID uuid.UUID, req *model.CreateAssessmentRequest, createdBy *uuid.UUID) (*model.SCSAssessment, error) {
+	if err := r.vendorBelongsTo(ctx, tenantID, req.VendorID); err != nil {
+		return nil, err
+	}
+	// The column has a DEFAULT and a CHECK, and the insert names it — so an
+	// omitted type reached PostgreSQL as the empty string, which the CHECK
+	// refuses. The default never applied, and every assessment opened without
+	// a type answered 500.
+	assessmentType := req.AssessmentType
+	if assessmentType == "" {
+		assessmentType = "security_questionnaire"
+	}
 	qJSON, _ := json.Marshal(map[string]any{})
 	fJSON, _ := json.Marshal([]any{})
 	var a model.SCSAssessment
@@ -546,10 +732,12 @@ func (r *SCSRepository) CreateAssessment(ctx context.Context, tenantID uuid.UUID
 		 (tenant_id,vendor_id,assessment_type,assessor,assessor_id,due_at,planned_at,notes,
 		  questionnaire,findings,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		 RETURNING id,tenant_id,vendor_id,assessment_type,status,score,max_score,risk_rating,
+		 RETURNING id,tenant_id,vendor_id,assessment_type,status,score,max_score,
+		           COALESCE(risk_rating,''),
 		           findings_count,critical_findings,planned_at,started_at,completed_at,due_at,next_due_at,
-		           assessor,assessor_id,questionnaire,findings,recommendations,notes,created_by,created_at,updated_at`,
-		tenantID, req.VendorID, req.AssessmentType, req.Assessor, req.AssessorID,
+		           COALESCE(assessor,''),assessor_id,questionnaire,findings,
+		           COALESCE(recommendations,''),COALESCE(notes,''),created_by,created_at,updated_at`,
+		tenantID, req.VendorID, assessmentType, req.Assessor, req.AssessorID,
 		req.DueAt, req.PlannedAt, req.Notes, qJSON, fJSON, createdBy,
 	).Scan(&a.ID, &a.TenantID, &a.VendorID, &a.AssessmentType, &a.Status,
 		&a.Score, &a.MaxScore, &a.RiskRating,
@@ -570,10 +758,14 @@ func (r *SCSRepository) ListAssessments(ctx context.Context, tenantID, vendorID 
 	args := []any{tenantID}
 	n := 2
 	if vendorID != uuid.Nil {
-		cond = append(cond, fmt.Sprintf("a.vendor_id=$%d", n)); args = append(args, vendorID); n++
+		cond = append(cond, fmt.Sprintf("a.vendor_id=$%d", n))
+		args = append(args, vendorID)
+		n++
 	}
 	if status != "" {
-		cond = append(cond, fmt.Sprintf("a.status=$%d", n)); args = append(args, status); n++
+		cond = append(cond, fmt.Sprintf("a.status=$%d", n))
+		args = append(args, status)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,vendor_id,assessment_type,status,score,max_score,risk_rating,
@@ -611,43 +803,61 @@ func (r *SCSRepository) UpdateAssessment(ctx context.Context, tenantID, id uuid.
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		now := time.Now().UTC()
 		switch *req.Status {
 		case "in_progress":
 			sets = append(sets, fmt.Sprintf("started_at=COALESCE(started_at,$%d)", n))
-			args = append(args, now); n++
+			args = append(args, now)
+			n++
 		case "completed":
 			sets = append(sets, fmt.Sprintf("completed_at=COALESCE(completed_at,$%d)", n))
-			args = append(args, now); n++
-			sets = append(sets, fmt.Sprintf("last_assessment_at=$%d", n))
-			args = append(args, now); n++
+			args = append(args, now)
+			n++
 		}
 	}
 	if req.Score != nil {
-		sets = append(sets, fmt.Sprintf("score=$%d", n)); args = append(args, *req.Score); n++
+		sets = append(sets, fmt.Sprintf("score=$%d", n))
+		args = append(args, *req.Score)
+		n++
 	}
 	if req.RiskRating != nil {
-		sets = append(sets, fmt.Sprintf("risk_rating=$%d", n)); args = append(args, *req.RiskRating); n++
+		sets = append(sets, fmt.Sprintf("risk_rating=$%d", n))
+		args = append(args, *req.RiskRating)
+		n++
 	}
 	if req.Questionnaire != nil {
 		q, _ := json.Marshal(req.Questionnaire)
-		sets = append(sets, fmt.Sprintf("questionnaire=$%d", n)); args = append(args, q); n++
+		sets = append(sets, fmt.Sprintf("questionnaire=$%d", n))
+		args = append(args, q)
+		n++
 	}
 	if req.Findings != nil {
 		f, _ := json.Marshal(req.Findings)
 		cnt := len(req.Findings)
-		sets = append(sets, fmt.Sprintf("findings=$%d", n)); args = append(args, f); n++
-		sets = append(sets, fmt.Sprintf("findings_count=$%d", n)); args = append(args, cnt); n++
+		sets = append(sets, fmt.Sprintf("findings=$%d", n))
+		args = append(args, f)
+		n++
+		sets = append(sets, fmt.Sprintf("findings_count=$%d", n))
+		args = append(args, cnt)
+		n++
 	}
 	if req.Recommendations != nil {
-		sets = append(sets, fmt.Sprintf("recommendations=$%d", n)); args = append(args, *req.Recommendations); n++
+		sets = append(sets, fmt.Sprintf("recommendations=$%d", n))
+		args = append(args, *req.Recommendations)
+		n++
 	}
 	if req.Notes != nil {
-		sets = append(sets, fmt.Sprintf("notes=$%d", n)); args = append(args, *req.Notes); n++
+		sets = append(sets, fmt.Sprintf("notes=$%d", n))
+		args = append(args, *req.Notes)
+		n++
 	}
 	if req.NextDueAt != nil {
-		sets = append(sets, fmt.Sprintf("next_due_at=$%d", n)); args = append(args, *req.NextDueAt); n++
+		sets = append(sets, fmt.Sprintf("next_due_at=$%d", n))
+		args = append(args, *req.NextDueAt)
+		n++
 	}
 
 	var a model.SCSAssessment
@@ -655,9 +865,11 @@ func (r *SCSRepository) UpdateAssessment(ctx context.Context, tenantID, id uuid.
 	err := r.db.QueryRow(ctx,
 		`UPDATE scs_assessments SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,vendor_id,assessment_type,status,score,max_score,risk_rating,
+		 RETURNING id,tenant_id,vendor_id,assessment_type,status,score,max_score,
+		           COALESCE(risk_rating,''),
 		           findings_count,critical_findings,planned_at,started_at,completed_at,due_at,next_due_at,
-		           assessor,assessor_id,questionnaire,findings,recommendations,notes,created_by,created_at,updated_at`,
+		           COALESCE(assessor,''),assessor_id,questionnaire,findings,
+		           COALESCE(recommendations,''),COALESCE(notes,''),created_by,created_at,updated_at`,
 		args...,
 	).Scan(&a.ID, &a.TenantID, &a.VendorID, &a.AssessmentType, &a.Status,
 		&a.Score, &a.MaxScore, &a.RiskRating,
@@ -670,12 +882,31 @@ func (r *SCSRepository) UpdateAssessment(ctx context.Context, tenantID, id uuid.
 	}
 	_ = json.Unmarshal(qRaw, &a.Questionnaire)
 	_ = json.Unmarshal(fRaw, &a.Findings)
+
+	// A completed assessment is what makes a vendor assessed.
+	if req.Status != nil && *req.Status == "completed" {
+		_, _ = r.db.Exec(ctx,
+			`UPDATE scs_vendors SET last_assessment_at=$3,
+			        next_assessment_at=COALESCE($4, next_assessment_at), updated_at=NOW()
+			 WHERE tenant_id=$1 AND id=$2`,
+			tenantID, a.VendorID, a.CompletedAt, a.NextDueAt)
+	}
 	return &a, nil
 }
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
 
 func (r *SCSRepository) CreateAlert(ctx context.Context, tenantID uuid.UUID, req *model.CreateAlertRequest) (*model.SCSAlert, error) {
+	if req.VendorID != nil {
+		if err := r.vendorBelongsTo(ctx, tenantID, *req.VendorID); err != nil {
+			return nil, err
+		}
+	}
+	if req.ComponentID != nil {
+		if err := r.componentBelongsTo(ctx, tenantID, *req.ComponentID); err != nil {
+			return nil, err
+		}
+	}
 	cveIDs := req.CVEIDs
 	if cveIDs == nil {
 		cveIDs = []string{}
@@ -699,9 +930,11 @@ func (r *SCSRepository) CreateAlert(ctx context.Context, tenantID uuid.UUID, req
 		  affected_components,affected_systems,cve_ids,advisory_url,remediation,
 		  source,source_ref,tags)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-		 RETURNING id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,description,
-		           affected_components,affected_systems,cve_ids,advisory_url,remediation,
-		           resolved_by,resolved_at,source,source_ref,detected_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,
+		           COALESCE(description,''),affected_components,affected_systems,cve_ids,
+		           COALESCE(advisory_url,''),COALESCE(remediation,''),
+		           COALESCE(resolved_by,''),resolved_at,
+		           COALESCE(source,''),COALESCE(source_ref,''),detected_at,tags,created_at,updated_at`,
 		tenantID, req.VendorID, req.ComponentID, req.AlertType, req.Severity,
 		req.Title, req.Description, affComps, affSys, cveIDs,
 		req.AdvisoryURL, req.Remediation, req.Source, req.SourceRef, tags,
@@ -718,13 +951,19 @@ func (r *SCSRepository) ListAlerts(ctx context.Context, tenantID uuid.UUID, f mo
 	args := []any{tenantID}
 	n := 2
 	if f.Status != "" {
-		cond = append(cond, fmt.Sprintf("status=$%d", n)); args = append(args, f.Status); n++
+		cond = append(cond, fmt.Sprintf("status=$%d", n))
+		args = append(args, f.Status)
+		n++
 	}
 	if f.Severity != "" {
-		cond = append(cond, fmt.Sprintf("severity=$%d", n)); args = append(args, f.Severity); n++
+		cond = append(cond, fmt.Sprintf("severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
 	}
 	if f.AlertType != "" {
-		cond = append(cond, fmt.Sprintf("alert_type=$%d", n)); args = append(args, f.AlertType); n++
+		cond = append(cond, fmt.Sprintf("alert_type=$%d", n))
+		args = append(args, f.AlertType)
+		n++
 	}
 	where := strings.Join(cond, " AND ")
 	var total int
@@ -736,9 +975,11 @@ func (r *SCSRepository) ListAlerts(ctx context.Context, tenantID uuid.UUID, f mo
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,description,
-		        affected_components,affected_systems,cve_ids,advisory_url,remediation,
-		        resolved_by,resolved_at,source,source_ref,detected_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,
+		        COALESCE(description,''),affected_components,affected_systems,cve_ids,
+		        COALESCE(advisory_url,''),COALESCE(remediation,''),
+		        COALESCE(resolved_by,''),resolved_at,
+		        COALESCE(source,''),COALESCE(source_ref,''),detected_at,tags,created_at,updated_at
 		 FROM scs_alerts WHERE `+where+
 			fmt.Sprintf(` ORDER BY detected_at DESC LIMIT $%d OFFSET $%d`, n, n+1),
 		args...)
@@ -767,25 +1008,35 @@ func (r *SCSRepository) UpdateAlert(ctx context.Context, tenantID, id uuid.UUID,
 	n := 3
 
 	if req.Status != nil {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, *req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
 		if *req.Status == "resolved" {
-			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n)); args = append(args, time.Now().UTC()); n++
+			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n))
+			args = append(args, time.Now().UTC())
+			n++
 		}
 	}
 	if req.Remediation != nil {
-		sets = append(sets, fmt.Sprintf("remediation=$%d", n)); args = append(args, *req.Remediation); n++
+		sets = append(sets, fmt.Sprintf("remediation=$%d", n))
+		args = append(args, *req.Remediation)
+		n++
 	}
 	if req.ResolvedBy != nil {
-		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n)); args = append(args, *req.ResolvedBy); n++
+		sets = append(sets, fmt.Sprintf("resolved_by=$%d", n))
+		args = append(args, *req.ResolvedBy)
+		n++
 	}
 
 	var a model.SCSAlert
 	err := r.db.QueryRow(ctx,
 		`UPDATE scs_alerts SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,description,
-		           affected_components,affected_systems,cve_ids,advisory_url,remediation,
-		           resolved_by,resolved_at,source,source_ref,detected_at,tags,created_at,updated_at`,
+		 RETURNING id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,
+		           COALESCE(description,''),affected_components,affected_systems,cve_ids,
+		           COALESCE(advisory_url,''),COALESCE(remediation,''),
+		           COALESCE(resolved_by,''),resolved_at,
+		           COALESCE(source,''),COALESCE(source_ref,''),detected_at,tags,created_at,updated_at`,
 		args...,
 	).Scan(&a.ID, &a.TenantID, &a.VendorID, &a.ComponentID, &a.AlertType, &a.Severity, &a.Status,
 		&a.Title, &a.Description, &a.AffectedComponents, &a.AffectedSystems,
@@ -824,7 +1075,9 @@ func (r *SCSRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, po
 	args := []any{tenantID}
 	n := 2
 	if policyType != "" {
-		cond = append(cond, fmt.Sprintf("policy_type=$%d", n)); args = append(args, policyType); n++
+		cond = append(cond, fmt.Sprintf("policy_type=$%d", n))
+		args = append(args, policyType)
+		n++
 	}
 	rows, err := r.db.Query(ctx,
 		`SELECT id,tenant_id,name,description,policy_type,rule,action,is_active,created_by,created_at,updated_at
@@ -854,20 +1107,30 @@ func (r *SCSRepository) UpdatePolicy(ctx context.Context, tenantID, id uuid.UUID
 	n := 3
 
 	if req.Name != nil {
-		sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, *req.Name); n++
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, *req.Name)
+		n++
 	}
 	if req.Description != nil {
-		sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, *req.Description); n++
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, *req.Description)
+		n++
 	}
 	if req.Rule != nil {
 		rule, _ := json.Marshal(req.Rule)
-		sets = append(sets, fmt.Sprintf("rule=$%d", n)); args = append(args, rule); n++
+		sets = append(sets, fmt.Sprintf("rule=$%d", n))
+		args = append(args, rule)
+		n++
 	}
 	if req.Action != nil {
-		sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, *req.Action); n++
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, *req.Action)
+		n++
 	}
 	if req.IsActive != nil {
-		sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
 	}
 
 	var p model.SCSPolicy
@@ -929,7 +1192,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows.Scan(&k, &v)
 			stats.AlertsBySeverity[k] = v
 		}
@@ -941,7 +1205,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows2 != nil {
 		defer rows2.Close()
 		for rows2.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows2.Scan(&k, &v)
 			stats.AlertsByType[k] = v
 		}
@@ -953,7 +1218,8 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 	if rows3 != nil {
 		defer rows3.Close()
 		for rows3.Next() {
-			var k string; var v int
+			var k string
+			var v int
 			_ = rows3.Scan(&k, &v)
 			stats.VendorsByTier["tier_"+k] = v
 		}
@@ -984,9 +1250,11 @@ func (r *SCSRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*mode
 
 	// Recent open alerts
 	arows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,description,
-		        affected_components,affected_systems,cve_ids,advisory_url,remediation,
-		        resolved_by,resolved_at,source,source_ref,detected_at,tags,created_at,updated_at
+		`SELECT id,tenant_id,vendor_id,component_id,alert_type,severity,status,title,
+		        COALESCE(description,''),affected_components,affected_systems,cve_ids,
+		        COALESCE(advisory_url,''),COALESCE(remediation,''),
+		        COALESCE(resolved_by,''),resolved_at,
+		        COALESCE(source,''),COALESCE(source_ref,''),detected_at,tags,created_at,updated_at
 		 FROM scs_alerts WHERE tenant_id=$1 AND status='open'
 		 ORDER BY detected_at DESC LIMIT 5`, tenantID)
 	if arows != nil {

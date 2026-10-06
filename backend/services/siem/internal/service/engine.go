@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/siem/internal/model"
@@ -34,9 +35,10 @@ type RuleEngine struct {
 	logger    zerolog.Logger
 	cache     ruleCache
 
-	// In-memory threshold counters: key = dedup_key → []event_time
-	threshMu      sync.Mutex
-	threshCounters map[string][]time.Time
+	// thresholds counts rule hits across every replica of this service. It
+	// used to be a map in this process, which made a threshold rule fire only
+	// once a single replica had seen the whole burst.
+	thresholds *cache.Window
 }
 
 // NewRuleEngine creates a RuleEngine.
@@ -46,17 +48,18 @@ func NewRuleEngine(
 	caseRepo *repository.CaseRepository,
 	consumer *pkgkafka.Consumer,
 	publisher *pkgkafka.Producer,
+	thresholds *cache.Window,
 	logger zerolog.Logger,
 ) *RuleEngine {
 	return &RuleEngine{
-		ruleRepo:       ruleRepo,
-		alertRepo:      alertRepo,
-		caseRepo:       caseRepo,
-		consumer:       consumer,
-		publisher:      publisher,
-		logger:         logger,
-		cache:          ruleCache{rules: make(map[string][]*model.DetectionRule)},
-		threshCounters: make(map[string][]time.Time),
+		ruleRepo:   ruleRepo,
+		alertRepo:  alertRepo,
+		caseRepo:   caseRepo,
+		consumer:   consumer,
+		publisher:  publisher,
+		logger:     logger,
+		cache:      ruleCache{rules: make(map[string][]*model.DetectionRule)},
+		thresholds: thresholds,
 	}
 }
 
@@ -77,7 +80,7 @@ func (e *RuleEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 
 	rules := e.getRules(ctx, ev.TenantID)
 	for _, rule := range rules {
-		if e.evaluate(rule, &ev) {
+		if e.evaluate(ctx, rule, &ev) {
 			e.fire(ctx, rule, &ev)
 		}
 	}
@@ -85,7 +88,7 @@ func (e *RuleEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 }
 
 // evaluate checks whether an event satisfies a rule's conditions.
-func (e *RuleEngine) evaluate(rule *model.DetectionRule, ev *event.NormalizedEvent) bool {
+func (e *RuleEngine) evaluate(ctx context.Context, rule *model.DetectionRule, ev *event.NormalizedEvent) bool {
 	// 1. All field_matches must pass
 	for _, fm := range rule.Conditions.FieldMatches {
 		if !matchField(fm, ev) {
@@ -95,7 +98,7 @@ func (e *RuleEngine) evaluate(rule *model.DetectionRule, ev *event.NormalizedEve
 
 	// 2. Threshold check (if configured)
 	if t := rule.Conditions.Threshold; t != nil && t.Count > 1 {
-		return e.thresholdMet(rule, ev, t)
+		return e.thresholdMet(ctx, rule, ev, t)
 	}
 
 	return true
@@ -119,11 +122,51 @@ func matchField(fm model.FieldMatch, ev *event.NormalizedEvent) bool {
 		a, _ := strconv.ParseFloat(actual, 64)
 		b, _ := strconv.ParseFloat(fm.Value, 64)
 		return a >= b
+	case model.OpLt:
+		a, _ := strconv.ParseFloat(actual, 64)
+		b, _ := strconv.ParseFloat(fm.Value, 64)
+		return a < b
+	case model.OpLte:
+		a, _ := strconv.ParseFloat(actual, 64)
+		b, _ := strconv.ParseFloat(fm.Value, 64)
+		return a <= b
+	case model.OpIn:
+		for _, candidate := range strings.Split(fm.Value, ",") {
+			if strings.EqualFold(actual, strings.TrimSpace(candidate)) {
+				return true
+			}
+		}
+		return false
 	case model.OpExists:
 		return actual != ""
 	default:
 		return strings.EqualFold(actual, fm.Value)
 	}
+}
+
+// KnownFields are the event fields a rule may name.
+//
+// It is declared rather than implied by the switch below so the detection
+// library can be checked against it: a shipped rule naming an unknown field
+// loads, matches nothing, and presents itself as working coverage — which is
+// worse than no rule. library_test.go asserts both that every catalogue entry
+// names only these, and that every one of these actually resolves.
+var KnownFields = []string{
+	"category", "severity", "outcome", "action", "source_type",
+	"mitre_tactic", "mitre_technique",
+	"user_id", "user_name", "ip_source", "ip_destination", "geo_country",
+	"risk_score", "threat_score", "cbs_impact", "swift_impact",
+	"ioc_matched", "geo_anomaly", "anomalous_hours",
+}
+
+// KnownField reports whether a rule may name this field.
+func KnownField(name string) bool {
+	for _, f := range KnownFields {
+		if f == name {
+			return true
+		}
+	}
+	return false
 }
 
 // getField extracts a named field from a NormalizedEvent.
@@ -167,6 +210,16 @@ func getField(ev *event.NormalizedEvent, field string) string {
 		if ev.GeoCountry != nil {
 			return *ev.GeoCountry
 		}
+	case "ioc_matched":
+		// The indicators this event touched, as "type:value@field", joined.
+		// A rule uses `exists` to mean "matched anything", or `contains` to
+		// name a kind — "ip", say, or a specific address.
+		//
+		// The field was on the event all along and unreachable from a rule,
+		// which meant the estate's threat intelligence could not drive a
+		// detection: the most valuable signal the platform holds was the one
+		// thing a rule could not ask about.
+		return strings.Join(ev.IOCMatched, ",")
 	case "risk_score":
 		return fmt.Sprintf("%.2f", ev.RiskScore)
 	case "threat_score":
@@ -190,34 +243,23 @@ func getField(ev *event.NormalizedEvent, field string) string {
 	return ""
 }
 
-// thresholdMet uses in-memory sliding window counters.
-func (e *RuleEngine) thresholdMet(rule *model.DetectionRule, ev *event.NormalizedEvent, t *model.ThresholdCondition) bool {
-	// Build group key from group_by fields
-	parts := []string{rule.ID.String()}
+// thresholdMet reports whether a rule's group has been hit t.Count times
+// inside its window, counting across every replica.
+func (e *RuleEngine) thresholdMet(ctx context.Context, rule *model.DetectionRule, ev *event.NormalizedEvent, t *model.ThresholdCondition) bool {
+	// The tenant is already implied by the rule, which is loaded per tenant,
+	// but naming it keeps the key readable in a shared Redis and stops two
+	// tenants from ever sharing a counter if rule loading changes.
+	parts := []string{ev.TenantID, rule.ID.String()}
 	for _, gf := range t.GroupBy {
 		parts = append(parts, getField(ev, gf))
 	}
 	groupKey := strings.Join(parts, "|")
 
-	window := time.Duration(t.WindowSeconds) * time.Second
-	now := time.Now().UTC()
-	cutoff := now.Add(-window)
-
-	e.threshMu.Lock()
-	defer e.threshMu.Unlock()
-
-	times := e.threshCounters[groupKey]
-	// Expire old entries
-	fresh := times[:0]
-	for _, ts := range times {
-		if ts.After(cutoff) {
-			fresh = append(fresh, ts)
-		}
-	}
-	fresh = append(fresh, now)
-	e.threshCounters[groupKey] = fresh
-
-	return len(fresh) >= t.Count
+	// A degraded count — one that covers this replica only — is reported by the
+	// window itself, as a throttled log and crp_sliding_window_fallback_total.
+	// Repeating it per event here would flood the log on a busy tenant.
+	count, _ := e.thresholds.Count(ctx, groupKey, time.Duration(t.WindowSeconds)*time.Second)
+	return count >= t.Count
 }
 
 // fire creates an alert for a rule match.

@@ -5,22 +5,14 @@ import (
 	"fmt"
 	"net/http"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/tenant/internal/model"
 	"github.com/cyberradar/platform/services/tenant/internal/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
-)
-
-// contextKey is a private type for context keys to avoid collisions.
-type contextKey string
-
-const (
-	ctxTenantID    contextKey = "tenant_id"
-	ctxUserID      contextKey = "user_id"
-	ctxIsSuperAdmin contextKey = "is_super_admin"
 )
 
 // TenantHandler exposes tenant management endpoints.
@@ -177,7 +169,7 @@ func (h *TenantHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // Stats handles GET /tenants/{tenantID}/stats
 func (h *TenantHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// TODO: implement stats aggregation (asset count, user count, alert count)
-	response.OK(w, map[string]any{"message": "stats endpoint — implementation in progress"})
+	response.OKWithMeta(w, "stats endpoint — implementation in progress", &response.Meta{Total: int64(len("stats endpoint — implementation in progress"))})
 }
 
 // ─── Context helpers ─────────────────────────────────────────────────────────
@@ -185,14 +177,11 @@ func (h *TenantHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // mustTenantID extracts the tenant_id from context (set by JWT middleware).
 // It panics if not found — the auth middleware must always set this.
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(ctxTenantID).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustIsSuperAdmin(r *http.Request) bool {
-	v, _ := r.Context().Value(ctxIsSuperAdmin).(bool)
-	return v
+	return authctx.IsSuperAdmin(r.Context())
 }
 
 // ─── Error mapping ────────────────────────────────────────────────────────────
@@ -203,18 +192,7 @@ func mapError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil
 	}
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindConflict):
-		response.Conflict(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 	return err
 }
 
