@@ -413,6 +413,19 @@ jobs:
   e2e-chain:
     name: e2e-chain — one attack, end to end
     runs-on: ubuntu-latest
+    env:
+      # On the job, not on one step. CRP_OIDC_ISSUER explicitly empty means
+      # "there is no Keycloak here", and the services then accept only
+      # platform-signed tokens — which is what the chain mints. Set on the
+      # start step alone, the step that provisions the SOAR's credential and
+      # restarts it did not have it: the restarted service took the default
+      # issuer, probed a Keycloak that does not exist, and exited, while the
+      # step reported success. Three runs of the chain drove a platform with
+      # no SOAR in it.
+      CRP_OIDC_ISSUER: ""
+      # CRP_CORS_ORIGINS, which is the name the script reads. It was
+      # CRP_CORS_ALLOWED_ORIGINS here, which nothing has ever read.
+      CRP_CORS_ORIGINS: http://localhost:3000
     # The chain this job drives: an event is ingested, the rule engine raises an
     # alert, an analyst promotes it to a case, a playbook runs, the address is
     # blocked at the network, and the audit trail names the playbook.
@@ -513,11 +526,6 @@ jobs:
 
       - name: Start the platform
         working-directory: backend
-        env:
-          # Explicitly empty: no Keycloak in this job, so the services accept
-          # only platform-signed tokens — which is what the chain mints.
-          CRP_OIDC_ISSUER: ""
-          CRP_CORS_ALLOWED_ORIGINS: http://localhost:3000
         run: ./scripts/dev-local.sh services
 
       # The step that was missing from every installation. Without it the SOAR

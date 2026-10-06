@@ -298,7 +298,8 @@ func TestTheChainFromEventToContainment(t *testing.T) {
 			return false, nil
 		})
 	}); err != nil {
-		fatal(t, "the alert never appeared for %s: %v%s", attacker, err, tl)
+		fatal(t, "the alert never appeared for %s: %v%s\n%s", attacker, err, tl,
+			whyNoAlert(ctx, analyst, rule.ID))
 	}
 	if alert.Severity != "CRITICAL" {
 		t.Errorf("the alert is %q, want the rule's CRITICAL", alert.Severity)
@@ -570,4 +571,48 @@ func onboardConnector(ctx context.Context, pool *pgxpool.Pool, admin *Client, st
 		return nil, fmt.Errorf("the exchange returned no token")
 	}
 	return admin.As(granted.AccessToken), nil
+}
+
+// whyNoAlert separates the two reasons the fourth step can fail.
+//
+// "The alert never appeared" is true of both of them and useful for neither.
+// Either the engine is not consuming — nothing it produces reaches the
+// alerts table, whatever the rule says — or it is consuming and this rule
+// does not match. The first question is answered by asking for the tenant's
+// alerts with no rule filter at all; the second by reading back what the
+// platform stored for the rule, because a condition dropped on the way in
+// looks exactly like an engine that never ran.
+//
+// It is only ever called on a failure, so it reports what it cannot read
+// rather than failing the test a second time.
+func whyNoAlert(ctx context.Context, c *Client, ruleID uuid.UUID) string {
+	var b strings.Builder
+	b.WriteString("  where it stopped:\n")
+
+	var existing []struct {
+		AlertID  uuid.UUID `json:"alert_id"`
+		RuleName string    `json:"rule_name"`
+		IPSource string    `json:"ip_source"`
+	}
+	switch err := c.Do(ctx, "GET", "siem", "/api/v1/siem/alerts?limit=5", nil, &existing); {
+	case err != nil:
+		fmt.Fprintf(&b, "    the tenant's alerts could not be read at all: %v\n", err)
+	case len(existing) == 0:
+		b.WriteString("    this tenant has no alert from any rule, so the engine is " +
+			"producing nothing: look at whether it is consuming crp.events.enriched\n")
+	default:
+		fmt.Fprintf(&b, "    this tenant has %d alert(s) from other rules (e.g. %q on %s), "+
+			"so the engine is consuming and this rule did not match\n",
+			len(existing), existing[0].RuleName, existing[0].IPSource)
+	}
+
+	var stored map[string]any
+	if err := c.Do(ctx, "GET", "siem", "/api/v1/siem/rules/"+ruleID.String(), nil, &stored); err != nil {
+		fmt.Fprintf(&b, "    the rule could not be read back: %v\n", err)
+		return b.String()
+	}
+	conditions, _ := json.Marshal(stored["conditions"])
+	fmt.Fprintf(&b, "    the rule as the platform stored it: enabled=%v category=%v conditions=%s\n",
+		stored["enabled"], stored["category"], conditions)
+	return b.String()
 }

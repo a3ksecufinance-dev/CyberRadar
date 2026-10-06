@@ -29,6 +29,60 @@ STATE_DIR="${CRP_STATE_DIR:-$BACKEND_DIR/.dev-local}"
 LOG_DIR="$STATE_DIR/logs"
 PID_DIR="$STATE_DIR/pids"
 
+# ─── The configuration a second invocation has to reuse ───────────────────────
+#
+# How a service is configured is read from the shell that starts it. That is
+# fine for one invocation and wrong across two, because `restart` goes back
+# through `services`, which re-reads the shell — a different shell, with
+# different exports.
+#
+# The end-to-end job in CI found this the hard way. It sets CRP_OIDC_ISSUER
+# empty on the step that starts the platform, meaning "there is no Keycloak
+# here". The next step provisions the SOAR's credential and restarts that
+# service, and that step does not set the variable. The restarted service took
+# the default issuer, probed a Keycloak that does not exist in that job, and
+# exited — while the step reported "soar-service restarted with its
+# credential". Every run of the chain since then has been driving a platform
+# with no SOAR in it.
+#
+# So the choices are written down on the first start and read back on the next
+# invocation. A variable this shell sets explicitly still wins, so
+# `CRP_LOG_LEVEL=debug dev-local.sh restart siem-service` does what it says.
+CONFIG_FILE="$STATE_DIR/config.env"
+CONFIG_VARS=(CRP_OIDC_ISSUER CRP_OIDC_AUDIENCE CRP_CORS_ORIGINS CRP_LOG_LEVEL
+	CRP_PG_USER CRP_PG_PASSWORD CRP_PG_DB CRP_REDIS_PASSWORD CRP_NEO4J_PASSWORD)
+
+# save_config records what decides how services are configured.
+#
+# `declare -p` rather than hand-quoting: an issuer carrying a space or an '&'
+# has to come back exactly as it went in, and "set but empty" has to survive —
+# that is the value that means "no identity provider".
+save_config() {
+	mkdir -p "$STATE_DIR"
+	: > "$CONFIG_FILE"
+	local v
+	for v in "${CONFIG_VARS[@]}"; do
+		if [[ -v $v ]]; then
+			declare -p "$v" >> "$CONFIG_FILE"
+		fi
+	done
+}
+
+# load_config fills in only what this shell has not set itself.
+load_config() {
+	[[ -f "$CONFIG_FILE" ]] || return 0
+	local line name
+	while read -r line; do
+		[[ "$line" == "declare -x "* || "$line" == "declare -- "* ]] || continue
+		line="${line#declare -? }"
+		name="${line%%=*}"
+		[[ -v $name ]] && continue
+		eval "export $line"
+	done < "$CONFIG_FILE"
+}
+
+load_config
+
 PGUSER_NAME="${CRP_PG_USER:-crp_user}"
 PGPASS="${CRP_PG_PASSWORD:-crp_password_dev}"
 PGDB="${CRP_PG_DB:-crp_foundation}"
@@ -763,13 +817,22 @@ cmd_accounts() {
 	fi
 	ok "soar-executor (credential in $SOAR_CREDENTIAL)"
 	if [[ -f "$PID_DIR/soar-service.pid" ]]; then
-		cmd_restart soar-service >/dev/null 2>&1 || warn "restart soar-service by hand to pick the credential up"
-		ok "soar-service restarted with its credential"
+		# Not silenced, and the outcome is checked: this said "restarted with
+		# its credential" about a process that had already exited.
+		if cmd_restart soar-service >/dev/null; then
+			ok "soar-service restarted with its credential"
+		else
+			fail "soar-service did not come back after its restart — $LOG_DIR/soar-service.log"
+			return 1
+		fi
 	fi
 }
 
 cmd_services() {
 	cmd_build
+	# Written down before anything starts, so the next invocation — a restart
+	# in particular — configures the services the same way this one did.
+	save_config
 	step "Services"
 	local started=0
 	for entry in "${SERVICES[@]}"; do
@@ -811,7 +874,16 @@ cmd_services() {
 			down=$((down + 1)); fail "$name (:$port) — $LOG_DIR/$name.log"
 		fi
 	done
-	if [[ $down -eq 0 ]]; then ok "all $up services answer /health"; else warn "$up up, $down down"; fi
+	if [[ $down -eq 0 ]]; then
+		ok "all $up services answer /health"
+		return 0
+	fi
+	# A failure, not a warning. The step that starts the platform in CI reported
+	# success with a dead SOAR, and three runs of the end-to-end chain went on
+	# to drive a platform that could not contain anything. Whoever starts the
+	# services is the one in a position to say they did not start.
+	fail "$up up, $down down"
+	return 1
 }
 
 # ─── Frontend ─────────────────────────────────────────────────────────────────
