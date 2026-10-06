@@ -75,9 +75,15 @@ données.
 
 ### Temps 1 — Le tableau de bord (2 min)
 
-L'estate : **125 actifs**, 25 vulnérabilités, **412 constats**, 511 alertes,
-41 contrôles de conformité, 4 risques — une banque de détail avec 24 agences,
-son réseau de distributeurs, son back-office et ses systèmes centraux.
+L'estate : **125 actifs**, 25 vulnérabilités, **412 constats**, 72 alertes,
+42 contrôles sur **5 référentiels**, 4 risques — Banque Al Massira, banque de
+détail marocaine fictive : siège à Casa Finance City, 24 agences de Tanger à
+Laâyoune, son réseau de distributeurs, son back-office et ses systèmes
+centraux.
+
+> **La banque est inventée**, le nom comme le domaine `almassira.ma`. Les
+> villes sont réelles. À dire une fois, au début : un DSI qui se demande de
+> quelle banque viennent ces chiffres n'écoute plus le reste.
 
 > « Tout ce que vous voyez a été écrit à travers l'API de la plateforme, sous
 > une identité réelle avec de vraies permissions. Rien n'est injecté en base. »
@@ -90,6 +96,14 @@ vous pousse : chaque agence porte sa propre ville dans le champ *localisation*,
 et les vulnérabilités sont rattachées aux actifs **par le produit qu'elles
 nomment**. Un distributeur porte SMBGhost et PrintNightmare ; il ne porte pas la
 faille Outlook. C'est exactement ce qu'un RSSI vérifie en premier.
+
+**Et le point qui porte devant cette salle** : les cinq référentiels sont ceux
+qui obligent réellement un établissement marocain — **DNSSI** de la DGSSI,
+**loi 09-08** et CNDP, **PCI DSS 4.0**, **SWIFT CSP** et **ISO 27001:2022**.
+DORA n'y est pas : c'est un règlement européen, et le citer à Casablanca
+décrédibilise au lieu de rassurer. Les intitulés de contrôle sont la
+correspondance de la plateforme, pas une citation des textes — ce qui se
+démontre est le mécanisme, et il vaut pour le référentiel que le client apporte.
 
 ### Temps 2 — La détection, et sa généalogie (4 min)
 
@@ -114,15 +128,24 @@ make e2e-chain
 Neuf étapes chronométrées : règle écrite, connecteur raccordé, six
 authentifications en échec depuis une adresse, alerte levée, cas ouvert,
 playbook écrit, playbook exécuté, adresse bloquée au niveau réseau, journal
-d'audit nommant le playbook. **4,3 secondes de bout en bout**, détection
-comprise.
+d'audit nommant le playbook.
+
+**Entre 4 et 65 secondes de bout en bout**, et la variation a une raison qu'il
+vaut mieux énoncer que subir : le moteur rafraîchit son cache de règles toutes
+les 60 secondes, donc une règle écrite à l'instant s'applique quelque part dans
+ce cycle. Mesures réelles : 4,3 s et 44,9 s sur la même installation. Si vous
+voulez le chiffre bas, lancez la chaîne une fois cinq minutes avant — et si
+elle met 40 secondes devant la salle, dites pourquoi : « le temps affiché
+inclut la latence du cache, c'est le délai qu'un client constate, pas celui
+qu'un commercial choisit ».
 
 > « L'ingestion, la détection, la réponse et la trace d'audit sont quatre
 > produits séparés chez la plupart des éditeurs. Ici c'est une seule chaîne, et
 > voilà son chronomètre. »
 
 Puis revenir dans l'interface montrer l'alerte, le cas et la politique réseau
-qui viennent d'apparaître.
+qui viennent d'apparaître — au milieu des 72 alertes de la semaine, ce qui
+montre au passage qu'on ne travaille pas sur une base vide.
 
 **Si la chaîne échoue en direct** : elle affiche la table des étapes et dit
 *lequel* des passages a rompu, avec les offsets du courtier. Lisez-la à voix
@@ -170,6 +193,7 @@ Un décideur qui entend ça fait confiance au reste. Un décideur qui entend
 | L'écran Copilot sans `ANTHROPIC_API_KEY` | Le service refuse de démarrer, et c'est le bon comportement : un assistant qui répond silencieusement rien est pire qu'un assistant absent. L'écran, lui, sera vide |
 | Les graphes d'attaque sans Neo4j | La lecture retombe sur PostgreSQL, ce qui marche, mais le rendu est moins parlant |
 | Les écrans à faible volume | DSPM et mobile portent peu de données de démonstration |
+| La couverture de détection à 100 % | 13 des 15 règles du catalogue sont adoptées, deux ne le sont pas **volontairement** : l'écran de couverture n'a d'intérêt que s'il a un écart à montrer, et « pourquoi celle-là n'est pas active » est la question qu'un auditeur pose |
 | Le détail d'une CVE devant un RSSI | Le score CVSS est celui publié, mais l'EPSS est une valeur **datée** : c'est une probabilité qui change chaque jour. Elle est là pour que le tri ait un sens, pas pour être citée comme un chiffre courant |
 
 ---

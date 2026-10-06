@@ -23,14 +23,18 @@ import "fmt"
 var branches = []struct {
 	Slug, City string
 }{
-	{"par-ope", "Paris Opéra"}, {"par-def", "Paris La Défense"}, {"par-bas", "Paris Bastille"},
-	{"lyo-par", "Lyon Part-Dieu"}, {"mar-vie", "Marseille Vieux-Port"}, {"lil-eur", "Lille Europe"},
-	{"bor-cha", "Bordeaux Chartrons"}, {"tou-cap", "Toulouse Capitole"}, {"nan-gra", "Nantes Graslin"},
-	{"str-kle", "Strasbourg Kléber"}, {"nic-mas", "Nice Masséna"}, {"ren-rep", "Rennes République"},
-	{"mon-com", "Montpellier Comédie"}, {"rou-cat", "Rouen Cathédrale"}, {"gre-vic", "Grenoble Victor-Hugo"},
-	{"dij-dar", "Dijon Darcy"}, {"ang-ral", "Angers Ralliement"}, {"rei-dro", "Reims Drouet"},
-	{"tou-jea", "Tours Jean-Jaurès"}, {"cle-jau", "Clermont Jaude"}, {"bre-sie", "Brest Siam"},
-	{"lim-mot", "Limoges Motte"}, {"orl-mar", "Orléans Martroi"}, {"cae-sai", "Caen Saint-Pierre"},
+	{"cas-cfc", "Casablanca Finance City"}, {"cas-maa", "Casablanca Maârif"},
+	{"cas-sid", "Casablanca Sidi Maârouf"}, {"cas-ain", "Casablanca Aïn Diab"},
+	{"rab-agd", "Rabat Agdal"}, {"rab-hay", "Rabat Hay Riad"},
+	{"mar-gue", "Marrakech Guéliz"}, {"mar-men", "Marrakech Ménara"},
+	{"fes-atl", "Fès Atlas"}, {"tan-ibe", "Tanger Ibéria"},
+	{"tan-med", "Tanger Med"}, {"aga-tal", "Agadir Talborjt"},
+	{"mek-ham", "Meknès Hamria"}, {"ouj-and", "Oujda Al Andalous"},
+	{"ken-mak", "Kénitra Maâmora"}, {"tet-mar", "Tétouan Marina"},
+	{"sal-bet", "Salé Bettana"}, {"moh-par", "Mohammedia Parc"},
+	{"jad-pla", "El Jadida Plateau"}, {"ben-bel", "Béni Mellal Belvédère"},
+	{"saf-jor", "Safi Jorf"}, {"nad-ari", "Nador Arid"},
+	{"set-cen", "Settat Centre"}, {"laa-smr", "Laâyoune Smara"},
 }
 
 // backOffice is what sits behind the branches and is neither core banking nor
@@ -64,7 +68,7 @@ func fleetAssets() []demoAsset {
 	for i, b := range branches {
 		octet := 10 + i // 10.70.10.x … 10.70.33.x, clear of the named assets
 		host := func(n int) string { return fmt.Sprintf("10.70.%d.%d", octet, n) }
-		fqdn := func(n string) string { return n + ".bnf.fr" }
+		fqdn := func(n string) string { return n + ".almassira.ma" }
 
 		srv := fmt.Sprintf("agence-%s-srv", b.Slug)
 		gab := fmt.Sprintf("agence-%s-gab", b.Slug)
@@ -100,7 +104,7 @@ func fleetAssets() []demoAsset {
 
 	for i, b := range backOffice {
 		out = append(out, demoAsset{
-			Name: b.Name, Hostname: b.Name + ".bnf.fr", IP: fmt.Sprintf("10.65.0.%d", 10+i),
+			Name: b.Name, Hostname: b.Name + ".almassira.ma", IP: fmt.Sprintf("10.65.0.%d", 10+i),
 			Type: b.Type, OS: b.OS, Criticality: b.Crit, Environment: b.Env, Zone: "internal",
 			Department: b.Dept, Service: b.Service, Location: headOffice,
 			Tags: []string{"demo", "back-office"},

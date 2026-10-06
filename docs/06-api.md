@@ -94,7 +94,7 @@ GET /api/v1/siem/rule-library/CRP-XXX-9999
 ### Avec un jeton, sans la permission
 
 ```
-POST /api/v1/siem/rules      (compte dpo@bnf.fr)
+POST /api/v1/siem/rules      (compte dpo@almassira.ma)
 ```
 ```json
 { "error": { "code": "FORBIDDEN", "message": "permission required: rules:write" } }

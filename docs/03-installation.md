@@ -175,12 +175,12 @@ pouvoir vérifier ce que chacun voit :
 | Compte | Rôle |
 |---|---|
 | `admin@cyberradar.io` | `platform_admin`, `ciso` |
-| `ciso@bnf.fr` | `ciso` |
-| `soc-l1@bnf.fr` | `soc_analyst_l1` |
-| `soc-l2@bnf.fr` | `soc_analyst_l2` |
-| `risk@bnf.fr` | `risk_manager` |
-| `dpo@bnf.fr` | `dpo` |
-| `auditor@bnf.fr` | `auditor` |
+| `ciso@almassira.ma` | `ciso` |
+| `soc-l1@almassira.ma` | `soc_analyst_l1` |
+| `soc-l2@almassira.ma` | `soc_analyst_l2` |
+| `risk@almassira.ma` | `risk_manager` |
+| `dpo@almassira.ma` | `dpo` |
+| `auditor@almassira.ma` | `auditor` |
 
 Tous avec le même mot de passe de développement, `Admin@CyberRadar2025!`.
 

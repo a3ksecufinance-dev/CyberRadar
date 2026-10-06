@@ -284,9 +284,26 @@ type demoControl struct {
 	Note      string
 }
 
+// Les cadres que porte réellement une banque marocaine.
+//
+// DORA est un règlement européen : il n'oblige pas un établissement de droit
+// marocain, et le citer devant un DSI de la place le disqualifie plutôt que
+// l'inverse. Ce que l'audit regarde ici, c'est la DNSSI de la DGSSI, la
+// loi 09-08 et la CNDP pour les données personnelles, puis PCI DSS et le CSP
+// SWIFT qui s'appliquent partout où l'on traite une carte ou un virement
+// international.
+//
+// Les intitulés de contrôle ci-dessous sont **la correspondance de la
+// plateforme**, pas une citation des textes : ils nomment l'exigence sans
+// prétendre reproduire la numérotation officielle d'une directive. Ce que la
+// démonstration montre est le mécanisme de rattachement — un contrôle, les
+// actifs concernés, un score et sa preuve — et il vaut pour n'importe quel
+// référentiel qu'un client apporte.
 var demoFrameworks = []map[string]any{
-	{"code": "DORA", "name": "Digital Operational Resilience Act", "version": "2022/2554",
-		"description": "Règlement européen sur la résilience opérationnelle numérique du secteur financier."},
+	{"code": "DNSSI", "name": "DNSSI — Directive Nationale de la Sécurité des Systèmes d'Information", "version": "DGSSI",
+		"description": "Directive nationale marocaine applicable aux infrastructures d'importance vitale, publiée par la DGSSI."},
+	{"code": "LOI0908", "name": "Loi 09-08 — protection des données à caractère personnel", "version": "CNDP",
+		"description": "Loi marocaine sur la protection des personnes physiques à l'égard du traitement des données à caractère personnel, contrôlée par la CNDP."},
 	{"code": "PCIDSS", "name": "PCI DSS", "version": "4.0",
 		"description": "Norme de sécurité des données de l'industrie des cartes de paiement."},
 	{"code": "SWIFTCSP", "name": "SWIFT Customer Security Programme", "version": "CSCF v2025",
@@ -296,12 +313,17 @@ var demoFrameworks = []map[string]any{
 }
 
 var demoControls = []demoControl{
-	{"DORA", "DORA-5.2", "Gouvernance TIC", "Cartographie des fonctions critiques et de leurs dépendances", "CRITICAL", false, "partial", 65, "La cartographie existe mais n'est pas revue à chaque changement d'architecture."},
-	{"DORA", "DORA-8.1", "Gestion des risques TIC", "Identification continue des vulnérabilités", "CRITICAL", true, "compliant", 92, "Analyse hebdomadaire de l'ensemble du parc exposé."},
-	{"DORA", "DORA-10.3", "Détection", "Détection des anomalies et des activités inhabituelles", "HIGH", true, "compliant", 88, "Règles de corrélation en production, couverture ATT&CK mesurée."},
-	{"DORA", "DORA-11.4", "Réponse et rétablissement", "Plan de réponse testé au moins une fois par an", "HIGH", false, "partial", 55, "Exercice réalisé, mais sans le prestataire d'infogérance."},
-	{"DORA", "DORA-17.1", "Déclaration d'incident", "Notification à l'autorité dans les délais réglementaires", "CRITICAL", false, "non_compliant", 30, "Le délai de notification initiale a été dépassé lors du dernier incident majeur."},
-	{"DORA", "DORA-28.2", "Risque tiers", "Registre des prestataires TIC critiques tenu à jour", "HIGH", false, "partial", 60, "Registre complet pour le cœur bancaire, incomplet pour les canaux digitaux."},
+	{"DNSSI", "DNSSI-GOUV-01", "Gouvernance SSI", "Cartographie des systèmes d'importance vitale et de leurs dépendances", "CRITICAL", false, "partial", 65, "La cartographie existe mais n'est pas revue à chaque changement d'architecture."},
+	{"DNSSI", "DNSSI-VULN-01", "Gestion des vulnérabilités", "Identification continue des vulnérabilités sur le périmètre exposé", "CRITICAL", true, "compliant", 92, "Analyse hebdomadaire de l'ensemble du parc exposé."},
+	{"DNSSI", "DNSSI-DETEC-01", "Détection", "Détection des anomalies et des activités inhabituelles", "HIGH", true, "compliant", 88, "Règles de corrélation en production, couverture ATT&CK mesurée."},
+	{"DNSSI", "DNSSI-REPON-01", "Réponse et continuité", "Plan de réponse testé au moins une fois par an", "HIGH", false, "partial", 55, "Exercice réalisé, mais sans le prestataire d'infogérance."},
+	{"DNSSI", "DNSSI-NOTIF-01", "Déclaration d'incident", "Notification à l'autorité nationale dans les délais prescrits", "CRITICAL", false, "non_compliant", 30, "Le délai de notification initiale a été dépassé lors du dernier incident majeur."},
+	{"DNSSI", "DNSSI-TIERS-01", "Risque fournisseur", "Registre des prestataires critiques tenu à jour", "HIGH", false, "partial", 60, "Registre complet pour le cœur bancaire, incomplet pour les canaux digitaux."},
+	{"LOI0908", "L0908-DECL-01", "Formalités préalables", "Déclaration des traitements auprès de la CNDP", "HIGH", false, "compliant", 90, "Les traitements du cœur bancaire et des canaux digitaux sont déclarés."},
+	{"LOI0908", "L0908-FINA-01", "Finalité et proportionnalité", "Durée de conservation définie et appliquée par traitement", "HIGH", false, "partial", 58, "Les durées sont définies ; la purge automatique ne couvre pas les journaux applicatifs."},
+	{"LOI0908", "L0908-SECU-01", "Sécurité des traitements", "Chiffrement des données personnelles au repos et en transit", "CRITICAL", true, "compliant", 86, "Chiffrement en base et TLS imposé ; deux flux internes restent en clair."},
+	{"LOI0908", "L0908-DROI-01", "Droits des personnes", "Traçabilité des demandes d'accès, de rectification et d'opposition", "MEDIUM", false, "partial", 48, "Les demandes sont traitées, la preuve du délai de réponse n'est pas conservée."},
+	{"LOI0908", "L0908-TRAN-01", "Transfert hors du Maroc", "Autorisation préalable de la CNDP pour tout transfert transfrontalier", "CRITICAL", false, "non_compliant", 25, "Un service d'analyse hébergé hors du Royaume traite des données clients sans autorisation."},
 	{"PCIDSS", "PCI-1.2.1", "Réseau", "Restriction des flux entrants et sortants du périmètre carte", "CRITICAL", true, "compliant", 95, "Segmentation validée par le dernier test d'intrusion."},
 	{"PCIDSS", "PCI-6.3.3", "Développement sécurisé", "Correctifs de sécurité critiques appliqués sous un mois", "CRITICAL", true, "non_compliant", 40, "CVE-2024-3400 ouverte au-delà du délai sur un actif du périmètre."},
 	{"PCIDSS", "PCI-8.3.6", "Authentification", "Authentification multifacteur sur tous les accès administratifs", "CRITICAL", false, "partial", 70, "Couverte sur le bastion, absente sur deux consoles d'administration."},

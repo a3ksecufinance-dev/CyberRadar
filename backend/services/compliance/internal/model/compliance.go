@@ -181,7 +181,12 @@ type AutoAssessmentSuggestion struct {
 // ── Request / filter models ───────────────────────────────────────────────────
 
 type CreateFrameworkRequest struct {
-	Code        string `json:"code"        validate:"required,oneof=ISO27001 SOC2 PCIDSS SWIFTCSP NIS2 DORA GDPR"`
+	// Pas une énumération. Un produit de conformité qui n'accepte que sept
+	// référentiels refuse le cadre national de son client dès qu'il n'est ni
+	// européen ni américain : la DNSSI marocaine, le SAMA CSF, Solvabilité II.
+	// La contrainte porte sur la forme, et la migration 000050 l'a ouverte de
+	// la même façon côté base, où elle était posée une seconde fois.
+	Code        string `json:"code"        validate:"required,min=2,max=32,framework_code"`
 	Name        string `json:"name"        validate:"required,min=2,max=200"`
 	Description string `json:"description"`
 	Version     string `json:"version"     validate:"omitempty,max=50"`

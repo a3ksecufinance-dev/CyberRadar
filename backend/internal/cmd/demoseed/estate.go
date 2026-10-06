@@ -9,8 +9,21 @@ import (
 )
 
 // The estate is a retail bank with an internet-facing channel, a core banking
-// system, a SWIFT gateway and an ATM network: the four things a European
+// system, a SWIFT gateway and a cash-machine network: the four things a
 // supervisor asks about first. Everything below hangs off it.
+//
+// **Banque Al Massira is invented.** The name, the domain almassira.ma and
+// every figure here are a demonstration dataset; no resemblance to any
+// existing institution is intended, and none should be read into it. It is
+// placed in Morocco — Casa Finance City for the head office, twenty-four
+// branches from Tanger to Laâyoune — because a reviewer judges a dataset by
+// whether it looks like their own estate, and a French bank shown to the
+// Casablanca market answers a question nobody asked.
+//
+// Two consequences worth knowing before presenting: the compliance frameworks
+// are the ones that actually bind a Moroccan bank (see demoFrameworks in
+// analysis.go — DORA is not one of them), and the branch cities are real while
+// the bank is not.
 
 type demoAsset struct {
 	Name        string
@@ -35,23 +48,23 @@ type demoAsset struct {
 // city instead: the asset screen shows the field, and every asset of a
 // twenty-four-branch network located in La Défense is the kind of detail that
 // makes a reviewer stop trusting the rest.
-const headOffice = "Paris — La Défense"
+const headOffice = "Casablanca — Casa Finance City"
 
 var demoAssets = []demoAsset{
-	{"waf-dmz-01", "waf-dmz-01.bnf.fr", "203.0.113.10", "proxy", "PAN-OS 11.1", 3, "production", "dmz", "Infrastructure", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "dmz", "edge"}},
-	{"vpn-gw-01", "vpn-gw-01.bnf.fr", "203.0.113.11", "vpn", "FortiOS 7.2", 3, "production", "dmz", "Infrastructure", "Accès distant", true, false, false, false, headOffice, []string{"demo", "dmz", "remote-access"}},
-	{"web-ebank-01", "web-ebank-01.bnf.fr", "10.20.1.11", "server", "RHEL 9.3", 4, "production", "dmz", "Canaux digitaux", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "web", "pci"}},
-	{"web-ebank-02", "web-ebank-02.bnf.fr", "10.20.1.12", "server", "RHEL 9.3", 4, "production", "dmz", "Canaux digitaux", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "web", "pci"}},
-	{"app-core-01", "app-core-01.bnf.fr", "10.30.2.21", "cbs_server", "RHEL 9.3", 4, "production", "core", "Systèmes centraux", "Core banking", false, true, false, false, headOffice, []string{"demo", "cbs"}},
-	{"db-core-01", "db-core-01.bnf.fr", "10.30.2.31", "database", "Oracle Linux 8", 4, "production", "core", "Systèmes centraux", "Core banking", false, true, false, true, headOffice, []string{"demo", "database", "cbs"}},
-	{"swift-gw-01", "swift-gw-01.bnf.fr", "10.40.3.41", "swift_gateway", "RHEL 8.9", 4, "production", "swift", "Paiements", "Paiements internationaux", false, false, true, false, headOffice, []string{"demo", "swift", "cscf"}},
-	{"hsm-pay-01", "hsm-pay-01.bnf.fr", "10.40.3.45", "hsm", "Thales payShield", 4, "production", "swift", "Paiements", "Paiements internationaux", false, false, true, true, headOffice, []string{"demo", "hsm", "pci"}},
-	{"ad-dc-01", "ad-dc-01.bnf.fr", "10.10.0.5", "server", "Windows Server 2022", 4, "production", "internal", "Infrastructure", "Annuaire", false, false, false, false, headOffice, []string{"demo", "active-directory"}},
-	{"jump-adm-01", "jump-adm-01.bnf.fr", "10.10.0.50", "server", "Windows Server 2022", 4, "production", "admin", "Infrastructure", "Administration", false, false, false, false, headOffice, []string{"demo", "bastion", "tier0"}},
-	{"atm-switch-01", "atm-switch-01.bnf.fr", "10.50.4.10", "monetique", "RHEL 8.9", 4, "production", "monetique", "Monétique", "Réseau GAB", false, false, false, true, headOffice, []string{"demo", "atm", "pci"}},
-	{"backup-nas-01", "backup-nas-01.bnf.fr", "10.10.0.90", "storage", "TrueNAS 13", 3, "production", "internal", "Infrastructure", "Sauvegarde", false, false, false, false, headOffice, []string{"demo", "backup"}},
-	{"k8s-node-03", "k8s-node-03.bnf.fr", "10.20.1.53", "container", "Ubuntu 22.04", 2, "production", "dmz", "Canaux digitaux", "Banque en ligne", false, false, false, false, headOffice, []string{"demo", "kubernetes"}},
-	{"poste-soc-014", "poste-soc-014.bnf.fr", "10.60.5.14", "workstation", "Windows 11 23H2", 2, "production", "internal", "Sécurité", "Poste de travail", false, false, false, false, headOffice, []string{"demo", "workstation"}},
+	{"waf-dmz-01", "waf-dmz-01.almassira.ma", "203.0.113.10", "proxy", "PAN-OS 11.1", 3, "production", "dmz", "Infrastructure", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "dmz", "edge"}},
+	{"vpn-gw-01", "vpn-gw-01.almassira.ma", "203.0.113.11", "vpn", "FortiOS 7.2", 3, "production", "dmz", "Infrastructure", "Accès distant", true, false, false, false, headOffice, []string{"demo", "dmz", "remote-access"}},
+	{"web-ebank-01", "web-ebank-01.almassira.ma", "10.20.1.11", "server", "RHEL 9.3", 4, "production", "dmz", "Canaux digitaux", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "web", "pci"}},
+	{"web-ebank-02", "web-ebank-02.almassira.ma", "10.20.1.12", "server", "RHEL 9.3", 4, "production", "dmz", "Canaux digitaux", "Banque en ligne", true, false, false, true, headOffice, []string{"demo", "web", "pci"}},
+	{"app-core-01", "app-core-01.almassira.ma", "10.30.2.21", "cbs_server", "RHEL 9.3", 4, "production", "core", "Systèmes centraux", "Core banking", false, true, false, false, headOffice, []string{"demo", "cbs"}},
+	{"db-core-01", "db-core-01.almassira.ma", "10.30.2.31", "database", "Oracle Linux 8", 4, "production", "core", "Systèmes centraux", "Core banking", false, true, false, true, headOffice, []string{"demo", "database", "cbs"}},
+	{"swift-gw-01", "swift-gw-01.almassira.ma", "10.40.3.41", "swift_gateway", "RHEL 8.9", 4, "production", "swift", "Paiements", "Paiements internationaux", false, false, true, false, headOffice, []string{"demo", "swift", "cscf"}},
+	{"hsm-pay-01", "hsm-pay-01.almassira.ma", "10.40.3.45", "hsm", "Thales payShield", 4, "production", "swift", "Paiements", "Paiements internationaux", false, false, true, true, headOffice, []string{"demo", "hsm", "pci"}},
+	{"ad-dc-01", "ad-dc-01.almassira.ma", "10.10.0.5", "server", "Windows Server 2022", 4, "production", "internal", "Infrastructure", "Annuaire", false, false, false, false, headOffice, []string{"demo", "active-directory"}},
+	{"jump-adm-01", "jump-adm-01.almassira.ma", "10.10.0.50", "server", "Windows Server 2022", 4, "production", "admin", "Infrastructure", "Administration", false, false, false, false, headOffice, []string{"demo", "bastion", "tier0"}},
+	{"atm-switch-01", "atm-switch-01.almassira.ma", "10.50.4.10", "monetique", "RHEL 8.9", 4, "production", "monetique", "Monétique", "Réseau GAB", false, false, false, true, headOffice, []string{"demo", "atm", "pci"}},
+	{"backup-nas-01", "backup-nas-01.almassira.ma", "10.10.0.90", "storage", "TrueNAS 13", 3, "production", "internal", "Infrastructure", "Sauvegarde", false, false, false, false, headOffice, []string{"demo", "backup"}},
+	{"k8s-node-03", "k8s-node-03.almassira.ma", "10.20.1.53", "container", "Ubuntu 22.04", 2, "production", "dmz", "Canaux digitaux", "Banque en ligne", false, false, false, false, headOffice, []string{"demo", "kubernetes"}},
+	{"poste-soc-014", "poste-soc-014.almassira.ma", "10.60.5.14", "workstation", "Windows 11 23H2", 2, "production", "internal", "Sécurité", "Poste de travail", false, false, false, false, headOffice, []string{"demo", "workstation"}},
 }
 
 func (s *seeder) seedAssets(ctx context.Context) error {

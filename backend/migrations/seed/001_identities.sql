@@ -23,12 +23,12 @@ WITH tenant AS (
 ), people(email, display_name, privilege, role_name) AS (
     VALUES
       ('admin@cyberradar.io', 'Platform Administrator', 'super_admin', 'super_admin'),
-      ('ciso@bnf.fr',         'CISO',                  'elevated',    'ciso'),
-      ('soc-l2@bnf.fr',       'SOC Analyst L2',        'standard',    'soc_analyst_l2'),
-      ('soc-l1@bnf.fr',       'SOC Analyst L1',        'standard',    'soc_analyst_l1'),
-      ('auditor@bnf.fr',      'Auditor',               'standard',    'auditor'),
-      ('risk@bnf.fr',         'Risk Manager',          'standard',    'compliance_officer'),
-      ('dpo@bnf.fr',          'Data Protection Officer','standard',   'compliance_officer')
+      ('ciso@almassira.ma',         'CISO',                  'elevated',    'ciso'),
+      ('soc-l2@almassira.ma',       'SOC Analyst L2',        'standard',    'soc_analyst_l2'),
+      ('soc-l1@almassira.ma',       'SOC Analyst L1',        'standard',    'soc_analyst_l1'),
+      ('auditor@almassira.ma',      'Auditor',               'standard',    'auditor'),
+      ('risk@almassira.ma',         'Risk Manager',          'standard',    'compliance_officer'),
+      ('dpo@almassira.ma',          'Data Protection Officer','standard',   'compliance_officer')
 ), inserted AS (
     INSERT INTO identities (tenant_id, username, email, display_name, identity_type, privilege_level, status)
     SELECT tenant.id, split_part(p.email, '@', 1), p.email, p.display_name, 'user', p.privilege, 'active'

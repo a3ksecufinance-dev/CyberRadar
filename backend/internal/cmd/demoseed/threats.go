@@ -175,6 +175,16 @@ var demoAdoptions = []struct {
 	},
 	{Code: "CRP-LAT-0001"},
 	{Code: "CRP-DIS-0001"},
+	{Code: "CRP-IAM-0002"},
+	{Code: "CRP-IAM-0004"},
+	{Code: "CRP-IAM-0005"},
+	{Code: "CRP-C2-0003"},
+	{Code: "CRP-EXF-0002"},
+	{Code: "CRP-GEO-0001"},
+	// CRP-FRD-0001 et CRP-LAT-0001 restent volontairement non adoptées : un
+	// client ne prend pas tout, et l'écran de couverture n'a d'intérêt que s'il
+	// a un écart à montrer. C'est aussi la question qu'un auditeur pose —
+	// « pourquoi celle-là n'est pas active » — et elle doit avoir une réponse.
 }
 
 func (s *seeder) seedRules(ctx context.Context) error {
@@ -279,8 +289,8 @@ func (s *seeder) seedEvents(ctx context.Context) error {
 		events = append(events, jsonEventLine(map[string]any{
 			"timestamp": now.Add(time.Duration(-i*20) * time.Second).Format(time.RFC3339),
 			"action":    "user_login", "category": "authentication", "severity": "MEDIUM",
-			"outcome": "failure", "user_name": "m.durand", "user_email": "m.durand@bnf.fr",
-			"hostname": "web-ebank-01.bnf.fr", "asset_type": "server",
+			"outcome": "failure", "user_name": "m.durand", "user_email": "m.durand@almassira.ma",
+			"hostname": "web-ebank-01.almassira.ma", "asset_type": "server",
 			"src_ip": "203.0.113.66", "dst_ip": "10.20.1.11", "dst_port": 443,
 			"risk_score": 4.5,
 		}))
@@ -290,8 +300,8 @@ func (s *seeder) seedEvents(ctx context.Context) error {
 	events = append(events, jsonEventLine(map[string]any{
 		"timestamp": now.Add(-3 * time.Minute).Format(time.RFC3339),
 		"action":    "admin_login", "category": "authentication", "severity": "HIGH",
-		"outcome": "success", "user_name": "svc-admin", "user_email": "svc-admin@bnf.fr",
-		"hostname": "jump-adm-01.bnf.fr", "asset_type": "server",
+		"outcome": "success", "user_name": "svc-admin", "user_email": "svc-admin@almassira.ma",
+		"hostname": "jump-adm-01.almassira.ma", "asset_type": "server",
 		"src_ip": "198.51.100.23", "dst_ip": "10.10.0.50", "dst_port": 3389,
 		"risk_score": 8.7,
 	}))
@@ -301,7 +311,7 @@ func (s *seeder) seedEvents(ctx context.Context) error {
 		events = append(events, jsonEventLine(map[string]any{
 			"timestamp": now.Add(time.Duration(-i*90) * time.Second).Format(time.RFC3339),
 			"action":    "network_connection", "category": "network", "severity": "HIGH",
-			"outcome": "success", "hostname": "swift-gw-01.bnf.fr", "asset_type": "server",
+			"outcome": "success", "hostname": "swift-gw-01.almassira.ma", "asset_type": "server",
 			"src_ip": "10.40.3.41", "dst_ip": "198.51.100.23", "dst_port": 443,
 			"risk_score": 9.1,
 		}))
@@ -311,7 +321,7 @@ func (s *seeder) seedEvents(ctx context.Context) error {
 	events = append(events, jsonEventLine(map[string]any{
 		"timestamp": now.Add(-6 * time.Minute).Format(time.RFC3339),
 		"action":    "process_exec powershell.exe -enc", "category": "security", "severity": "CRITICAL",
-		"outcome": "success", "user_name": "svc-swift", "hostname": "swift-gw-01.bnf.fr",
+		"outcome": "success", "user_name": "svc-swift", "hostname": "swift-gw-01.almassira.ma",
 		"asset_type": "server", "src_ip": "10.40.3.41", "risk_score": 9.4,
 	}))
 
@@ -319,20 +329,70 @@ func (s *seeder) seedEvents(ctx context.Context) error {
 	events = append(events, jsonEventLine(map[string]any{
 		"timestamp": now.Add(-12 * time.Minute).Format(time.RFC3339),
 		"action":    "file_transfer outbound 42GB", "category": "security", "severity": "HIGH",
-		"outcome": "success", "user_name": "svc-backup", "hostname": "backup-nas-01.bnf.fr",
+		"outcome": "success", "user_name": "svc-backup", "hostname": "backup-nas-01.almassira.ma",
 		"asset_type": "storage", "src_ip": "10.10.0.90", "dst_ip": "198.51.100.77",
 		"dst_port": 443, "risk_score": 8.2,
 	}))
 
-	// 6. Ordinary traffic, so the estate is not made of nothing but alerts.
-	for i := 0; i < 25; i++ {
+	// 6. The week across the branch network.
+	//
+	// Why this is here. A bank with 125 assets whose alert screen shows ten
+	// rows reads as a laboratory, and the dashboards' trend charts have nothing
+	// to draw. The threshold counter keys on (tenant, rule, source address), so
+	// alert volume comes from distinct attackers rather than from more events:
+	// sixty addresses each failing six times is sixty alerts, which is what a
+	// retail bank's console looks like on a Monday morning.
+	//
+	// The events carry timestamps spread over seven days, so the volume graphs
+	// have a shape. The alerts themselves are stamped when the engine raises
+	// them — the platform has just ingested the week, and saying so is more
+	// honest than back-dating a detection that did not happen then.
+	for a := 0; a < 60; a++ {
+		branch := branches[a%len(branches)]
+		host := fmt.Sprintf("agence-%s-srv.almassira.ma", branch.Slug)
+		// 185.x and 196.x: the ranges a Moroccan bank actually sees knocking.
+		attacker := fmt.Sprintf("185.%d.%d.%d", 100+a%80, 10+a%200, 2+a%250)
+		day := time.Duration(-(a % 7)) * 24 * time.Hour
+		for i := 0; i < 6; i++ {
+			events = append(events, jsonEventLine(map[string]any{
+				"timestamp": now.Add(day + time.Duration(-i*25)*time.Second).Format(time.RFC3339),
+				"action":    "user_login", "category": "authentication", "severity": "MEDIUM",
+				"outcome":   "failure",
+				"user_name": fmt.Sprintf("client%04d", 1000+a),
+				"hostname":  host, "asset_type": "server",
+				"src_ip": attacker, "dst_ip": "10.20.1.11", "dst_port": 443,
+				"risk_score": 4.8,
+			}))
+		}
+	}
+
+	// 7. Five transfers leaving the estate, from five different hosts, so the
+	//    exfiltration rule has more than one row to its name.
+	for i, h := range []string{"agence-cas-cfc-srv", "agence-rab-agd-srv", "agence-mar-gue-srv",
+		"file-srv-01", "backup-nas-01"} {
 		events = append(events, jsonEventLine(map[string]any{
-			"timestamp": now.Add(time.Duration(-i*40) * time.Second).Format(time.RFC3339),
-			"action":    "user_login", "category": "authentication", "severity": "LOW",
-			"outcome": "success", "user_name": fmt.Sprintf("agent%02d", i%7),
-			"hostname": "web-ebank-02.bnf.fr", "asset_type": "server",
-			"src_ip": fmt.Sprintf("10.60.5.%d", 20+i%30), "dst_ip": "10.20.1.12",
-			"dst_port": 443, "risk_score": 1.0,
+			"timestamp": now.Add(time.Duration(-i*7) * time.Hour).Format(time.RFC3339),
+			"action":    fmt.Sprintf("file_transfer outbound %dGB", 3+i*4), "category": "security",
+			"severity": "HIGH", "outcome": "success", "user_name": "svc-report",
+			"hostname": h + ".almassira.ma", "asset_type": "server",
+			"src_ip": "10.70.10.10", "dst_ip": fmt.Sprintf("196.200.%d.%d", 10+i, 40+i),
+			"dst_port": 443, "risk_score": 8.0,
+		}))
+	}
+
+	// 8. Ordinary traffic, so the estate is not made of nothing but alerts.
+	for i := 0; i < 300; i++ {
+		branch := branches[i%len(branches)]
+		events = append(events, jsonEventLine(map[string]any{
+			"timestamp": now.Add(time.Duration(-(i % 7)) * 24 * time.Hour).
+				Add(time.Duration(-i*11) * time.Minute).Format(time.RFC3339),
+			"action": "user_login", "category": "authentication", "severity": "LOW",
+			"outcome":    "success",
+			"user_name":  fmt.Sprintf("agent.%s%02d", branch.Slug[:3], i%9),
+			"hostname":   fmt.Sprintf("poste-%s-%02d.almassira.ma", branch.Slug, 1+i%2),
+			"asset_type": "workstation",
+			"src_ip":     fmt.Sprintf("10.70.%d.%d", 10+i%24, 101+i%2),
+			"dst_ip":     "10.20.1.12", "dst_port": 443, "risk_score": 1.0,
 		}))
 	}
 

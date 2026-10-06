@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/cyberradar/platform/internal/pkg/authctx"
@@ -21,9 +22,20 @@ type ComplianceHandler struct {
 	validate *validator.Validate
 }
 
+// frameworkCode is the shape a referential's code must have: upper case,
+// digits, dash and underscore. It is deliberately a shape and not a list —
+// see CreateFrameworkRequest and migration 000050 for why.
+var frameworkCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,31}$`)
+
 // NewComplianceHandler creates a ComplianceHandler.
 func NewComplianceHandler(svc *service.ComplianceService) *ComplianceHandler {
-	return &ComplianceHandler{svc: svc, validate: validator.New()}
+	v := validator.New()
+	// The error is ignored on purpose: it only fires on an empty tag name, and
+	// a nil return here would make every create fail open instead of closed.
+	_ = v.RegisterValidation("framework_code", func(fl validator.FieldLevel) bool {
+		return frameworkCode.MatchString(fl.Field().String())
+	})
+	return &ComplianceHandler{svc: svc, validate: v}
 }
 
 // RegisterRoutes mounts all compliance routes under the provided router.

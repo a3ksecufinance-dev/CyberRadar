@@ -10,7 +10,7 @@
 // anything a customer would enter.
 //
 //	demoseed                      seed the default tenant
-//	demoseed -tenant bnf -v       say what is being created, one line each
+//	demoseed -tenant almassira -v say what is being created, one line each
 //	demoseed -summary             create nothing, just report what is there
 //
 // Running it twice is safe: every step looks for what it is about to create

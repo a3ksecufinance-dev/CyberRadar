@@ -109,8 +109,11 @@ func up(m *migrate.Migrate, db *sql.DB, quiet bool) error {
 		return fmt.Errorf("read the current version: %w", err)
 	}
 	if dirty {
-		return fmt.Errorf("the database is marked dirty at version %d: a migration failed half way "+
-			"and has to be looked at by hand; nothing here will guess what to do", before)
+		return fmt.Errorf("the database is marked dirty at version %d: a migration failed half way, "+
+			"so what it did and did not do has to be looked at by hand — nothing here will guess. "+
+			"Once the schema is back to version %d by hand, clear the flag with "+
+			"`UPDATE schema_migrations SET version=%d, dirty=false` and run up again",
+			before, before-1, before-1)
 	}
 
 	// An installation that predates the version table: the tables are there and
