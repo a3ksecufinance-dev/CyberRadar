@@ -67,6 +67,17 @@ func (f *KafkaFixture) NewTopic(name string) string {
 		f.t.Fatalf("create topic %s: %v", full, err)
 	}
 
+	// Created is not the same as writable.
+	//
+	// CreateTopics returns once the broker has recorded the topic, not once the
+	// partition has a leader — and a producer that writes in between gets
+	// LEADER_NOT_AVAILABLE or UNKNOWN_TOPIC_OR_PARTITION back. It cost a CI run
+	// to learn: a collector test asserted one published and one failed event,
+	// and read two failures, because the valid event's publish lost the race
+	// against leader election. Waiting for a leader here fixes it for every
+	// test rather than in each one.
+	waitForLeader(f.t, f.Brokers, full)
+
 	f.t.Cleanup(func() {
 		c, _, err := controllerConn(f.Brokers)
 		if err != nil {
@@ -79,6 +90,28 @@ func (f *KafkaFixture) NewTopic(name string) string {
 		}
 	})
 	return full
+}
+
+// waitForLeader blocks until partition 0 of the topic has a leader that
+// accepts a connection, which is the condition a producer actually needs.
+func waitForLeader(t *testing.T, brokers []string, topic string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	var last error
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		conn, err := kafka.DialLeader(ctx, "tcp", brokers[0], topic, 0)
+		cancel()
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+		last = err
+		if time.Now().After(deadline) {
+			t.Fatalf("topic %s has no leader after 30s: %v", topic, last)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // controllerConn opens a connection to the broker that owns topic

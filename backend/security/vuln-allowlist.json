@@ -1,0 +1,34 @@
+{
+  "comment": [
+    "Reachable vulnerabilities govulncheck reports and this platform accepts, each",
+    "with the reason, who reviewed it and when it has to be looked at again.",
+    "",
+    "An entry here is not a way to make the pipeline quiet. The gate",
+    "(scripts/govulncheck-gate.py) fails on an entry past its review date, so an",
+    "exception cannot outlive the reasoning behind it, and it fails on anything",
+    "not listed — which is the point of the check being blocking at all.",
+    "",
+    "An entry whose vulnerability has a fixed version is not an exception, it is",
+    "work: bump the module."
+  ],
+  "exceptions": [
+    {
+      "id": "GO-2026-4887",
+      "module": "github.com/docker/docker",
+      "no_fix_available": true,
+      "test_only_package": "internal/pkg/testinfra",
+      "reason": "Reached only from internal/pkg/testinfra, which exists to start PostgreSQL, ClickHouse and Kafka for tests and is imported by no production file — the gate checks that claim itself and fails if one ever imports it. No fixed version of docker/docker exists, so the alternatives are to stop testing against real infrastructure or to accept this; the first costs more than it saves.",
+      "reviewed": "2026-10-05",
+      "review_by": "2027-04-05"
+    },
+    {
+      "id": "GO-2026-4883",
+      "module": "github.com/docker/docker",
+      "no_fix_available": true,
+      "test_only_package": "internal/pkg/testinfra",
+      "reason": "Same dependency, same path, same reasoning as GO-2026-4887.",
+      "reviewed": "2026-10-05",
+      "review_by": "2027-04-05"
+    }
+  ]
+}
