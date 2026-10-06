@@ -102,7 +102,7 @@ func main() {
 		Brokers:     brokers,
 		Topic:       event.TopicNormalized,
 		GroupID:     groupID,
-		StartOffset: -2, // kafka.FirstOffset
+		StartOffset: pkgkafka.FromTheBeginning,
 		MaxBytes:    10 << 20,
 		DLQTopic:    event.TopicDLQ,
 	}, logger)

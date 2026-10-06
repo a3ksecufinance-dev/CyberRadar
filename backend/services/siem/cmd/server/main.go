@@ -113,10 +113,22 @@ func main() {
 
 	// ── Rule Engine (Kafka consumer on crp.events.enriched) ──────────────────
 	ruleConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
-		Brokers:     brokers,
-		Topic:       event.TopicEnriched,
-		GroupID:     "crp-siem-rule-engine",
-		StartOffset: -1,
+		Brokers: brokers,
+		Topic:   event.TopicEnriched,
+		GroupID: "crp-siem-rule-engine",
+		// From the beginning, not from the end. This carried -1, which means
+		// "skip whatever arrived while the engine was not running": restart the
+		// SIEM during an attack and the attack is invisible, with nothing
+		// logged to say so. The pipeline worker next to it already read from
+		// the beginning — the service that only stores events was careful with
+		// them and the one that decides whether to raise an alert was not.
+		//
+		// It applies only when the group has no committed offset, so steady
+		// state is unchanged: the engine resumes where it stopped. What changes
+		// is a fresh installation, where it now evaluates the retained history
+		// instead of ignoring it — and the deduplication key (rule, entity,
+		// tenant) is what stops that replay raising the same alert twice.
+		StartOffset: pkgkafka.FromTheBeginning,
 		DLQTopic:    event.TopicDLQ,
 	}, logger)
 	if err != nil {

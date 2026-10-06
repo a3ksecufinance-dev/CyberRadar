@@ -189,10 +189,14 @@ func main() {
 // consumeTopic reads from a Kafka topic and auto-triggers matching playbooks.
 func consumeTopic(ctx context.Context, brokers []string, topic string, soarSvc *service.SOARService, logger zerolog.Logger) {
 	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       topic,
-		GroupID:     "crp-soar-auto-trigger",
-		StartOffset: kafka.LastOffset,
+		Brokers: brokers,
+		Topic:   topic,
+		GroupID: "crp-soar-auto-trigger",
+		// Deliberately only new events, and this is the one place where it is
+		// the safe direction: replaying an alert means running its playbook
+		// again, so a fresh group reading history would re-block addresses and
+		// re-isolate hosts on the strength of what already happened.
+		StartOffset: pkgkafka.OnlyNewEvents,
 		MinBytes:    1,
 		MaxBytes:    10 << 20,
 		MaxWait:     time.Second,

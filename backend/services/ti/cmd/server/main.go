@@ -80,7 +80,7 @@ func main() {
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-ti-ioc-matcher",
-		StartOffset: -1,
+		StartOffset: pkgkafka.OnlyNewEvents,
 		DLQTopic:    event.TopicDLQ,
 	}, logger)
 	if err != nil {

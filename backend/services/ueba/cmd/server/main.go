@@ -105,10 +105,14 @@ func main() {
 
 	// ── Behavior Engine (Kafka consumer on crp.events.enriched) ───────────────
 	engineConsumer, err := pkgkafka.NewConsumer(pkgkafka.ConsumerConfig{
-		Brokers:     brokers,
-		Topic:       event.TopicEnriched,
-		GroupID:     "crp-ueba-engine",
-		StartOffset: -1,
+		Brokers: brokers,
+		Topic:   event.TopicEnriched,
+		GroupID: "crp-ueba-engine",
+		// The same choice as the rule engine, for the same reason: baselines
+		// built from events that skip whatever arrived while this service was
+		// restarting are baselines that understate the activity, and nothing
+		// says so. Only a group with no committed offset is affected.
+		StartOffset: pkgkafka.FromTheBeginning,
 		DLQTopic:    event.TopicDLQ,
 	}, logger)
 	if err != nil {

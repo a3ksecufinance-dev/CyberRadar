@@ -97,9 +97,10 @@ func main() {
 	//   {"tenant_id":"...", "domain":"siem", "metric_key":"open_alerts", "metric_value":42, "labels":{}}
 	go func() {
 		r := kafkago.NewReader(kafkago.ReaderConfig{
-			Brokers:     brokers,
-			Topic:       "crp.events.kpi",
-			GroupID:     "crp-dashboard-kpi-ingestor",
+			Brokers: brokers,
+			Topic:   "crp.events.kpi",
+			GroupID: "crp-dashboard-kpi-ingestor",
+			// Only new KPI snapshots: this reads current state, not history.
 			StartOffset: kafkago.LastOffset,
 			MinBytes:    1,
 			MaxBytes:    10 << 20,

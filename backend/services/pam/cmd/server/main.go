@@ -77,7 +77,7 @@ func main() {
 		Brokers:     brokers,
 		Topic:       event.TopicEnriched,
 		GroupID:     "crp-pam-risk-engine",
-		StartOffset: -1, // LastOffset — only new events
+		StartOffset: pkgkafka.OnlyNewEvents,
 		DLQTopic:    event.TopicDLQ,
 	}, logger)
 	if err != nil {

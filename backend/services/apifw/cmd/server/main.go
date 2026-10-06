@@ -152,7 +152,7 @@ func consumeTopic(ctx context.Context, brokers []string, topic string, apifwSvc 
 		Brokers:     brokers,
 		Topic:       topic,
 		GroupID:     "crp-apifw-webhook-delivery",
-		StartOffset: kafka.LastOffset,
+		StartOffset: pkgkafka.OnlyNewEvents,
 		MinBytes:    1,
 		MaxBytes:    10 << 20,
 		MaxWait:     time.Second,

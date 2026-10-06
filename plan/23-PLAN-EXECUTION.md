@@ -493,7 +493,16 @@ dépende d'une déclaration.
 > sans SOAR ; le démarrage des services annonçait sa réussite avec des
 > services morts ; et `${VAR:-default}` faisait prendre le défaut à un mot de
 > passe explicitement vide, si bien que chaque service basculait sur son
-> chemin de repli sans que rien ne paraisse cassé. **B5 est fait** : les 49 migrations PostgreSQL passent par
+> chemin de repli sans que rien ne paraisse cassé. Et le quatrième, le plus
+> grave des quatre : **le moteur de détection repartait de la fin du journal
+> Kafka**. Le travailleur du pipeline lisait depuis le début, le moteur de
+> règles depuis la fin — le service qui ne fait que stocker les événements en
+> prenait soin, celui qui décide s'il faut lever une alerte non. Redémarrer le
+> SIEM pendant une attaque rendait cette attaque invisible, sans une ligne pour
+> le dire ; l'UEBA portait le même défaut. C'est aussi ce qui rendait l'étape de
+> l'alerte instable en CI, une exécution sur deux, parce que le groupe de
+> consommateurs y est neuf à chaque fois. Un test de source fixe désormais le
+> choix de chaque service. **B5 est fait** : les 49 migrations PostgreSQL passent par
 > `golang-migrate` et une table `schema_migrations`, chaque fichier s'applique
 > une fois, et la CI applique l'ensemble deux fois de suite en exigeant que la
 > seconde n'applique rien. Ce qui change n'est pas la commodité : la boucle

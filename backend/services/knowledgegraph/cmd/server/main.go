@@ -110,7 +110,7 @@ func main() {
 			Brokers:     brokers,
 			Topic:       "crp.events.enriched",
 			GroupID:     "crp-kg-ingestor",
-			StartOffset: kafka.LastOffset,
+			StartOffset: pkgkafka.OnlyNewEvents,
 			MinBytes:    1,
 			MaxBytes:    10 << 20,
 			MaxWait:     time.Second,

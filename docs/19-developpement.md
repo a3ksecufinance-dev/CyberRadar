@@ -376,7 +376,27 @@ instrumentée a donné la réponse immédiatement :
    piloté une plateforme sans SOAR. Le code de retour est maintenant non nul, et
    le redémarrage du SOAR, qui était muet et dont le résultat était ignoré, est
    vérifié ;
-7. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
+7. **le moteur de détection repartait de la fin du journal Kafka.** Le
+   travailleur du pipeline lisait depuis le début (`FirstOffset`), le moteur de
+   règles depuis la fin (`LastOffset`) : le service qui ne fait que stocker les
+   événements en prenait soin, celui qui décide s'il faut lever une alerte non.
+   Conséquence hors CI : redémarrer le SIEM pendant une attaque rend cette
+   attaque invisible, sans une ligne de journal pour le dire. En CI, où le
+   groupe de consommateurs est neuf à chaque exécution, c'est ce qui rendait
+   l'étape 4 instable — une exécution sur deux selon que le groupe se stabilise
+   avant ou pendant les rafales. L'UEBA portait le même défaut : des lignes de
+   base construites sur un trou sous-estiment l'activité. Les deux lisent
+   désormais depuis le début, ce qui ne change que le cas d'un groupe sans
+   position validée ; en régime établi le moteur reprend où il s'était arrêté,
+   et la clé de déduplication (règle, entité, client) est ce qui empêche un
+   rejeu de lever deux fois la même alerte. Le SOAR reste délibérément sur
+   « seulement les nouveaux » : rejouer une alerte, c'est rejouer son playbook,
+   donc rebloquer des adresses sur la foi de l'histoire. Les deux constantes
+   portent maintenant un nom — `kafka.FromTheBeginning` et
+   `kafka.OnlyNewEvents` — et un test de source vérifie le choix de chaque
+   service, parce qu'un `-1` à un appel ne dit rien et qu'un service copié sur
+   son voisin hérite du choix de ce voisin ;
+8. **`${VAR:-default}` là où le vide a un sens.** Le deux-points fait prendre le
    défaut à une valeur explicitement vide. Pour un mot de passe, « ce serveur
    n'en a pas » est une configuration réelle — celle des conteneurs de la CI — et
    la seule façon de le dire est le vide. Avec le deux-points, chaque `AUTH`

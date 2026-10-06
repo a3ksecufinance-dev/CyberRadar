@@ -16,15 +16,47 @@ const (
 	defaultRetryBackoff = 250 * time.Millisecond
 )
 
+// Where a consumer with no committed offset begins.
+//
+// The choice is not a tuning knob, it is what happens to the events that
+// arrived while the consumer was down. For anything that decides whether an
+// attack is happening, that has one answer: read them. A detection engine
+// that skips to the end discards the window in which it was restarted and
+// says nothing about it — the attack simply did not happen, as far as the
+// product is concerned.
+//
+// It is the opposite for a consumer that *acts*. Replaying an alert means
+// running its playbook again, so the SOAR would re-block addresses and
+// re-isolate hosts on the strength of history. That one skips to the end on
+// purpose.
+//
+// Written as named constants because -1 and -2 at a call site say nothing,
+// and the rule engine carried -1 — skip the restart window — where the
+// pipeline worker beside it carried -2.
+const (
+	// FromTheBeginning reads everything the topic still retains. For
+	// detection, and for anything whose job is not to lose an event.
+	FromTheBeginning = kafka.FirstOffset
+
+	// OnlyNewEvents skips whatever arrived while the consumer was away. For
+	// consumers of current state, and for anything that acts on what it reads.
+	OnlyNewEvents = kafka.LastOffset
+)
+
 // ConsumerConfig holds Kafka consumer configuration.
 type ConsumerConfig struct {
-	Brokers     []string
-	Topic       string
-	GroupID     string
-	MinBytes    int           // default 1B
-	MaxBytes    int           // default 10MB
-	MaxWait     time.Duration // default 500ms
-	StartOffset int64         // kafka.FirstOffset or kafka.LastOffset
+	Brokers  []string
+	Topic    string
+	GroupID  string
+	MinBytes int           // default 1B
+	MaxBytes int           // default 10MB
+	MaxWait  time.Duration // default 500ms
+
+	// StartOffset is FromTheBeginning or OnlyNewEvents, and it decides what
+	// happens to the events that arrived while this consumer was not there.
+	// It applies only when the group has no committed offset — so on a fresh
+	// installation, and after that never again.
+	StartOffset int64
 
 	// MaxAttempts is how many times a message is handed to the handler before
 	// it is routed to the dead letter queue. Default 3.
@@ -88,9 +120,13 @@ func NewConsumer(cfg ConsumerConfig, logger zerolog.Logger) (*Consumer, error) {
 	if maxWait <= 0 {
 		maxWait = 500 * time.Millisecond
 	}
+	// Zero is "not set", and the safe default for an unset one is to skip:
+	// a consumer whose author did not think about it is more likely to be one
+	// of current state than one that must not lose an event. The ones that
+	// must not say so explicitly.
 	startOffset := cfg.StartOffset
 	if startOffset == 0 {
-		startOffset = kafka.LastOffset
+		startOffset = OnlyNewEvents
 	}
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = defaultMaxAttempts
