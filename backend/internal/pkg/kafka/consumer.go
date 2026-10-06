@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -133,6 +134,27 @@ func NewConsumer(cfg ConsumerConfig, logger zerolog.Logger) (*Consumer, error) {
 	}
 	if cfg.RetryBackoff <= 0 {
 		cfg.RetryBackoff = defaultRetryBackoff
+	}
+
+	// The topic has to exist, with a leader, before the reader joins its group.
+	//
+	// Relying on auto-creation loses events, silently. A consumer that joins at
+	// the instant its topic is created can end up in a generation holding no
+	// partition, and then it blocks on ReadMessage with nothing to show for it:
+	// no error, no log line, no lag — it simply never reads. On a cold
+	// installation that is every consumer, because nothing has produced yet.
+	//
+	// It cost this platform its detection chain. The collector published 48
+	// events, the pipeline worker committed none of them, `crp.events.enriched`
+	// stayed at zero, and the rule engine waited correctly on an empty topic.
+	// Both journals looked healthy: neither logs a line per event, so a
+	// handover that worked and one that never happened read the same. Only the
+	// broker's offsets said otherwise.
+	//
+	// A production cluster usually has auto-creation disabled anyway, which
+	// turns the same race into a permanent failure rather than a start-up one.
+	if err := EnsureTopic(cfg.Brokers, cfg.Topic, topicReadyWait, logger); err != nil {
+		return nil, fmt.Errorf("prepare topic %s: %w", cfg.Topic, err)
 	}
 
 	r := kafka.NewReader(kafka.ReaderConfig{
@@ -328,4 +350,55 @@ func (c *Consumer) Close() error {
 // Stats returns reader statistics (lag, messages read, etc.).
 func (c *Consumer) Stats() kafka.ReaderStats {
 	return c.reader.Stats()
+}
+
+// How long to wait for a topic to exist and elect a leader before giving up.
+const topicReadyWait = 60 * time.Second
+
+// EnsureTopic creates a topic if it is missing and waits until it has a leader.
+//
+// Creation is idempotent: a topic that already exists comes back as
+// TopicAlreadyExists, which is success. The wait is what matters as much as the
+// creation — CreateTopics returns once the controller has accepted the record,
+// before the partition has a leader, and a reader or writer that arrives in
+// that window behaves as if the topic were not there.
+func EnsureTopic(brokers []string, topic string, wait time.Duration, logger zerolog.Logger) error {
+	if len(brokers) == 0 || topic == "" {
+		return errors.New("a broker address and a topic are required")
+	}
+
+	conn, err := kafka.Dial("tcp", brokers[0])
+	if err != nil {
+		return fmt.Errorf("reach %s: %w", brokers[0], err)
+	}
+	defer conn.Close() //nolint:errcheck // closing on the way out
+
+	switch err := conn.CreateTopics(kafka.TopicConfig{
+		Topic:             topic,
+		NumPartitions:     1,
+		ReplicationFactor: 1,
+	}); {
+	case err == nil, errors.Is(err, kafka.TopicAlreadyExists):
+	default:
+		// Not fatal on its own: a cluster that forbids creation may still have
+		// the topic, and the wait below is what decides.
+		logger.Warn().Err(err).Str("topic", topic).Msg("kafka_topic_not_created")
+	}
+
+	deadline := time.Now().Add(wait)
+	var last error
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		lead, err := kafka.DialLeader(ctx, "tcp", brokers[0], topic, 0)
+		cancel()
+		if err == nil {
+			_ = lead.Close()
+			return nil
+		}
+		last = err
+		if time.Now().After(deadline) {
+			return fmt.Errorf("topic %s has no leader after %s: %w", topic, wait, last)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }

@@ -870,19 +870,44 @@ cmd_services() {
 			"$BACKEND_DIR/bin/pipeline-worker"
 	fi
 
-	sleep 3
-	local up=0 down=0
+	# Waited for, not sampled once.
+	#
+	# This slept three seconds and then asked each service exactly once. A
+	# service that needed four reported as down, and since the outcome is now a
+	# failure rather than a warning, a slow start would stop an installation
+	# that was perfectly fine — seen here, "0 up, 29 down" on a machine where
+	# the chain passed seconds later. Each service is given up to
+	# serviceHealthWait seconds, and the loop leaves as soon as they all answer.
+	local waited=0 up=0 down=0 pending=()
 	for entry in "${SERVICES[@]}"; do
 		IFS=: read -r name port _ <<< "$entry"
 		running "$name" || continue
-		if curl -fsS -m 2 "http://localhost:$port/health" >/dev/null 2>&1; then
-			up=$((up + 1))
-		else
+		pending+=("$name:$port")
+	done
+	while :; do
+		local still=() entry name port
+		for entry in "${pending[@]}"; do
+			IFS=: read -r name port <<< "$entry"
+			curl -fsS -m 2 "http://localhost:$port/health" >/dev/null 2>&1 || still+=("$entry")
+		done
+		pending=("${still[@]}")
+		[[ ${#pending[@]} -eq 0 ]] && break
+		[[ $waited -ge ${CRP_HEALTH_WAIT:-60} ]] && break
+		sleep 2
+		waited=$((waited + 2))
+	done
+
+	for entry in "${SERVICES[@]}"; do
+		IFS=: read -r name port _ <<< "$entry"
+		running "$name" || continue
+		if printf '%s\n' "${pending[@]+"${pending[@]}"}" | grep -qx "$name:$port"; then
 			down=$((down + 1)); fail "$name (:$port) — $LOG_DIR/$name.log"
+		else
+			up=$((up + 1))
 		fi
 	done
 	if [[ $down -eq 0 ]]; then
-		ok "all $up services answer /health"
+		ok "all $up services answer /health${waited:+ (after ${waited}s)}"
 		return 0
 	fi
 	# A failure, not a warning. The step that starts the platform in CI reported
