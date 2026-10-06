@@ -75,7 +75,9 @@ données.
 
 ### Temps 1 — Le tableau de bord (2 min)
 
-L'estate : 14 actifs, 10 vulnérabilités, 41 contrôles de conformité, 4 risques.
+L'estate : **125 actifs**, 25 vulnérabilités, **412 constats**, 511 alertes,
+41 contrôles de conformité, 4 risques — une banque de détail avec 24 agences,
+son réseau de distributeurs, son back-office et ses systèmes centraux.
 
 > « Tout ce que vous voyez a été écrit à travers l'API de la plateforme, sous
 > une identité réelle avec de vraies permissions. Rien n'est injecté en base. »
@@ -83,9 +85,11 @@ L'estate : 14 actifs, 10 vulnérabilités, 41 contrôles de conformité, 4 risqu
 C'est vrai et c'est vérifiable, et c'est ce qui distingue cette démonstration
 d'une maquette.
 
-**À ne pas faire** : s'attarder sur le nombre d'actifs. 14, c'est un jeu de
-test, pas une banque. Les écrans qui portent sont les alertes (423) et la
-conformité (41 contrôles).
+Deux détails qui tiennent à l'examen, et qu'il vaut la peine de montrer si on
+vous pousse : chaque agence porte sa propre ville dans le champ *localisation*,
+et les vulnérabilités sont rattachées aux actifs **par le produit qu'elles
+nomment**. Un distributeur porte SMBGhost et PrintNightmare ; il ne porte pas la
+faille Outlook. C'est exactement ce qu'un RSSI vérifie en premier.
 
 ### Temps 2 — La détection, et sa généalogie (4 min)
 
@@ -166,6 +170,7 @@ Un décideur qui entend ça fait confiance au reste. Un décideur qui entend
 | L'écran Copilot sans `ANTHROPIC_API_KEY` | Le service refuse de démarrer, et c'est le bon comportement : un assistant qui répond silencieusement rien est pire qu'un assistant absent. L'écran, lui, sera vide |
 | Les graphes d'attaque sans Neo4j | La lecture retombe sur PostgreSQL, ce qui marche, mais le rendu est moins parlant |
 | Les écrans à faible volume | DSPM et mobile portent peu de données de démonstration |
+| Le détail d'une CVE devant un RSSI | Le score CVSS est celui publié, mais l'EPSS est une valeur **datée** : c'est une probabilité qui change chaque jour. Elle est là pour que le tri ait un sens, pas pour être citée comme un chiffre courant |
 
 ---
 

@@ -131,6 +131,10 @@ else
 	if [[ "${assets:-0}" -lt 40 ]]; then
 		warn "${assets} assets and ${vulns} vulnerabilities is a small estate for a decision-maker audience; the alert and compliance screens carry more weight"
 	fi
+	# A fleet with no findings reads as badly as no fleet: a bank's cash
+	# machines always carry something.
+	gab=$(psql_q "SELECT count(*) FROM asset_vulnerabilities f JOIN assets a ON a.id=f.asset_id WHERE a.asset_type='monetique'")
+	[[ "${gab:-0}" -gt 0 ]] || warn "the cash machines carry no finding at all, which no auditor would believe"
 fi
 [[ "${rules:-0}" -gt 5 ]]  && ok "the detection catalogue is loaded" || bad "no detection rules — run: make content"
 [[ "${ident:-0}" -gt 0 ]]  && ok "somebody can sign in" || bad "no active identity — run: make seed"
