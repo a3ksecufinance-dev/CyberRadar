@@ -40,6 +40,7 @@ visé et le produit existant, et la route entre les deux, voir
 - **[03 — Installation](03-installation.md)** — poste de développement, Docker Compose, jeu de démonstration.
 - **[04 — Configuration](04-configuration.md)** — variables d'environnement, ports, secrets, Vault.
 - **[21 — Démonstration](21-demonstration.md)** — présenter à un client ou à un intégrateur : une commande pour le verdict, le déroulé minuté, ce qu'il ne faut pas ouvrir, et le durcissement d'une machine joignable.
+- **[La présentation](presentation/)** — le document PDF pour un intégrateur, un DSI ou une direction générale, sa source et son contrôle de mise en page.
 - **[18 — Exploitation](18-exploitation.md)** — santé, observabilité, incidents courants, sauvegarde.
 
 ### Intégrer

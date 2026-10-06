@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>CyberRadar — Présentation</title>
+<style>
+  @page { size: 1280px 720px; margin: 0; }
+  :root{
+    --ink:#0B1220; --ink-2:#1C2535; --muted:#5B6472; --faint:#8B94A3;
+    --line:#E4E7EC; --surface:#FFFFFF; --wash:#F6F8FB;
+    --accent:#1D4ED8; --accent-soft:#E8EEFD;
+    --ok:#047857; --caution:#B45309; --bad:#B91C1C;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{
+    font-family:"DejaVu Sans","Liberation Sans",Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--surface);
+    font-variant-numeric:tabular-nums;
+  }
+  .slide{
+    width:1280px; height:720px; page-break-after:always; position:relative;
+    padding:68px 84px 64px; overflow:hidden; background:var(--surface);
+  }
+  .slide:last-child{page-break-after:auto;}
+
+  /* ── furniture ─────────────────────────────────────────── */
+  .eyebrow{
+    font-size:13px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--accent); font-weight:700; margin-bottom:18px;
+  }
+  h1{font-size:62px; line-height:1.04; letter-spacing:-.025em; font-weight:700;}
+  h2{font-size:41px; line-height:1.1; letter-spacing:-.02em; font-weight:700; margin-bottom:10px;}
+  .sub{font-size:20px; line-height:1.45; color:var(--muted); max-width:66ch;}
+  .foot{
+    position:absolute; left:84px; right:84px; bottom:30px;
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12.5px; color:var(--faint); border-top:1px solid var(--line);
+    padding-top:12px; letter-spacing:.04em;
+  }
+  .foot b{color:var(--muted); font-weight:600;}
+
+  /* ── dark slides ───────────────────────────────────────── */
+  .dark{background:var(--ink); color:#fff;}
+  .dark .sub{color:#A9B4C6;} .dark .eyebrow{color:#7FA0F5;}
+  .dark .foot{color:#6B7689; border-top-color:#232E42;}
+  .dark .foot b{color:#9AA6BA;}
+
+  /* ── layout helpers ────────────────────────────────────── */
+  .cols{display:grid; gap:34px; margin-top:34px;}
+  .c2{grid-template-columns:1fr 1fr;} .c3{grid-template-columns:repeat(3,1fr);}
+  .c4{grid-template-columns:repeat(4,1fr);}
+  .c23{grid-template-columns:1.25fr 1fr;}
+  .stack>*+*{margin-top:14px;}
+
+  /* ── figures ───────────────────────────────────────────── */
+  .fig{border-top:3px solid var(--accent); padding-top:14px;}
+  .fig .n{font-size:49px; font-weight:700; letter-spacing:-.03em; line-height:1;}
+  .fig .l{font-size:14.5px; color:var(--muted); margin-top:9px; line-height:1.38;}
+  .fig.warn{border-top-color:var(--caution);} .fig.warn .n{color:var(--caution);}
+  .fig.good{border-top-color:var(--ok);} .fig.good .n{color:var(--ok);}
+  .dark .fig{border-top-color:#7FA0F5;} .dark .fig .l{color:#A9B4C6;}
+
+  /* ── cards ─────────────────────────────────────────────── */
+  .card{background:var(--wash); border:1px solid var(--line); border-radius:10px; padding:22px 24px;}
+  .card h3{font-size:17.5px; font-weight:700; margin-bottom:9px;}
+  .card p{font-size:14.5px; line-height:1.5; color:var(--muted);}
+  .card.flag{background:var(--accent-soft); border-color:#C9D7FA;}
+
+  /* ── lists ─────────────────────────────────────────────── */
+  ul{list-style:none;}
+  li{font-size:17px; line-height:1.5; padding-left:26px; position:relative; margin-bottom:13px;}
+  li:before{
+    content:""; position:absolute; left:0; top:9px; width:9px; height:9px;
+    border-radius:2px; background:var(--accent);
+  }
+  li.ok:before{background:var(--ok);} li.no:before{background:var(--bad);}
+  li.part:before{background:var(--caution);}
+  li b{font-weight:700;}
+  li span{color:var(--muted);}
+
+  /* ── table ─────────────────────────────────────────────── */
+  table{width:100%; border-collapse:collapse; font-size:16px;}
+  th{
+    text-align:left; font-size:12px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--faint); font-weight:700; padding:0 12px 10px 0; border-bottom:1px solid var(--line);
+  }
+  td{padding:13px 12px 13px 0; border-bottom:1px solid var(--line); vertical-align:top;}
+  td.num{font-weight:700; white-space:nowrap;}
+  td small{display:block; color:var(--muted); font-size:13.5px; margin-top:3px; line-height:1.4;}
+  table.tight td{padding:10px 12px 10px 0;}
+  table.dense td{padding:7.5px 12px 7.5px 0;}
+  table.tight td small{margin-top:2px; font-size:12.5px;}
+  .t-ok{color:var(--ok);} .t-no{color:var(--bad);} .t-part{color:var(--caution);}
+
+  /* ── flow ──────────────────────────────────────────────── */
+  .flow{display:flex; align-items:stretch; gap:0; margin-top:30px;}
+  .step{
+    flex:1; border:1px solid var(--line); border-right:none; padding:16px 15px;
+    background:var(--surface);
+  }
+  .step:last-child{border-right:1px solid var(--line);}
+  .step:first-child{border-radius:9px 0 0 9px;} .step:last-child{border-radius:0 9px 9px 0;}
+  .step .k{font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--accent); font-weight:700;}
+  .step .v{font-size:15.5px; font-weight:700; margin-top:7px; line-height:1.3;}
+  .step .t{font-size:13px; color:var(--muted); margin-top:7px; font-weight:600;}
+
+  /* ── bars ──────────────────────────────────────────────── */
+  .bar{margin-bottom:17px;}
+  .bar .top{display:flex; justify-content:space-between; font-size:15px; margin-bottom:7px;}
+  .bar .top b{font-weight:700;}
+  .bar .track{height:9px; background:var(--line); border-radius:5px; overflow:hidden;}
+  .bar .fill{height:100%; background:var(--accent); border-radius:5px;}
+  .bar .fill.warn{background:var(--caution);} .bar .fill.good{background:var(--ok);}
+  .bar .fill.none{background:var(--bad);}
+
+  .note{
+    margin-top:26px; border-left:3px solid var(--accent); padding:4px 0 4px 18px;
+    font-size:16px; line-height:1.5; color:var(--ink-2); max-width:84ch;
+  }
+  .note.warn{border-left-color:var(--caution);}
+  .dark .note{border-left-color:#7FA0F5; color:#D5DDE9;}
+  code{font-family:"DejaVu Sans Mono","Liberation Mono",monospace; font-size:.9em;
+       background:var(--wash); padding:2px 6px; border-radius:4px; border:1px solid var(--line);}
+  .dark code{background:#17202F; border-color:#2A3650; color:#CBD5E6;}
+</style>
+</head>
+<body>
+
+<!-- 1 ─────────────────────────────────────────── couverture -->
+<section class="slide dark">
+  <div class="eyebrow">Plateforme de cybersécurité unifiée</div>
+  <h1>CyberRadar</h1>
+  <p class="sub" style="margin-top:26px; font-size:23px;">
+    Ingestion, détection, réponse et conformité dans une seule chaîne —
+    et le chronomètre qui va avec.
+  </p>
+  <div class="cols c4" style="margin-top:150px;">
+    <div class="fig"><div class="n">32</div><div class="l">services, une seule plateforme</div></div>
+    <div class="fig"><div class="n">9</div><div class="l">étapes de l'événement au confinement</div></div>
+    <div class="fig"><div class="n">5</div><div class="l">référentiels de conformité, dont la DNSSI</div></div>
+    <div class="fig"><div class="n">101<span style="font-size:26px; color:#8795AD">/346</span></div><div class="l">exigences livrées, et nous le disons</div></div>
+  </div>
+  <div class="foot"><b>AUSIM 2026 — 7 au 9 octobre</b><span>Document de présentation · Intégrateur · DSI · Direction générale</span></div>
+</section>
+
+<!-- 2 ─────────────────────────────────────────── en une phrase -->
+<section class="slide">
+  <div class="eyebrow">Ce que c'est</div>
+  <h2>Quatre produits chez la plupart des éditeurs.<br>Ici, une seule chaîne.</h2>
+  <p class="sub">
+    Collecter les journaux, détecter une attaque, ouvrir un cas, exécuter la réponse et
+    en garder la trace sont quatre achats séparés, quatre intégrations et trois endroits
+    où l'information se perd. CyberRadar les tient ensemble.
+  </p>
+  <div class="flow">
+    <div class="step"><div class="k">1 · Ingestion</div><div class="v">Le journal arrive</div><div class="t">collecteur, normalisation</div></div>
+    <div class="step"><div class="k">2 · Détection</div><div class="v">La règle correspond</div><div class="t">moteur de corrélation</div></div>
+    <div class="step"><div class="k">3 · Qualification</div><div class="v">L'analyste ouvre un cas</div><div class="t">SIEM → IR</div></div>
+    <div class="step"><div class="k">4 · Réponse</div><div class="v">Le playbook s'exécute</div><div class="t">SOAR</div></div>
+    <div class="step"><div class="k">5 · Confinement</div><div class="v">L'adresse est bloquée</div><div class="t">politique réseau</div></div>
+    <div class="step"><div class="k">6 · Preuve</div><div class="v">L'audit nomme l'auteur</div><div class="t">journal immuable</div></div>
+  </div>
+  <div class="note">
+    Ces six passages sont exactement là où un produit assemblé perd l'information. La chaîne
+    les mesure en neuf étapes — page suivante — à chaque modification du code, contre une
+    plateforme réelle. La mesure est dans l'intégration continue, pas dans une plaquette.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>2 / 18</span></div>
+</section>
+
+<!-- 3 ─────────────────────────────────────────── sommaire -->
+<section class="slide">
+  <div class="eyebrow">Comment lire ce document</div>
+  <h2>Trois lecteurs, trois questions différentes</h2>
+  <div class="cols c3" style="margin-top:44px;">
+    <div class="card">
+      <h3>Direction générale</h3>
+      <p><b>« Qu'est-ce que ça change, et qu'est-ce que ça engage ? »</b><br><br>
+      Le problème, la chaîne, l'état réel du produit et ce que la suite demande.</p>
+      <p style="margin-top:14px; color:var(--accent); font-weight:700;">Pages 4 à 7</p>
+    </div>
+    <div class="card">
+      <h3>Direction des systèmes d'information</h3>
+      <p><b>« Est-ce que je peux l'exploiter, et le défendre devant un auditeur ? »</b><br><br>
+      Architecture, sécurité, conformité marocaine, exploitation, et les limites mesurées.</p>
+      <p style="margin-top:14px; color:var(--accent); font-weight:700;">Pages 8 à 12</p>
+    </div>
+    <div class="card">
+      <h3>Intégrateur</h3>
+      <p><b>« Qu'est-ce que je déploie, qu'est-ce que je branche, qu'est-ce qui va me surprendre ? »</b><br><br>
+      Déploiement, API, extension par le contenu, et ce qu'il faut prévoir.</p>
+      <p style="margin-top:14px; color:var(--accent); font-weight:700;">Pages 13 à 16</p>
+    </div>
+  </div>
+  <div class="note warn">
+    <b>Une convention tenue dans tout le document :</b> chaque chiffre est mesuré sur le dépôt
+    ou sur une installation réelle. Là où une mesure n'existe pas — la performance en charge,
+    par exemple — il est écrit qu'elle n'existe pas, plutôt qu'estimée.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>3 / 18</span></div>
+</section>
+
+<!-- 4 ─────────────────────────────────────────── DG : problème -->
+<section class="slide dark">
+  <div class="eyebrow">Direction générale</div>
+  <h1 style="font-size:52px;">Le coût n'est pas dans les outils.<br>Il est entre les outils.</h1>
+  <div class="cols c3" style="margin-top:58px;">
+    <div class="fig"><div class="n">4 à 6</div><div class="l">éditeurs pour couvrir la même chaîne : SIEM, SOAR, gestion des vulnérabilités, conformité</div></div>
+    <div class="fig"><div class="n">3</div><div class="l">endroits où l'information se perd : entre la détection et le cas, entre le cas et l'action, entre l'action et la preuve</div></div>
+    <div class="fig"><div class="n">0</div><div class="l">chiffre commun : chaque outil mesure son propre délai, aucun ne mesure celui du client</div></div>
+  </div>
+  <div class="note">
+    Un régulateur ne demande pas quels outils vous avez. Il demande combien de temps s'écoule
+    entre l'intrusion et le confinement, et qui l'a décidé. Cette question n'a de réponse que
+    si la chaîne est tenue d'un bout à l'autre.
+  </div>
+  <div class="foot"><b>CyberRadar · Direction générale</b><span>4 / 18</span></div>
+</section>
+
+<!-- 5 ─────────────────────────────────────────── DG : la chaîne -->
+<section class="slide">
+  <div class="eyebrow">Direction générale</div>
+  <h2>De l'attaque au confinement, chronométré</h2>
+  <p class="sub" style="font-size:17px; max-width:none;">Exécuté à chaque modification du code, contre une
+  plateforme réelle. <b style="color:var(--ink)">La fourchette a une raison</b> : le cache de règles du moteur se
+  rafraîchit toutes les 60 s, donc une règle écrite à l'instant s'applique quelque part dans ce cycle.</p>
+  <table class="tight dense" style="margin-top:18px; font-size:15px;">
+    <tr><th>Étape</th><th>Mesuré</th><th>Budget</th></tr>
+    <tr><td>Une règle de détection est écrite</td><td class="num">6 ms</td><td>—</td></tr>
+    <tr><td>Un connecteur est raccordé</td><td class="num">165 ms</td><td>—</td></tr>
+    <tr><td>L'attaque commence : six authentifications en échec</td><td class="num">41 ms</td><td>20 s</td></tr>
+    <tr><td><b>Le moteur lève l'alerte</b></td><td class="num t-ok">2 s à 41 s</td><td>2 min 30</td></tr>
+    <tr><td>Un analyste promeut l'alerte en cas</td><td class="num">8 ms</td><td>15 s</td></tr>
+    <tr><td>Un playbook de confinement est écrit</td><td class="num">6 ms</td><td>—</td></tr>
+    <tr><td>Le playbook s'exécute jusqu'au bout</td><td class="num">2 s</td><td>1 min</td></tr>
+    <tr><td>L'adresse est bloquée au niveau réseau</td><td class="num">5 ms</td><td>1 min</td></tr>
+    <tr><td>Le journal d'audit nomme le playbook</td><td class="num">14 ms</td><td>30 s</td></tr>
+    <tr><td style="border-bottom:none;"><b>Total</b></td><td class="num" style="border-bottom:none; font-size:19px;">4 s à 45 s</td><td style="border-bottom:none;">—</td></tr>
+  </table>
+
+  <div class="foot"><b>CyberRadar · Direction générale</b><span>5 / 18</span></div>
+</section>
+
+<!-- 6 ─────────────────────────────────────────── DG : état réel -->
+<section class="slide">
+  <div class="eyebrow">Direction générale</div>
+  <h2>Où en est le produit, sans arrondi</h2>
+  <div class="cols c23" style="margin-top:34px;">
+    <div>
+      <div class="bar"><div class="top"><span>Exigences fonctionnelles livrées</span><b>101 / 346</b></div><div class="track"><div class="fill" style="width:29%"></div></div></div>
+      <div class="bar"><div class="top"><span>Services couverts par des tests</span><b class="t-ok">32 / 32</b></div><div class="track"><div class="fill good" style="width:100%"></div></div></div>
+      <div class="bar"><div class="top"><span>Chaîne de bout en bout en intégration continue</span><b class="t-ok">verte</b></div><div class="track"><div class="fill good" style="width:100%"></div></div></div>
+      <div class="bar"><div class="top"><span>Indicateurs de performance mesurés</span><b class="t-no">0 / 8</b></div><div class="track"><div class="fill none" style="width:2%"></div></div></div>
+      <div class="bar"><div class="top"><span>Exigences non fonctionnelles vérifiées</span><b class="t-no">0 / 14</b></div><div class="track"><div class="fill none" style="width:2%"></div></div></div>
+      <div class="bar"><div class="top"><span>Connecteurs cloud réels (AWS, Azure, GCP)</span><b class="t-no">à faire</b></div><div class="track"><div class="fill none" style="width:2%"></div></div></div>
+    </div>
+    <div class="card flag">
+      <h3>Ce que cela veut dire</h3>
+      <p><b>La plateforme est réelle et fonctionne.</b> Elle couvre environ 30 % du périmètre
+      qu'elle s'est fixé, et nous savons dire lequel, ligne par ligne.</p>
+      <p style="margin-top:13px;"><b>Les chiffres de performance ne sont pas mesurés.</b> Nous
+      ne citerons donc pas de MTTD ni de MTTR : les mesurer est un chantier de dix jours,
+      identifié et chiffré.</p>
+      <p style="margin-top:13px;">Un plan d'exécution découpe le reste en lots, chacun ayant
+      une valeur autonome.</p>
+    </div>
+  </div>
+  <div class="note warn">
+    Une plateforme de sécurité qui annonce « tout est prêt » invite à vérifier. Nous préférons
+    annoncer ce qui manque : c'est la seule façon de rendre crédible ce qui est là.
+  </div>
+  <div class="foot"><b>CyberRadar · Direction générale</b><span>6 / 18</span></div>
+</section>
+
+<!-- 7 ─────────────────────────────────────────── DG : décision -->
+<section class="slide">
+  <div class="eyebrow">Direction générale</div>
+  <h2>Ce que la suite demande</h2>
+  <div class="cols c2" style="margin-top:34px;">
+    <div class="stack">
+      <div class="card"><h3>Ce qui est utilisable dès aujourd'hui</h3>
+        <p>Une installation de démonstration ou de pilote, sur une machine, en une commande.
+        L'interface, les 32 services, le jeu de données d'une banque de détail, la chaîne
+        complète et le journal d'audit.</p></div>
+      <div class="card"><h3>Ce qu'un pilote chez un client demande</h3>
+        <p>Les connecteurs vers ses sources réelles, la mesure de la performance sur son
+        volume, et la revue de conformité avec son référentiel. Trois chantiers identifiés,
+        pas des inconnues.</p></div>
+    </div>
+    <div class="stack">
+      <div class="card"><h3>Ce que nous demandons à un intégrateur</h3>
+        <p>De porter le déploiement et les connecteurs chez le client, avec notre
+        documentation — 22 chapitres — et une API de 455 routes documentées.</p></div>
+      <div class="card"><h3>Ce que nous ne demandons pas</h3>
+        <p>De croire un chiffre que nous n'avons pas mesuré. Tout ce qui est présenté ici est
+        reproductible sur une machine, et nous le montrons.</p></div>
+    </div>
+  </div>
+  <div class="note">
+    <b>La démonstration est le propos.</b> En vingt minutes, une attaque traverse la plateforme
+    de bout en bout devant vous, et chaque étape est chronométrée à l'écran.
+  </div>
+  <div class="foot"><b>CyberRadar · Direction générale</b><span>7 / 18</span></div>
+</section>
+
+<!-- 8 ─────────────────────────────────────────── DSI : architecture -->
+<section class="slide dark">
+  <div class="eyebrow">Direction des systèmes d'information</div>
+  <h1 style="font-size:52px;">Architecture</h1>
+  <div class="cols c4" style="margin-top:50px;">
+    <div class="fig"><div class="n">32</div><div class="l">services en Go, chacun propriétaire de son schéma</div></div>
+    <div class="fig"><div class="n">5</div><div class="l">magasins : PostgreSQL, ClickHouse, Kafka, Redis, Neo4j</div></div>
+    <div class="fig"><div class="n">455</div><div class="l">routes HTTP servies, documentées</div></div>
+    <div class="fig"><div class="n">144</div><div class="l">tables, 50 migrations à état</div></div>
+  </div>
+  <div class="cols c3" style="margin-top:44px;">
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Le flux d'un événement</h3>
+      <p style="color:#A9B4C6;">Collecteur → <code>crp.events.normalized</code> → enrichissement
+      (géolocalisation, indicateurs, score) → <code>crp.events.enriched</code> → moteur de
+      règles → <code>crp.events.alerts</code>. ClickHouse garde l'historique, PostgreSQL l'état.</p>
+    </div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Pourquoi Kafka au milieu</h3>
+      <p style="color:#A9B4C6;">Un courtier coupé ne doit pas arrêter la détection
+      définitivement, et un service redémarré ne doit pas perdre la fenêtre pendant laquelle
+      il était absent. Les deux cas sont traités et testés.</p>
+    </div>
+    <div class="card" style="background:#17202F; border-color:#2A3650;">
+      <h3 style="color:#fff;">Observabilité</h3>
+      <p style="color:#A9B4C6;">OpenTelemetry sur les appels, métriques Prometheus,
+      traces Jaeger. Les compteurs de seuil sont partagés dans Redis : deux répliques
+      atteignent le seuil ensemble, pas chacune de son côté.</p>
+    </div>
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>8 / 18</span></div>
+</section>
+
+<!-- 9 ─────────────────────────────────────────── DSI : sécurité -->
+<section class="slide">
+  <div class="eyebrow">Direction des systèmes d'information</div>
+  <h2>Sécurité de la plateforme elle-même</h2>
+  <p class="sub">Une plateforme de sécurité est jugée d'abord sur la sienne. Voici ce qui est en place et vérifié par des tests.</p>
+  <div class="cols c2" style="margin-top:30px;">
+    <ul>
+      <li class="ok"><b>Jetons signés RS256.</b> <span>Clé privée chez le seul service qui émet, clé publique chez ceux qui vérifient. Aucun secret partagé entre services.</span></li>
+      <li class="ok"><b>Autorisation à l'exécution.</b> <span>Chaque route exige une permission nommée, résolue depuis les rôles de la personne — pas une vérification côté interface.</span></li>
+      <li class="ok"><b>Cloisonnement multi-client.</b> <span>Chaque écriture vérifie que l'objet visé appartient au client appelant, avant l'écriture et non après.</span></li>
+    </ul>
+    <ul>
+      <li class="ok"><b>Journal d'audit sur les actions automatiques.</b> <span>Un pare-feu modifié par un playbook laisse une trace nommant le playbook, l'acteur de service et la ressource.</span></li>
+      <li class="ok"><b>Vulnérabilités des dépendances bloquantes.</b> <span><code>govulncheck</code> arrête la chaîne d'intégration ; les exceptions sont datées et expirent.</span></li>
+      <li class="part"><b>Secrets.</b> <span>Client Vault en place. Les identifiants livrés avec le dépôt sont des identifiants de développement, et un script de durcissement les remplace.</span></li>
+    </ul>
+  </div>
+  <div class="note warn">
+    <b>Ce qui reste à faire, et qui est connu :</b> l'audit de sécurité externe n'a pas eu lieu,
+    et le chiffrement au repos dépend de la configuration de l'hébergeur plutôt que de la
+    plateforme. Les deux sont dans le plan, pas dans un angle mort.
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>9 / 18</span></div>
+</section>
+
+<!-- 10 ────────────────────────────────────────── DSI : conformité -->
+<section class="slide">
+  <div class="eyebrow">Direction des systèmes d'information</div>
+  <h2>Conformité : les référentiels qui obligent ici</h2>
+  <div class="cols c23" style="margin-top:26px;">
+    <table style="font-size:15px;" class="tight">
+      <tr><th>Référentiel</th><th>Portée</th><th>Contrôles</th></tr>
+      <tr><td><b>DNSSI</b><small>Directive Nationale de la Sécurité des Systèmes d'Information — DGSSI</small></td><td>Infrastructures d'importance vitale</td><td class="num">6</td></tr>
+      <tr><td><b>Loi 09-08</b><small>Protection des données à caractère personnel — CNDP</small></td><td>Données personnelles, transferts hors du Royaume</td><td class="num">5</td></tr>
+      <tr><td><b>PCI DSS 4.0</b><small>Industrie des cartes de paiement</small></td><td>Monétique, réseau GAB</td><td class="num">10</td></tr>
+      <tr><td><b>SWIFT CSP</b><small>Customer Security Controls Framework</small></td><td>Paiements internationaux</td><td class="num">8</td></tr>
+      <tr><td style="border-bottom:none;"><b>ISO/IEC 27001:2022</b><small>Management de la sécurité de l'information</small></td><td style="border-bottom:none;">Transverse</td><td class="num" style="border-bottom:none;">13</td></tr>
+    </table>
+    <div class="stack">
+      <div class="card flag"><h3>DORA n'y est pas</h3>
+        <p>C'est un règlement européen : il n'oblige pas un établissement de droit marocain.
+        Le citer ici décrédibiliserait le reste.</p></div>
+      <div class="card"><h3>Le référentiel que vous apportez</h3>
+        <p>Le code d'un référentiel était une liste fermée de sept valeurs européennes et
+        américaines. Il ne l'est plus : la contrainte porte sur la forme. Un client arrive
+        avec son cadre, il l'enregistre.</p></div>
+      <div class="card"><h3>Ce qui se démontre</h3>
+        <p>Les intitulés de contrôle sont <b>la correspondance de la plateforme</b>, pas une
+        citation des textes : le mécanisme vaut pour n'importe quel référentiel.</p></div>
+    </div>
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>10 / 18</span></div>
+</section>
+
+<!-- 11 ────────────────────────────────────────── DSI : exploitation -->
+<section class="slide">
+  <div class="eyebrow">Direction des systèmes d'information</div>
+  <h2>Exploitation</h2>
+  <div class="cols c3" style="margin-top:34px;">
+    <div class="card"><h3>Installation</h3>
+      <p>Docker Compose sur une machine, ou un lanceur local pour un poste de développement.
+      Infrastructure, schéma, contenu de détection, identités, services, interface : six étapes
+      séparables, chacune reprenant là où elle s'est arrêtée.</p></div>
+    <div class="card"><h3>Migrations à état</h3>
+      <p>50 migrations derrière une table de version. Chaque fichier s'applique une fois, et
+      une nouvelle migration s'applique à une installation <b>en service</b> — sans détruire
+      la base. La chaîne d'intégration les applique deux fois de suite et exige que la seconde
+      n'applique rien.</p></div>
+    <div class="card"><h3>Contrôle avant-vol</h3>
+      <p>Une commande donne un verdict avant toute démonstration ou mise en service :
+      magasins, version du schéma, services interrogés deux fois, données, justificatifs,
+      et l'attaque complète. Elle lit, elle ne répare pas.</p></div>
+  </div>
+  <div class="cols c3" style="margin-top:22px;">
+    <div class="fig good"><div class="n">6</div><div class="l">travaux d'intégration continue : construction, analyse statique, tests, migrations, vulnérabilités, chaîne complète</div></div>
+    <div class="fig good"><div class="n">27 635</div><div class="l">lignes de test pour 81 596 lignes de code</div></div>
+    <div class="fig warn"><div class="n">36</div><div class="l">unités déployables aujourd'hui ; la cible est 8 à 10, le regroupement est un chantier identifié</div></div>
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>11 / 18</span></div>
+</section>
+
+<!-- 12 ────────────────────────────────────────── DSI : limites -->
+<section class="slide dark">
+  <div class="eyebrow">Direction des systèmes d'information</div>
+  <h1 style="font-size:50px;">Les limites, mesurées</h1>
+  <p class="sub" style="margin-top:22px;">Ce que nous ne savons pas encore, et pourquoi c'est écrit ici plutôt que découvert en pilote.</p>
+  <div class="cols c2" style="margin-top:40px;">
+    <ul>
+      <li class="no"><b>Aucun indicateur de performance mesuré en charge.</b> <span>MTTD, MTTR, débit d'ingestion : les mécanismes existent, la mesure sur volume réel n'a pas été faite. Chantier chiffré à dix jours.</span></li>
+      <li class="no"><b>Aucune exigence non fonctionnelle vérifiée.</b> <span>Haute disponibilité, reprise après sinistre, tenue en charge : non éprouvées sur banc.</span></li>
+    </ul>
+    <ul>
+      <li class="no"><b>Pas de connecteur cloud réel.</b> <span>AWS, Azure, GCP : la posture cloud se démontre sur données injectées par l'API, pas par découverte.</span></li>
+      <li class="part"><b>36 unités déployables.</b> <span>Exploitable, mais lourd : un regroupement vers 8 à 10 unités est le prochain chantier d'exploitation.</span></li>
+    </ul>
+  </div>
+  <div class="note">
+    Chacune de ces lignes correspond à un lot du plan d'exécution, avec sa charge estimée.
+    Aucune n'est une surprise, et aucune n'est masquée.
+  </div>
+  <div class="foot"><b>CyberRadar · DSI</b><span>12 / 18</span></div>
+</section>
+
+<!-- 13 ────────────────────────────────────────── Intégrateur : déploiement -->
+<section class="slide">
+  <div class="eyebrow">Intégrateur</div>
+  <h2>Déploiement</h2>
+  <div class="cols c2" style="margin-top:30px;">
+    <div>
+      <ul>
+        <li><b>Une machine suffit pour un pilote.</b> <span>8 cœurs, 32 Go. Docker et Compose, puis une commande.</span></li>
+        <li><b>Les identifiants sont paramétrés.</b> <span>Un script génère les mots de passe, une nouvelle paire RSA, les origines et l'émetteur, et dit ce qu'il ne fait pas : HTTPS devant, et le pare-feu sur les ports qui n'ont aucune raison d'être joignables.</span></li>
+        <li><b>Le schéma se reprend.</b> <span>Une installation antérieure à la table de version s'adopte par une commande, sans détruire la base.</span></li>
+      </ul>
+    </div>
+    <div class="stack">
+      <div class="card"><h3>Ce qui va vous surprendre, et c'est écrit</h3>
+        <p><b>PostgreSQL, ClickHouse et Neo4j ne lisent leur mot de passe qu'à la création de
+        leur volume.</b> Durcir une installation déjà démarrée ne change rien côté serveur, et
+        l'erreur n'a aucun rapport apparent avec le fichier de configuration. Durcissez avant
+        le premier démarrage.</p></div>
+      <div class="card"><h3>Le démarrage échoue bruyamment</h3>
+        <p>L'étape qui démarre les services renvoie un échec si l'un d'eux ne répond pas —
+        elle se contentait d'un avertissement, et trois exécutions de la chaîne ont tourné
+        sur une plateforme incomplète sans que personne le voie.</p></div>
+    </div>
+  </div>
+  <div class="note warn">
+    <b>Non vérifié à ce jour :</b> le chemin Compose complet n'a pas été déroulé depuis que ses
+    identifiants sont paramétrés. Déroulez-le une fois en entier avant toute mise en service,
+    et considérez le chemin local comme la référence.
+  </div>
+  <div class="foot"><b>CyberRadar · Intégrateur</b><span>13 / 18</span></div>
+</section>
+
+<!-- 14 ────────────────────────────────────────── Intégrateur : API -->
+<section class="slide">
+  <div class="eyebrow">Intégrateur</div>
+  <h2>Intégration</h2>
+  <div class="cols c4" style="margin-top:30px;">
+    <div class="fig"><div class="n">455</div><div class="l">routes HTTP, réponses normalisées</div></div>
+    <div class="fig"><div class="n">22</div><div class="l">chapitres de documentation, dont une référence d'API générée</div></div>
+    <div class="fig"><div class="n">18</div><div class="l">écrans, internationalisés</div></div>
+    <div class="fig"><div class="n">0</div><div class="l">secret partagé entre services</div></div>
+  </div>
+  <div class="cols c2" style="margin-top:38px;">
+    <ul>
+      <li><b>Tout passe par l'API.</b> <span>Le jeu de démonstration lui-même est écrit à travers les routes publiques, sous une identité réelle avec de vraies permissions. Ce qui s'affiche a franchi la même validation qu'une saisie client.</span></li>
+      <li><b>Comptes de service.</b> <span>Un automate obtient un jeton par échange d'identifiants, avec les permissions de son rôle et rien de plus.</span></li>
+    </ul>
+    <ul>
+      <li><b>Ingestion.</b> <span>Un collecteur HTTP et un connecteur syslog. Les événements sont normalisés vers une taxonomie unique avant toute détection.</span></li>
+      <li><b>Erreurs utilisables.</b> <span>Les erreurs de la base sont traduites en codes HTTP justes : un conflit est un 409, une validation un 422. Pas de 500 générique.</span></li>
+    </ul>
+  </div>
+  <div class="foot"><b>CyberRadar · Intégrateur</b><span>14 / 18</span></div>
+</section>
+
+<!-- 15 ────────────────────────────────────────── Intégrateur : contenu -->
+<section class="slide">
+  <div class="eyebrow">Intégrateur</div>
+  <h2>Le contenu de détection se livre sans le code</h2>
+  <p class="sub">C'est le point qui distingue une plateforme d'un projet : la couverture de détection est un objet versionné, signé, livrable à sa propre cadence.</p>
+  <div class="flow">
+    <div class="step"><div class="k">Catalogue</div><div class="v">15 détections publiées</div><div class="t">fichiers, pas migrations</div></div>
+    <div class="step"><div class="k">Paquet</div><div class="v">Construit et signé</div><div class="t">empreinte + signature</div></div>
+    <div class="step"><div class="k">Canal</div><div class="v">Publié, versionné</div><div class="t">rotation et révocation des clés</div></div>
+    <div class="step"><div class="k">Adoption</div><div class="v">Le client prend ce qui lui convient</div><div class="t">13 sur 15 dans la démonstration</div></div>
+    <div class="step"><div class="k">Généalogie</div><div class="v">L'écart est traçable</div><div class="t">et défendable devant un auditeur</div></div>
+  </div>
+  <div class="cols c2" style="margin-top:34px;">
+    <div class="card"><h3>Pourquoi deux détections sur quinze ne sont pas adoptées</h3>
+      <p>Parce qu'un client ne prend pas tout, et parce qu'un écran de couverture n'a
+      d'intérêt que s'il a un écart à montrer. « Pourquoi celle-là n'est pas active » est la
+      question qu'un auditeur pose, et elle doit avoir une réponse.</p></div>
+    <div class="card"><h3>Ce qu'un intégrateur peut faire sans nous</h3>
+      <p>Ajouter ses propres détections au catalogue, les signer avec sa clé, et les livrer à
+      ses clients par le même mécanisme. Le format et l'outil de validation sont documentés.</p></div>
+  </div>
+  <div class="foot"><b>CyberRadar · Intégrateur</b><span>15 / 18</span></div>
+</section>
+
+<!-- 16 ────────────────────────────────────────── Intégrateur : à prévoir -->
+<section class="slide">
+  <div class="eyebrow">Intégrateur</div>
+  <h2>Ce qu'il faut prévoir</h2>
+  <table style="margin-top:28px;">
+    <tr><th>Sujet</th><th>État</th><th>Ce que cela demande</th></tr>
+    <tr><td><b>Déploiement d'un pilote</b></td><td class="t-ok">Prêt</td><td>Une machine, une journée avec la documentation</td></tr>
+    <tr><td><b>Connecteurs vers les sources du client</b></td><td class="t-part">À développer</td><td>Collecteur HTTP et syslog en place ; chaque source propriétaire est un développement</td></tr>
+    <tr><td><b>Découverte cloud (AWS, Azure, GCP)</b></td><td class="t-no">Absent</td><td>Lot identifié et chiffré ; aujourd'hui les données entrent par l'API</td></tr>
+    <tr><td><b>Mesure de performance sur le volume du client</b></td><td class="t-no">Jamais faite</td><td>Banc à construire — dix jours, le premier chantier d'un pilote sérieux</td></tr>
+    <tr><td><b>Haute disponibilité</b></td><td class="t-no">Non éprouvée</td><td>Les services sont sans état, les compteurs sont partagés ; la topologie reste à valider</td></tr>
+    <tr><td style="border-bottom:none;"><b>Regroupement des 36 unités</b></td><td class="t-part" style="border-bottom:none;">À faire</td><td style="border-bottom:none;">Exploitable en l'état, lourd ; cible 8 à 10 unités</td></tr>
+  </table>
+  <div class="note">
+    Un intégrateur qui lit ce tableau sait où il met les pieds. C'est l'intention : une
+    surprise en pilote coûte plus cher que la même information donnée avant.
+  </div>
+  <div class="foot"><b>CyberRadar · Intégrateur</b><span>16 / 18</span></div>
+</section>
+
+<!-- 17 ────────────────────────────────────────── la démonstration -->
+<section class="slide">
+  <div class="eyebrow">La démonstration</div>
+  <h2>Vingt minutes, cinq temps</h2>
+  <table style="margin-top:28px;">
+    <tr><th>Temps</th><th>Écran</th><th>Ce que vous verrez</th></tr>
+    <tr><td class="num">2 min</td><td><b>Tableau de bord</b></td><td>Banque Al Massira — établissement fictif : 125 actifs, 24 agences de Tanger à Laâyoune, 412 constats de vulnérabilité, 72 alertes de la semaine<small>Tout a été écrit à travers l'API de la plateforme, sous une identité réelle. Rien n'est injecté en base.</small></td></tr>
+    <tr><td class="num">4 min</td><td><b>Détection et bibliothèque</b></td><td>14 règles actives, leur généalogie vers le catalogue signé, et l'écart assumé sur deux détections</td></tr>
+    <tr><td class="num">5 min</td><td><b>L'attaque, en direct</b></td><td>Neuf étapes chronométrées à l'écran, de l'authentification en échec au blocage réseau et au journal d'audit</td></tr>
+    <tr><td class="num">4 min</td><td><b>Conformité et risque</b></td><td>Les cinq référentiels, les écarts, et les seuils paramétrables sans livraison de code</td></tr>
+    <tr><td class="num">5 min</td><td><b>La franchise</b></td><td>Les chiffres de la page 6 et de la page 12, dits à voix haute</td></tr>
+  </table>
+  <div class="note warn">
+    <b>Si la chaîne échoue devant vous</b>, elle affichera la table de ses étapes et nommera
+    lequel des passages a rompu, avec les offsets du courtier. Nous la lirons à voix haute :
+    un outil qui dit précisément où il casse vaut mieux qu'un outil qui n'a jamais cassé
+    devant personne.
+  </div>
+  <div class="foot"><b>CyberRadar</b><span>17 / 18</span></div>
+</section>
+
+<!-- 18 ────────────────────────────────────────── clôture -->
+<section class="slide dark">
+  <div class="eyebrow">En résumé</div>
+  <h1 style="font-size:50px;">Ce qui est vrai aujourd'hui</h1>
+  <div class="cols c2" style="margin-top:44px;">
+    <ul>
+      <li class="ok"><b>Une chaîne complète, mesurée.</b> <span>De l'événement au confinement et à sa preuve, exécutée à chaque modification du code.</span></li>
+      <li class="ok"><b>Un socle tenu.</b> <span>32 services, aucun sans test, 50 migrations à état, six travaux d'intégration continue.</span></li>
+      <li class="ok"><b>La conformité du Royaume.</b> <span>DNSSI, loi 09-08, PCI DSS, SWIFT CSP, ISO 27001 — et le référentiel que le client apporte.</span></li>
+    </ul>
+    <ul>
+      <li class="no"><b>Pas de chiffre de performance.</b> <span>Nous ne vous en citerons aucun avant de l'avoir mesuré chez vous.</span></li>
+      <li class="no"><b>Pas de connecteur cloud réel.</b> <span>Lot identifié, chiffré, pas commencé.</span></li>
+      <li class="part"><b>Environ 30 % du périmètre visé.</b> <span>101 exigences sur 346, et nous savons dire lesquelles.</span></li>
+    </ul>
+  </div>
+  <div class="note" style="margin-top:38px;">
+    <b>La prochaine étape que nous proposons :</b> un pilote sur un périmètre restreint, chez
+    un client, avec la mesure de performance comme premier livrable. C'est le seul chiffre qui
+    manque pour que tout le reste soit défendable.
+  </div>
+  <div class="foot"><b>CyberRadar · AUSIM 2026</b><span>18 / 18</span></div>
+</section>
+
+</body>
+</html>
