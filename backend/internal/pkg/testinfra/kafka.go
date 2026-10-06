@@ -114,6 +114,23 @@ func waitForLeader(t *testing.T, brokers []string, topic string) {
 	}
 }
 
+// probeBroker asks one broker to describe the cluster. Dialling proves only
+// that something accepts connections on the port.
+func probeBroker(broker string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn, err := kafka.DialContext(ctx, "tcp", broker)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", broker, err)
+	}
+	defer conn.Close() //nolint:errcheck // a probe
+	if _, err := conn.Brokers(); err != nil {
+		return fmt.Errorf("read cluster metadata from %s: %w", broker, err)
+	}
+	return nil
+}
+
 // controllerConn opens a connection to the broker that owns topic
 // administration.
 //
@@ -168,19 +185,29 @@ func sharedKafka() ([]string, error) {
 			brokers[i] = strings.TrimSpace(brokers[i])
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		conn, err := kafka.DialContext(ctx, "tcp", brokers[0])
-		if err != nil {
-			kErr = fmt.Errorf("dial %s: %w", brokers[0], err)
-			return
+		// A listening port is not a ready broker, and the container path makes
+		// that visible: testcontainers waits for 9092 to accept a connection,
+		// but a published fixed port is bound by Docker's proxy the moment the
+		// container starts — before Kafka has a listener behind it. The first
+		// metadata read then comes back "connection reset by peer", on
+		// whichever address localhost resolves to first (::1 on a GitHub
+		// runner). It passed by luck for several runs and failed on one.
+		//
+		// So the probe retries until the broker answers a real question about
+		// itself, which is the only definition of ready worth using.
+		deadline := time.Now().Add(90 * time.Second)
+		for {
+			kErr = probeBroker(brokers[0])
+			if kErr == nil {
+				kBrokers = brokers
+				return
+			}
+			if time.Now().After(deadline) {
+				kErr = fmt.Errorf("%w (90s)", kErr)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
-		defer conn.Close()
-		if _, err := conn.Brokers(); err != nil {
-			kErr = fmt.Errorf("read cluster metadata from %s: %w", brokers[0], err)
-			return
-		}
-		kBrokers = brokers
 	})
 	return kBrokers, kErr
 }
