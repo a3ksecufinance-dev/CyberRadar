@@ -32,7 +32,8 @@
       "showing": "Showing {from}-{to} of {total}",
       "previous": "Previous",
       "next": "Next"
-    }
+    },
+    "searchAll": "Search across all domains…"
   },
   "severity": {
     "critical": "Critical",
@@ -80,7 +81,7 @@
     "signIn": "Sign In",
     "signOut": "Sign Out",
     "welcome": "Welcome to CyberRadar",
-    "subtitle": "Sovereign Cybersecurity Platform",
+    "subtitle": "Sovereign cyber platform",
     "loginWithSSO": "Sign in with SSO",
     "loginDescription": "Authenticate with your organization's identity provider",
     "securedBy": "Secured by",
@@ -98,10 +99,19 @@
     "threatsByType": "Threats by Type",
     "riskEvolution": "Risk Evolution (30d)",
     "topRiskyAssets": "Top Risky Assets",
-    "doraStatus": "DORA Compliance",
+    "doraStatus": "Compliance posture",
     "lastUpdated": "Last updated",
     "noAlerts": "No active alerts",
-    "viewAll": "View all"
+    "viewAll": "View all",
+    "activeIocs": "Active IOCs",
+    "attackPaths": "Attack paths",
+    "anomalies": "Anomalies",
+    "slaBreached": "past SLA",
+    "iocHitsToday": "IOC hits today",
+    "highRiskEntities": "high-risk entities",
+    "critical": "critical",
+    "openAlertsBySeverity": "Open alerts by severity",
+    "alertsByCategory": "Alerts by category"
   },
   "siem": {
     "title": "SIEM",
@@ -205,7 +215,21 @@
       "apply": "Move to v{version}",
       "applying": "Applying…"
     },
-    "severity": "Severity"
+    "severity": "Severity",
+    "totalAlerts": "Total alerts",
+    "open": "Open",
+    "criticalN": "Critical",
+    "fired24h": "Fired (24h)",
+    "filter": "Filter these results…",
+    "colRule": "Rule",
+    "colEntity": "Entity",
+    "colTitle": "Title",
+    "colStatus": "Status",
+    "sevAll": "All",
+    "sevCritical": "Critical",
+    "sevHigh": "High",
+    "sevMedium": "Medium",
+    "sevLow": "Low"
   },
   "incidents": {
     "title": "Incident Response",
@@ -321,20 +345,22 @@
   },
   "compliance": {
     "title": "Compliance",
-    "subtitle": "Regulatory compliance — DORA, PCI-DSS, GDPR, NIS2",
+    "subtitle": "Regulatory monitoring — the frameworks your organisation carries",
     "frameworks": "Frameworks",
-    "controls": "Controls",
+    "controls": "controls",
     "assessments": "Assessments",
     "dora": "DORA",
     "pciDss": "PCI-DSS",
     "gdpr": "GDPR",
     "nis2": "NIS2",
     "compliant": "Compliant",
-    "nonCompliant": "Non-Compliant",
+    "nonCompliant": "Non-compliant",
     "partial": "Partial",
     "lastAssessed": "Last Assessed",
     "nextAssessment": "Next Assessment",
-    "coverage": "Coverage"
+    "coverage": "Coverage",
+    "notAssessed": "Not assessed",
+    "notApplicable": "Not applicable"
   },
   "copilot": {
     "title": "AI Copilot",
@@ -344,7 +370,7 @@
     "suggestions": "Suggested queries",
     "suggestion1": "Explain the latest critical incident",
     "suggestion2": "What are our top 5 vulnerabilities?",
-    "suggestion3": "Generate the DORA compliance report",
+    "suggestion3": "Generate the regulatory compliance report",
     "suggestion4": "Which assets are exposed to active IOCs?",
     "thinking": "Analyzing your security context..."
   },

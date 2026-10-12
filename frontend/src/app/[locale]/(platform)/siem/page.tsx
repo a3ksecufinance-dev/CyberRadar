@@ -12,7 +12,12 @@ import { ErrorState } from '@/components/shared/ErrorState'
 import { useSIEMAlerts, useSIEMStats } from '@/hooks'
 import { countOf, formatDateShort } from '@/lib/utils'
 
+// La valeur envoyée à l'API reste anglaise — c'est son vocabulaire ; seul
+// l'affichage est traduit.
 const SEVERITY_FILTERS = ['All', 'Critical', 'High', 'Medium', 'Low'] as const
+const SEVERITY_KEY: Record<string, string> = {
+  All: 'sevAll', Critical: 'sevCritical', High: 'sevHigh', Medium: 'sevMedium', Low: 'sevLow',
+}
 
 // The three questions this page answers, in the order they are asked: what fired,
 // what are we running and how does it differ from the standard, and what are we
@@ -90,10 +95,10 @@ function Alerts() {
       {stats && (
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Total Alerts', value: stats.total, color: 'text-slate-200' },
-            { label: 'Open', value: stats.open, color: 'text-red-400' },
-            { label: 'Critical', value: countOf(stats.by_severity, 'critical'), color: 'text-red-400' },
-            { label: 'Fired (24h)', value: stats.fired_last_24h.toLocaleString(), color: 'text-cyan-400' },
+            { label: t('totalAlerts'), value: stats.total, color: 'text-slate-200' },
+            { label: t('open'), value: stats.open, color: 'text-red-400' },
+            { label: t('criticalN'), value: countOf(stats.by_severity, 'critical'), color: 'text-red-400' },
+            { label: t('fired24h'), value: stats.fired_last_24h.toLocaleString(), color: 'text-cyan-400' },
           ].map((s) => (
             <Card key={s.label}>
               <CardContent className="pt-4">
@@ -108,7 +113,7 @@ function Alerts() {
       <div className="flex gap-3">
         <Input
           className="max-w-sm text-xs"
-          placeholder="Filter these results…"
+          placeholder={t('filter')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -120,7 +125,7 @@ function Alerts() {
                 ? 'border-cyan-600 bg-cyan-950/40 text-cyan-400'
                 : 'border-slate-700 text-slate-400 hover:text-slate-200'
             }`}>
-            {f}
+            {t(SEVERITY_KEY[f])}
           </button>
         ))}
       </div>
@@ -138,11 +143,11 @@ function Alerts() {
               <thead>
                 <tr className="border-b border-slate-700 text-xs text-slate-500">
                   <th className="px-4 py-3 text-left">{t('detectedAt')}</th>
-                  <th className="px-4 py-3 text-left">Rule</th>
-                  <th className="px-4 py-3 text-left">Entity</th>
-                  <th className="px-4 py-3 text-left">Title</th>
+                  <th className="px-4 py-3 text-left">{t('colRule')}</th>
+                  <th className="px-4 py-3 text-left">{t('colEntity')}</th>
+                  <th className="px-4 py-3 text-left">{t('colTitle')}</th>
                   <th className="px-4 py-3 text-left">{t('severity')}</th>
-                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">{t('colStatus')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/40 font-mono">

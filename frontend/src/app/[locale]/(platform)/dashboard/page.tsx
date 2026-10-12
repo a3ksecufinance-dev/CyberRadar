@@ -131,7 +131,7 @@ export default function DashboardPage() {
           <div className="flex gap-6 text-center">
             <div>
               <p className="text-xl font-bold text-amber-400">{overview?.active_iocs ?? '—'}</p>
-              <p className="text-[10px] text-slate-500">Active IOCs</p>
+              <p className="text-[10px] text-slate-500">{t('activeIocs')}</p>
             </div>
             <div>
               <p className="text-xl font-bold text-orange-400">{overview?.active_anomalies ?? '—'}</p>
@@ -139,7 +139,7 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-xl font-bold text-purple-400">{overview?.attack_paths ?? '—'}</p>
-              <p className="text-[10px] text-slate-500">Attack Paths</p>
+              <p className="text-[10px] text-slate-500">{t('attackPaths')}</p>
             </div>
           </div>
 
@@ -160,7 +160,7 @@ export default function DashboardPage() {
           icon={AlertTriangle}
           label={t('activeThreats')}
           value={overview?.open_alerts ?? '—'}
-          sub={`${overview?.critical_alerts ?? 0} critical`}
+          sub={`${overview?.critical_alerts ?? 0} ${t('critical')}`}
           color="text-red-400"
           bg="bg-red-950/60"
         />
@@ -168,7 +168,7 @@ export default function DashboardPage() {
           icon={Siren}
           label={t('openIncidents')}
           value={overview?.open_incidents ?? '—'}
-          sub={`${overview?.sla_breached_incidents ?? 0} SLA breached`}
+          sub={`${overview?.sla_breached_incidents ?? 0} ${t('slaBreached')}`}
           color="text-orange-400"
           bg="bg-orange-950/60"
         />
@@ -176,15 +176,15 @@ export default function DashboardPage() {
           icon={Bug}
           label={t('criticalVulns')}
           value={overview?.critical_vulns ?? '—'}
-          sub={`${overview?.sla_breached_vulns ?? 0} SLA breached`}
+          sub={`${overview?.sla_breached_vulns ?? 0} ${t('slaBreached')}`}
           color="text-amber-400"
           bg="bg-amber-950/60"
         />
         <MetricCard
           icon={TrendingUp}
-          label="IOC Hits Today"
+          label={t('iocHitsToday')}
           value={overview?.ioc_hits_today ?? '—'}
-          sub={`${overview?.high_risk_entities ?? 0} high-risk entities`}
+          sub={`${overview?.high_risk_entities ?? 0} ${t('highRiskEntities')}`}
           color="text-purple-400"
           bg="bg-purple-950/60"
         />
@@ -268,9 +268,9 @@ export default function DashboardPage() {
       {/* Alert distribution — straight from the SIEM's own counters */}
       {alertStats && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <SeverityBars title="Open alerts by severity" breakdown={alertStats.by_severity} />
+          <SeverityBars title={t('openAlertsBySeverity')} breakdown={alertStats.by_severity} />
           <SeverityBars
-            title="Alerts by category"
+            title={t('alertsByCategory')}
             breakdown={alertStats.by_category}
             palette="status"
             emptyMessage="No alerts categorised yet"

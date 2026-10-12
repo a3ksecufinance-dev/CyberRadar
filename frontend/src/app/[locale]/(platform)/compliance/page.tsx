@@ -19,14 +19,17 @@ const scoreColor = (s: number) =>
 const barColor = (s: number) =>
   s >= 85 ? 'bg-emerald-500' : s >= 70 ? 'bg-amber-500' : 'bg-red-500'
 
-/** The five assessment outcomes the service tracks per control. */
-function outcomes(fw: ComplianceScore) {
+/** The five assessment outcomes the service tracks per control.
+ *
+ * `t` is passed in rather than read from a hook: this is a module-level
+ * helper, outside the component, and a hook there does not compile. */
+function outcomes(fw: ComplianceScore, t: (k: string) => string) {
   return [
-    { key: 'compliant', label: 'Compliant', count: fw.compliant, icon: CheckCircle, color: 'text-emerald-400' },
-    { key: 'partial', label: 'Partial', count: fw.partial, icon: AlertCircle, color: 'text-amber-400' },
-    { key: 'non_compliant', label: 'Non-compliant', count: fw.non_compliant, icon: XCircle, color: 'text-red-400' },
-    { key: 'not_assessed', label: 'Not assessed', count: fw.not_assessed, icon: CircleDashed, color: 'text-slate-500' },
-    { key: 'not_applicable', label: 'Not applicable', count: fw.not_applicable, icon: MinusCircle, color: 'text-slate-600' },
+    { key: 'compliant', label: t('compliant'), count: fw.compliant, icon: CheckCircle, color: 'text-emerald-400' },
+    { key: 'partial', label: t('partial'), count: fw.partial, icon: AlertCircle, color: 'text-amber-400' },
+    { key: 'non_compliant', label: t('nonCompliant'), count: fw.non_compliant, icon: XCircle, color: 'text-red-400' },
+    { key: 'not_assessed', label: t('notAssessed'), count: fw.not_assessed, icon: CircleDashed, color: 'text-slate-500' },
+    { key: 'not_applicable', label: t('notApplicable'), count: fw.not_applicable, icon: MinusCircle, color: 'text-slate-600' },
   ].filter((o) => o.count > 0)
 }
 
@@ -95,7 +98,7 @@ export default function CompliancePage() {
           {/* Per-framework assessment outcomes */}
           <div className="grid gap-4 lg:grid-cols-2">
             {frameworks.map((fw) => {
-              const rows = outcomes(fw)
+              const rows = outcomes(fw, t)
               return (
                 <Card key={fw.framework_id}>
                   <CardHeader>

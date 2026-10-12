@@ -32,7 +32,8 @@
       "showing": "{from}-{to} sur {total} résultats",
       "previous": "Précédent",
       "next": "Suivant"
-    }
+    },
+    "searchAll": "Rechercher dans tous les domaines…"
   },
   "severity": {
     "critical": "Critique",
@@ -98,10 +99,19 @@
     "threatsByType": "Menaces par type",
     "riskEvolution": "Évolution du risque (30j)",
     "topRiskyAssets": "Assets les plus risqués",
-    "doraStatus": "Conformité DORA",
+    "doraStatus": "Posture de conformité",
     "lastUpdated": "Dernière mise à jour",
     "noAlerts": "Aucune alerte active",
-    "viewAll": "Voir tout"
+    "viewAll": "Voir tout",
+    "activeIocs": "IOC actifs",
+    "attackPaths": "Chemins d'attaque",
+    "anomalies": "Anomalies",
+    "slaBreached": "hors délai",
+    "iocHitsToday": "Correspondances IOC du jour",
+    "highRiskEntities": "entités à risque élevé",
+    "critical": "critiques",
+    "openAlertsBySeverity": "Alertes ouvertes par sévérité",
+    "alertsByCategory": "Alertes par catégorie"
   },
   "siem": {
     "title": "SIEM",
@@ -205,7 +215,21 @@
       "apply": "Passer en v{version}",
       "applying": "Application…"
     },
-    "severity": "Sévérité"
+    "severity": "Sévérité",
+    "totalAlerts": "Alertes totales",
+    "open": "Ouvertes",
+    "criticalN": "Critiques",
+    "fired24h": "Levées (24 h)",
+    "filter": "Filtrer ces résultats…",
+    "colRule": "Règle",
+    "colEntity": "Entité",
+    "colTitle": "Intitulé",
+    "colStatus": "État",
+    "sevAll": "Toutes",
+    "sevCritical": "Critique",
+    "sevHigh": "Élevée",
+    "sevMedium": "Moyenne",
+    "sevLow": "Faible"
   },
   "incidents": {
     "title": "Réponse aux incidents",
@@ -321,9 +345,9 @@
   },
   "compliance": {
     "title": "Conformité",
-    "subtitle": "Surveillance réglementaire — DORA, PCI-DSS, RGPD, NIS2",
+    "subtitle": "Surveillance réglementaire — les référentiels que porte votre organisation",
     "frameworks": "Référentiels",
-    "controls": "Contrôles",
+    "controls": "contrôles",
     "assessments": "Évaluations",
     "dora": "DORA",
     "pciDss": "PCI-DSS",
@@ -334,7 +358,9 @@
     "partial": "Partiel",
     "lastAssessed": "Dernière évaluation",
     "nextAssessment": "Prochaine évaluation",
-    "coverage": "Couverture"
+    "coverage": "Couverture",
+    "notAssessed": "Non évalué",
+    "notApplicable": "Non applicable"
   },
   "copilot": {
     "title": "Copilote IA",
@@ -344,7 +370,7 @@
     "suggestions": "Questions suggérées",
     "suggestion1": "Explique le dernier incident critique",
     "suggestion2": "Quelles sont nos 5 principales vulnérabilités ?",
-    "suggestion3": "Génère le rapport de conformité DORA",
+    "suggestion3": "Génère le rapport de conformité réglementaire",
     "suggestion4": "Quels assets sont exposés aux IOCs actifs ?",
     "thinking": "Analyse de votre contexte de sécurité..."
   },

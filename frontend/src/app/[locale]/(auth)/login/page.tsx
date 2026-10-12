@@ -65,7 +65,7 @@ export default async function LoginPage({
         </div>
 
         <p className="mt-4 text-center text-[10px] text-slate-700">
-          CyberRadar Platform · Sovereign Security · DORA Ready
+          CyberRadar Platform · Sécurité souveraine · Conformité réglementaire
         </p>
       </div>
     </div>
