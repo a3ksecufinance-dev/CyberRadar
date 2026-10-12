@@ -10,17 +10,21 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { SeverityBars } from '@/components/charts/SeverityBars'
+import { useEnumLabel } from '@/components/shared/useEnumLabel'
 import { useIncidents, useIRStats } from '@/hooks'
 import { formatDate } from '@/lib/utils'
 
 // ListIncidents reads status, severity and incident_type — nothing else — so
 // these are the filters that can actually narrow the query server-side.
+// `id` is what the component holds in state and `key` what the user reads:
+// the two were the same English string, so the selected filter was decided by
+// a label and would have changed meaning the moment it was translated.
 const FILTERS = [
-  { label: 'All', params: {} },
-  { label: 'Critical', params: { severity: 'critical' } },
-  { label: 'High', params: { severity: 'high' } },
-  { label: 'Open', params: { status: 'open' } },
-  { label: 'Investigating', params: { status: 'investigating' } },
+  { id: 'all', key: 'filterAll', params: {} },
+  { id: 'critical', key: 'filterCritical', params: { severity: 'critical' } },
+  { id: 'high', key: 'filterHigh', params: { severity: 'high' } },
+  { id: 'open', key: 'filterOpen', params: { status: 'open' } },
+  { id: 'investigating', key: 'filterInvestigating', params: { status: 'investigating' } },
 ] as const
 
 /** MTTD/MTTR arrive in minutes and are null until the milestone is reached. */
@@ -32,9 +36,10 @@ function minutes(value?: number): string {
 
 export default function IRPage() {
   const t = useTranslations('incidents')
-  const [filter, setFilter] = useState<string>('All')
+  const e = useEnumLabel()
+  const [filter, setFilter] = useState<string>('all')
 
-  const active = FILTERS.find((f) => f.label === filter) ?? FILTERS[0]
+  const active = FILTERS.find((f) => f.id === filter) ?? FILTERS[0]
   const params: Record<string, string> = { limit: '100', ...active.params }
 
   const { data, isLoading, error, mutate } = useIncidents(params)
@@ -57,10 +62,10 @@ export default function IRPage() {
 
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'Open', value: stats?.open_incidents ?? 0, color: 'text-red-400' },
-          { label: 'Critical', value: stats?.critical_incidents ?? 0, color: 'text-red-400' },
-          { label: 'Avg MTTD', value: minutes(stats?.avg_mttd_minutes), color: 'text-amber-400' },
-          { label: 'Avg MTTR', value: minutes(stats?.avg_mttr_minutes), color: 'text-cyan-400' },
+          { label: t('statOpen'), value: stats?.open_incidents ?? 0, color: 'text-red-400' },
+          { label: t('statCritical'), value: stats?.critical_incidents ?? 0, color: 'text-red-400' },
+          { label: t('avgMttd'), value: minutes(stats?.avg_mttd_minutes), color: 'text-amber-400' },
+          { label: t('avgMttr'), value: minutes(stats?.avg_mttr_minutes), color: 'text-cyan-400' },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -73,21 +78,21 @@ export default function IRPage() {
 
       {stats && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <SeverityBars title="Incidents by severity" breakdown={stats.by_severity} />
-          <SeverityBars title="Incidents by status" breakdown={stats.by_status} palette="status" />
+          <SeverityBars title={t('bySeverity')} breakdown={stats.by_severity} />
+          <SeverityBars title={t('byStatus')} breakdown={stats.by_status} palette="status" />
         </div>
       )}
 
       <div className="flex gap-3">
         {FILTERS.map((f) => (
-          <button key={f.label}
-            onClick={() => setFilter(f.label)}
+          <button key={f.id}
+            onClick={() => setFilter(f.id)}
             className={`rounded-md border px-3 py-1 text-xs transition-colors ${
-              filter === f.label
+              filter === f.id
                 ? 'border-cyan-600 bg-cyan-950/40 text-cyan-400'
                 : 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-200'
             }`}>
-            {f.label}
+            {t(f.key)}
           </button>
         ))}
       </div>
@@ -105,12 +110,12 @@ export default function IRPage() {
               <thead>
                 <tr className="border-b border-slate-700 text-xs text-slate-500">
                   <th className="px-4 py-3 text-left">{t('incidentId')}</th>
-                  <th className="px-4 py-3 text-left">Title</th>
+                  <th className="px-4 py-3 text-left">{t('titleCol')}</th>
                   <th className="px-4 py-3 text-left">{t('incidentType')}</th>
                   <th className="px-4 py-3 text-left">{t('severity')}</th>
                   <th className="px-4 py-3 text-left">{t('status')}</th>
                   <th className="px-4 py-3 text-left">{t('mttd')}</th>
-                  <th className="px-4 py-3 text-left">Detected</th>
+                  <th className="px-4 py-3 text-left">{t('detected')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
@@ -130,7 +135,7 @@ export default function IRPage() {
                           : ''}
                       </p>
                     </td>
-                    <td className="px-4 py-3 text-xs text-slate-400">{inc.incident_type}</td>
+                    <td className="px-4 py-3 text-xs text-slate-400">{e(inc.incident_type)}</td>
                     <td className="px-4 py-3"><SeverityBadge severity={inc.severity} /></td>
                     <td className="px-4 py-3"><StatusBadge status={inc.status} /></td>
                     <td className="px-4 py-3 text-xs text-slate-400">{minutes(inc.mttd_minutes)}</td>

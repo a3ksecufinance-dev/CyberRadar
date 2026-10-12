@@ -561,8 +561,9 @@ func (r *APIFWRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 		tenantID, today).Scan(&s.TotalRequestsToday)
 
 	r.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM apifw_webhooks WHERE tenant_id=$1 AND is_active=TRUE`,
-		tenantID).Scan(&s.ActiveWebhooks)
+		`SELECT COUNT(*) FILTER (WHERE is_active), COUNT(*)
+		 FROM apifw_webhooks WHERE tenant_id=$1`,
+		tenantID).Scan(&s.ActiveWebhooks, &s.TotalWebhooks)
 
 	// Delivery success rate over last 24h
 	var delivered, succeeded int
@@ -570,6 +571,7 @@ func (r *APIFWRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE success)
 		FROM apifw_webhook_deliveries WHERE tenant_id=$1 AND created_at >= $2`,
 		tenantID, today).Scan(&delivered, &succeeded)
+	s.DeliveriesToday = delivered
 	if delivered > 0 {
 		s.DeliverySuccessRate = float64(succeeded) * 100.0 / float64(delivered)
 	}

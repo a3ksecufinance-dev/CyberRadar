@@ -37,6 +37,12 @@ func (s *seeder) run(ctx context.Context) error {
 		{"attack graph", s.seedAttackGraph},
 		{"compliance", s.seedCompliance},
 		{"knowledge graph", s.seedKnowledgeGraph},
+		{"mobile fleet", s.seedMobileFleet},
+		{"data estate", s.seedDataEstate},
+		{"supply chain", s.seedSupplyChain},
+		{"industrial estate", s.seedIndustrial},
+		{"response file", s.seedResponseFile},
+		{"integration surface", s.seedIntegrationSurface},
 	} {
 		if err := stage.fn(ctx); err != nil {
 			if ctx.Err() != nil {

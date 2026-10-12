@@ -59,6 +59,32 @@ var naturalKeys = map[string]string{
 	"/api/v1/compliance/controls":   "control_id",
 	"/api/v1/compliance/risks":      "title",
 	"/api/v1/kg/entities":           "name",
+
+	// The six domains a bank sees last and a reviewer opens first: the fleet
+	// of phones, the data stores, the suppliers, the technical plant, the
+	// response file and the integration surface.
+	"/api/v1/mobile/devices":  "device_name",
+	"/api/v1/mobile/apps":     "bundle_id",
+	"/api/v1/mobile/policies": "name",
+	"/api/v1/mobile/threats":  "title",
+
+	"/api/v1/dspm/data-stores": "name",
+	"/api/v1/dspm/findings":    "title",
+
+	"/api/v1/scs/vendors":    "name",
+	"/api/v1/scs/components": "purl",
+	"/api/v1/scs/alerts":     "title",
+
+	"/api/v1/ot/zones":           "name",
+	"/api/v1/ot/assets":          "name",
+	"/api/v1/ot/vulnerabilities": "title",
+	"/api/v1/ot/events":          "title",
+
+	"/api/v1/ir/playbooks": "name",
+	"/api/v1/ir/incidents": "title",
+
+	"/api/v1/apifw/keys":     "name",
+	"/api/v1/apifw/webhooks": "name",
 }
 
 func (s *seeder) note(format string, args ...any) {

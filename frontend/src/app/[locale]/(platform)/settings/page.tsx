@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { useTranslations } from 'next-intl'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { StatusBadge } from '@/components/shared/StatusBadge'
 import { AttackPolicy } from '@/components/settings/AttackPolicy'
@@ -30,6 +31,7 @@ const sections = [
 ]
 
 export default function SettingsPage() {
+  const t = useTranslations('settings')
   const { data, isLoading, error, mutate } = useUsers({ limit: '100' })
   const users = data?.items ?? []
 
@@ -86,7 +88,7 @@ export default function SettingsPage() {
               ) : error ? (
                 <ErrorState message={error.message} retry={() => mutate()} />
               ) : users.length === 0 ? (
-                <EmptyState message="No user in this tenant" />
+                <EmptyState message={t('noUser')} />
               ) : (
                 <table className="w-full text-sm">
                   <thead>

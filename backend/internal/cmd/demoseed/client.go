@@ -165,6 +165,15 @@ func (c *client) put(ctx context.Context, service, path string, body, out any) e
 	return c.do(ctx, http.MethodPut, service, path, body, out)
 }
 
+// patch is how a demonstration records what happened to an object after it
+// was created. Several services compute a derived field — a device's risk, a
+// component's score — only when the fields it depends on move, so creating and
+// then updating is not a shortcut here: it is the path that exercises the
+// computation.
+func (c *client) patch(ctx context.Context, service, path string, body, out any) error {
+	return c.do(ctx, http.MethodPatch, service, path, body, out)
+}
+
 func (c *client) get(ctx context.Context, service, path string, query url.Values, out any) error {
 	if len(query) > 0 {
 		path += "?" + query.Encode()

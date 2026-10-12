@@ -63,7 +63,7 @@ export default function CompliancePage() {
       {frameworks.length === 0 ? (
         <Card>
           <CardContent className="p-0">
-            <EmptyState message="No framework activated for this tenant. Activate one to start scoring." />
+            <EmptyState message={t('noFramework')} />
           </CardContent>
         </Card>
       ) : (
@@ -109,13 +109,13 @@ export default function CompliancePage() {
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">
-                      {fw.framework_code} · {fw.total_controls} controls
+                      {fw.framework_code} · {t('controlsCount', { n: fw.total_controls })}
                     </p>
                   </CardHeader>
                   <CardContent>
                     {rows.length === 0 ? (
                       <p className="py-4 text-center text-xs text-slate-500">
-                        No control assessed yet for this framework
+                        {t('noControlAssessed')}
                       </p>
                     ) : (
                       <div className="space-y-2">
@@ -146,19 +146,19 @@ export default function CompliancePage() {
       {/* Open compliance risks */}
       <Card>
         <CardHeader>
-          <CardTitle>Open compliance risks</CardTitle>
+          <CardTitle>{t('openRisks')}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {risks.length === 0 ? (
-            <EmptyState message="No open compliance risk" />
+            <EmptyState message={t('noOpenRisk')} />
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700 text-xs text-slate-500">
-                  <th className="px-4 py-3 text-left">Risk</th>
-                  <th className="px-4 py-3 text-left">Category</th>
+                  <th className="px-4 py-3 text-left">{t('riskCol')}</th>
+                  <th className="px-4 py-3 text-left">{t('categoryCol')}</th>
                   <th className="px-4 py-3 text-center">L × I</th>
-                  <th className="px-4 py-3 text-center">Score</th>
+                  <th className="px-4 py-3 text-center">{t('scoreCol')}</th>
                   <th className="px-4 py-3 text-left">Status</th>
                 </tr>
               </thead>

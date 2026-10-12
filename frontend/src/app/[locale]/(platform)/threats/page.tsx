@@ -71,7 +71,7 @@ export default function ThreatsPage() {
       <div className="flex gap-3">
         <Input
           className="max-w-sm text-xs"
-          placeholder="Search IOCs..."
+          placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

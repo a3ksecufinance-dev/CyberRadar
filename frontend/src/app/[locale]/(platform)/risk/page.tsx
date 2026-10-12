@@ -1,4 +1,5 @@
 'use client'
+import { useTranslations } from 'next-intl'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -49,6 +50,7 @@ function cellRisks(risks: ComplianceRisk[], likelihood: number, impact: number):
 }
 
 export default function RiskPage() {
+  const t = useTranslations('risk')
   const { data: risksData, isLoading: risksLoading, error: risksError, mutate: retryRisks } = useComplianceRisks({ limit: '200' })
   const { data: scenariosData } = useRiskScenarios({ limit: '50' })
   const { data: krisData } = useKRIs({ limit: '20' })
@@ -145,7 +147,7 @@ export default function RiskPage() {
               ) : risksError ? (
                 <ErrorState message={risksError.message} retry={() => retryRisks()} />
               ) : risks.length === 0 ? (
-                <EmptyState message="No risks recorded" />
+                <EmptyState message={t('noRisks')} />
               ) : (
                 <table className="w-full text-sm">
                   <thead>
@@ -193,14 +195,14 @@ export default function RiskPage() {
       {stats && (
         <div className="grid gap-4 lg:grid-cols-2">
           <SeverityBars
-            title="FAIR scenarios by risk level"
+            title={t('fairByLevel')}
             breakdown={stats.scenarios_by_level}
-            emptyMessage="No FAIR scenarios modelled yet"
+            emptyMessage={t('noFairScenarios')}
           />
           <SeverityBars
-            title="Assets by criticality"
+            title={t('assetsByCriticality')}
             breakdown={stats.assets_by_criticality}
-            emptyMessage="No risk assets registered yet"
+            emptyMessage={t('noRiskAssets')}
           />
         </div>
       )}
@@ -213,7 +215,7 @@ export default function RiskPage() {
         </CardHeader>
         <CardContent className="p-0">
           {scenarios.length === 0 ? (
-            <EmptyState message="No loss scenarios modelled" />
+            <EmptyState message={t('noLossScenarios')} />
           ) : (
             <table className="w-full text-sm">
               <thead>

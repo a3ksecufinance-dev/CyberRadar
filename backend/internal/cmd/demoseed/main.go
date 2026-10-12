@@ -50,8 +50,13 @@ var services = map[string]struct {
 	"attackpath": {8012, "ATTACKPATH_SERVICE_URL"},
 	"kg":         {8013, "KG_SERVICE_URL"},
 	"soar":       {8014, "SOAR_SERVICE_URL"},
+	"apifw":      {8017, "APIFW_SERVICE_URL"},
 	"compliance": {8018, "COMPLIANCE_SERVICE_URL"},
 	"ir":         {8026, "IR_SERVICE_URL"},
+	"scs":        {8027, "SCS_SERVICE_URL"},
+	"ot":         {8028, "OT_SERVICE_URL"},
+	"mobile":     {8029, "MOBILE_SERVICE_URL"},
+	"dspm":       {8030, "DSPM_SERVICE_URL"},
 }
 
 func main() {
@@ -173,6 +178,18 @@ func reportCounts(ctx context.Context, c *client) {
 		{"graph entities", "kg", "/api/v1/kg/entities?limit=500"},
 		{"compliance controls", "compliance", "/api/v1/compliance/controls?limit=500"},
 		{"risks", "compliance", "/api/v1/compliance/risks?limit=500"},
+		{"mobile devices", "mobile", "/api/v1/mobile/devices?limit=500"},
+		{"mobile threats", "mobile", "/api/v1/mobile/threats?limit=500"},
+		{"data stores", "dspm", "/api/v1/dspm/data-stores?limit=500"},
+		{"data findings", "dspm", "/api/v1/dspm/findings?limit=500"},
+		{"suppliers", "scs", "/api/v1/scs/vendors?limit=500"},
+		{"software components", "scs", "/api/v1/scs/components?limit=500"},
+		{"OT zones", "ot", "/api/v1/ot/zones?limit=500"},
+		{"OT assets", "ot", "/api/v1/ot/assets?limit=500"},
+		{"response playbooks", "ir", "/api/v1/ir/playbooks?limit=500"},
+		{"response files", "ir", "/api/v1/ir/incidents?limit=500"},
+		{"API keys", "apifw", "/api/v1/apifw/keys?limit=500"},
+		{"webhooks", "apifw", "/api/v1/apifw/webhooks?limit=500"},
 	}
 
 	fmt.Printf("\nWhat the tenant now holds\n")

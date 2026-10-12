@@ -51,3 +51,7 @@ backend/.dev-local/
 # a deployment's trust store is its own decision, not the repository's.
 *.crpack
 backend/deployments/content/
+
+# Python bytecode from the documentation build scripts.
+__pycache__/
+*.pyc

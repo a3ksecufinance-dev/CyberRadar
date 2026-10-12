@@ -50,6 +50,43 @@ func componentRiskScore(critVulns, highVulns, medVulns int, isEOL, isDeprecated 
 	return score
 }
 
+// vendorRiskScore turns a completed assessment into the vendor's own risk.
+//
+// Nothing used to write scs_vendors.risk_score. The column defaulted to zero
+// and stayed there however badly a vendor assessed, so the supplier list
+// ranked "ORDER BY risk_score DESC" was a flat row of zeros — the same defect
+// componentRiskScore carried, one table across.
+//
+// The assessment scores what the vendor does well, out of its own max; risk is
+// the rest. Critical findings weigh on top, and tier — how much of the bank
+// stops when this vendor does — decides how much the same answers cost.
+func vendorRiskScore(score, maxScore, criticalFindings, tier int) int {
+	if maxScore <= 0 {
+		maxScore = 100
+	}
+	if score < 0 {
+		score = 0
+	}
+	if score > maxScore {
+		score = maxScore
+	}
+	risk := 100 - (score*100)/maxScore
+	risk += criticalFindings * 8
+	switch tier {
+	case 1:
+		risk += 15
+	case 2:
+		risk += 8
+	}
+	if risk > 100 {
+		risk = 100
+	}
+	if risk < 0 {
+		risk = 0
+	}
+	return risk
+}
+
 func sbomRiskScore(critVulns, highVulns, eolCount, totalComponents int) int {
 	if totalComponents == 0 {
 		return 0
@@ -883,13 +920,30 @@ func (r *SCSRepository) UpdateAssessment(ctx context.Context, tenantID, id uuid.
 	_ = json.Unmarshal(qRaw, &a.Questionnaire)
 	_ = json.Unmarshal(fRaw, &a.Findings)
 
-	// A completed assessment is what makes a vendor assessed.
+	// A completed assessment is what makes a vendor assessed — and, when it
+	// carries a score, what moves the vendor's risk. An assessment closed
+	// without a score says nothing about risk, so it leaves the score alone
+	// rather than reading as a perfect zero.
 	if req.Status != nil && *req.Status == "completed" {
-		_, _ = r.db.Exec(ctx,
-			`UPDATE scs_vendors SET last_assessment_at=$3,
-			        next_assessment_at=COALESCE($4, next_assessment_at), updated_at=NOW()
-			 WHERE tenant_id=$1 AND id=$2`,
-			tenantID, a.VendorID, a.CompletedAt, a.NextDueAt)
+		if a.Score == nil {
+			_, _ = r.db.Exec(ctx,
+				`UPDATE scs_vendors SET last_assessment_at=$3,
+				        next_assessment_at=COALESCE($4, next_assessment_at), updated_at=NOW()
+				 WHERE tenant_id=$1 AND id=$2`,
+				tenantID, a.VendorID, a.CompletedAt, a.NextDueAt)
+		} else {
+			var tier int
+			_ = r.db.QueryRow(ctx,
+				`SELECT risk_tier FROM scs_vendors WHERE tenant_id=$1 AND id=$2`,
+				tenantID, a.VendorID).Scan(&tier)
+			_, _ = r.db.Exec(ctx,
+				`UPDATE scs_vendors SET last_assessment_at=$3,
+				        next_assessment_at=COALESCE($4, next_assessment_at),
+				        risk_score=$5, updated_at=NOW()
+				 WHERE tenant_id=$1 AND id=$2`,
+				tenantID, a.VendorID, a.CompletedAt, a.NextDueAt,
+				vendorRiskScore(*a.Score, a.MaxScore, a.CriticalFindings, tier))
+		}
 	}
 	return &a, nil
 }

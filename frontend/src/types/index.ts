@@ -1375,6 +1375,8 @@ export interface APIFWStats {
   active_keys: number
   total_requests_today: number
   active_webhooks: number
+  total_webhooks: number
+  deliveries_today: number
   delivery_success_rate: number
   top_endpoints: EndpointStat[] | null
 }

@@ -60,8 +60,8 @@ export default function VulnerabilitiesPage() {
 
       {stats && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <SeverityBars title="Findings by severity" breakdown={stats.by_severity} />
-          <SeverityBars title="Findings by status" breakdown={stats.by_status} palette="status" />
+          <SeverityBars title={t('bySeverity')} breakdown={stats.by_severity} />
+          <SeverityBars title={t('byStatus')} breakdown={stats.by_status} palette="status" />
         </div>
       )}
 
@@ -129,7 +129,7 @@ export default function VulnerabilitiesPage() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       {v.is_exploited ? (
-                        <span title="Exploited in the wild">
+                        <span title={t('exploitedInTheWild')}>
                           <Flame className="mx-auto h-4 w-4 text-red-400" />
                         </span>
                       ) : v.exploit_available ? (

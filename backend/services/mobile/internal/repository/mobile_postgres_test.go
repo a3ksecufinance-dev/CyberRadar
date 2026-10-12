@@ -682,3 +682,48 @@ func isNil(v any) bool {
 func strp(s string) *string { return &s }
 func intp(n int) *int       { return &n }
 func boolp(b bool) *bool    { return &b }
+
+// A fleet enrols devices whose UDID is not known yet.
+//
+// mob_devices.udid is UNIQUE and the create path wrote whatever the request
+// carried, so an omitted UDID became the empty string — which satisfies a
+// UNIQUE constraint exactly once. The first such phone enrolled; the second
+// was refused with a conflict that named nothing, and a fleet manager
+// importing a branch's handsets saw one row appear out of forty.
+func TestDevicesEnrolWithoutAUDID(t *testing.T) {
+	ctx := context.Background()
+	r, _, tenant := repo(t)
+
+	first, err := r.CreateDevice(ctx, tenant, model.CreateDeviceRequest{
+		DeviceName: "Terminal d'agence 1", DeviceType: "smartphone", Platform: "android",
+		Ownership: "corporate", IsEncrypted: true, IsScreenLock: true,
+	})
+	if err != nil {
+		t.Fatalf("the first device without a UDID: %v", err)
+	}
+	second, err := r.CreateDevice(ctx, tenant, model.CreateDeviceRequest{
+		DeviceName: "Terminal d'agence 2", DeviceType: "smartphone", Platform: "android",
+		Ownership: "corporate", IsEncrypted: true, IsScreenLock: true,
+	})
+	if err != nil {
+		t.Fatalf("the second device without a UDID: %v", err)
+	}
+	if first.UDID != "" || second.UDID != "" {
+		t.Errorf("a device with no UDID came back carrying one: %q / %q", first.UDID, second.UDID)
+	}
+
+	// A UDID that is given is still unique: that is what the constraint is
+	// there for, and losing it would let the same handset enrol twice.
+	if _, err := r.CreateDevice(ctx, tenant, model.CreateDeviceRequest{
+		DeviceName: "Terminal d'agence 3", DeviceType: "smartphone", Platform: "android",
+		UDID: "UD-partagé", Ownership: "corporate",
+	}); err != nil {
+		t.Fatalf("a device with a UDID: %v", err)
+	}
+	if _, err := r.CreateDevice(ctx, tenant, model.CreateDeviceRequest{
+		DeviceName: "Terminal d'agence 4", DeviceType: "smartphone", Platform: "android",
+		UDID: "UD-partagé", Ownership: "corporate",
+	}); err == nil {
+		t.Error("the same UDID enrolled twice")
+	}
+}

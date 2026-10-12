@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Activity, Siren, Server, Radio, Bug,
   GitBranch, Smartphone, Factory, Database, CheckSquare,
-  TrendingUp, Package, Bot, Settings, LogOut, Shield,
+  TrendingUp, Package, Bot, Settings, LogOut, Shield, Webhook,
 } from 'lucide-react'
 
 const groups = [
@@ -48,6 +48,16 @@ const groups = [
     items: [
       { key: 'compliance', href: '/compliance', icon: CheckSquare },
       { key: 'risk',       href: '/risk',       icon: TrendingUp },
+    ],
+  },
+  // The integration surface had a page, a service and a permission, and no
+  // way to reach it: it was missing from this list, so the only route to it
+  // was typing the URL. An integrator evaluating the platform would have
+  // concluded it does not exist.
+  {
+    key: 'integration',
+    items: [
+      { key: 'apiGateway', href: '/api-gateway', icon: Webhook },
     ],
   },
 ]

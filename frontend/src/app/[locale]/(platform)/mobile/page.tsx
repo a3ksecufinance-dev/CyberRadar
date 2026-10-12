@@ -43,13 +43,13 @@ export default function MobilePage() {
 
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'Total Devices', value: stats?.total_devices ?? devices.length, color: 'text-slate-200' },
-          { label: 'Non-Compliant', value: stats?.non_compliant_devices ?? devices.filter(d => !d.is_compliant).length, color: 'text-red-400' },
+          { label: t('totalDevices'), value: stats?.total_devices ?? devices.length, color: 'text-slate-200' },
+          { label: t('nonCompliant'), value: stats?.non_compliant_devices ?? devices.filter(d => !d.is_compliant).length, color: 'text-red-400' },
           // The service counts jailbroken and high-risk devices; it does not
           // count unencrypted ones, so that tile would have been permanently
           // blank. Active threats is what it does know and what matters here.
-          { label: 'Active Threats', value: stats?.active_threats ?? 0, color: 'text-amber-400' },
-          { label: 'Jailbroken/Rooted', value: stats?.jailbroken_devices ?? devices.filter(d => d.is_jailbroken || d.is_rooted).length, color: 'text-red-400' },
+          { label: t('activeThreats'), value: stats?.active_threats ?? 0, color: 'text-amber-400' },
+          { label: t('jailbrokenRooted'), value: stats?.jailbroken_devices ?? devices.filter(d => d.is_jailbroken || d.is_rooted).length, color: 'text-red-400' },
         ].map((stat) => (
           <Card key={stat.label}>
             <CardContent className="pt-4">

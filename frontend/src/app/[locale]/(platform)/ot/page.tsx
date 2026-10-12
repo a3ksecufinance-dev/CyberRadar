@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { SeverityBars } from '@/components/charts/SeverityBars'
+import { useEnumLabel } from '@/components/shared/useEnumLabel'
 import { useOTAssets, useOTEvents, useOTStats } from '@/hooks'
 import { countOf, formatDate } from '@/lib/utils'
 
@@ -34,6 +35,7 @@ const UNKNOWN_LEVEL = 'bg-slate-800 text-slate-400 border-slate-700'
 
 export default function OTPage() {
   const t = useTranslations('ot')
+  const e = useEnumLabel()
 
   const { data: assetsData, isLoading, error, mutate } = useOTAssets({ limit: '100' })
   const { data: eventsData } = useOTEvents({ limit: '10' })
@@ -52,12 +54,12 @@ export default function OTPage() {
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'OT Assets', value: stats?.total_assets ?? assets.length, color: 'text-slate-200' },
-          { label: 'Internet Facing', value: stats?.internet_facing_assets ?? 0, color: 'text-red-400' },
+          { label: t('totalAssets'), value: stats?.total_assets ?? assets.length, color: 'text-slate-200' },
+          { label: t('internetFacing'), value: stats?.internet_facing_assets ?? 0, color: 'text-red-400' },
           // Safety impact is recorded on a vulnerability, not on the asset:
           // an asset is not "safety critical", a flaw in it is.
-          { label: 'Safety-impact Vulns', value: stats?.safety_impact_vulns ?? 0, color: 'text-orange-400' },
-          { label: 'Unpatched', value: stats?.unpatched_assets ?? 0, color: 'text-amber-400' },
+          { label: t('safetyVulns'), value: stats?.safety_impact_vulns ?? 0, color: 'text-orange-400' },
+          { label: t('unpatched'), value: stats?.unpatched_assets ?? 0, color: 'text-amber-400' },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -71,7 +73,7 @@ export default function OTPage() {
       {/* Purdue distribution — the service counts this itself. */}
       <Card>
         <CardHeader>
-          <CardTitle>Purdue Model Distribution</CardTitle>
+          <CardTitle>{t('purdueDistribution')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex gap-3">
@@ -92,8 +94,8 @@ export default function OTPage() {
 
       {stats && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <SeverityBars title="OT events by severity" breakdown={stats.events_by_severity} />
-          <SeverityBars title="OT vulnerabilities by severity" breakdown={stats.vulns_by_severity} />
+          <SeverityBars title={t('eventsBySeverity')} breakdown={stats.events_by_severity} />
+          <SeverityBars title={t('vulnsBySeverity')} breakdown={stats.vulns_by_severity} />
         </div>
       )}
 
@@ -112,15 +114,15 @@ export default function OTPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-700 text-xs text-slate-500">
-                    <th className="px-4 py-3 text-left">Asset</th>
+                    <th className="px-4 py-3 text-left">{t('asset')}</th>
                     <th className="px-4 py-3 text-left">{t('assetType')}</th>
                     <th className="px-4 py-3 text-left">{t('purdueLevel')}</th>
                     <th className="px-4 py-3 text-left">{t('protocol')}</th>
                     <th className="px-4 py-3 text-center">{t('internetFacing')}</th>
-                    <th className="px-4 py-3 text-center">Criticality</th>
-                    <th className="px-4 py-3 text-center">Patched</th>
-                    <th className="px-4 py-3 text-left">Risk</th>
-                    <th className="px-4 py-3 text-left">Updated</th>
+                    <th className="px-4 py-3 text-center">{t('criticality')}</th>
+                    <th className="px-4 py-3 text-center">{t('patched')}</th>
+                    <th className="px-4 py-3 text-left">{t('risk')}</th>
+                    <th className="px-4 py-3 text-left">{t('updated')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/40">
@@ -137,7 +139,7 @@ export default function OTPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{asset.asset_type.toUpperCase()}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">{e(asset.asset_type)}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${purdueColors[asset.purdue_level] ?? UNKNOWN_LEVEL}`}>
                           {purdueLabel[asset.purdue_level] ?? `L${asset.purdue_level}`}
@@ -148,8 +150,8 @@ export default function OTPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         {asset.is_internet_facing
-                          ? <Badge variant="critical" className="text-[10px]">YES</Badge>
-                          : <span className="text-xs text-slate-500">No</span>}
+                          ? <Badge variant="critical" className="text-[10px]">{t('yes')}</Badge>
+                          : <span className="text-xs text-slate-500">{t('no')}</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <SeverityBadge severity={asset.criticality} />

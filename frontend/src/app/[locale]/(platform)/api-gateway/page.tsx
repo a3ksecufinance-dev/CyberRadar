@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -41,6 +42,7 @@ function ScopeTag({ scope }: { scope: string }) {
 }
 
 function APIKeyRow({ k, onRotate, onRevoke }: { k: APIKey; onRotate: () => void; onRevoke: () => void }) {
+  const t = useTranslations('apiGateway')
   const isExpired = k.expires_at ? new Date(k.expires_at) < new Date() : false
   return (
     <tr className="border-b border-slate-800 hover:bg-slate-800/30">
@@ -60,25 +62,25 @@ function APIKeyRow({ k, onRotate, onRevoke }: { k: APIKey; onRotate: () => void;
         {k.rate_limit_rpm > 0 ? `${k.rate_limit_rpm} rpm` : '—'}
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
-        {k.last_used_at ? formatDateShort(k.last_used_at) : 'Never'}
+        {k.last_used_at ? formatDateShort(k.last_used_at) : t('never')}
       </td>
       <td className="px-4 py-3">
         {isExpired ? (
-          <Badge className="bg-red-900/50 text-red-400 border-red-700/50">Expired</Badge>
+          <Badge className="bg-red-900/50 text-red-400 border-red-700/50">{t('expired')}</Badge>
         ) : k.is_active ? (
-          <Badge className="bg-emerald-900/50 text-emerald-400 border-emerald-700/50">Active</Badge>
+          <Badge className="bg-emerald-900/50 text-emerald-400 border-emerald-700/50">{t('active')}</Badge>
         ) : (
-          <Badge className="bg-slate-800 text-slate-400 border-slate-600">Revoked</Badge>
+          <Badge className="bg-slate-800 text-slate-400 border-slate-600">{t('revoked')}</Badge>
         )}
       </td>
       <td className="px-4 py-3">
         <div className="flex gap-2">
           <Button size="sm" variant="ghost" className="text-xs h-7 px-2 text-slate-400 hover:text-slate-200" onClick={onRotate}>
-            Rotate
+            {t('rotate')}
           </Button>
           {k.is_active && (
             <Button size="sm" variant="ghost" className="text-xs h-7 px-2 text-red-500 hover:text-red-400" onClick={onRevoke}>
-              Revoke
+              {t('revoke')}
             </Button>
           )}
         </div>
@@ -93,6 +95,7 @@ function WebhookRow({ wh, onToggle, onTest, onDelete }: {
   onTest: () => void
   onDelete: () => void
 }) {
+  const t = useTranslations('apiGateway')
   const EVENTS_COLORS: Record<string, string> = {
     'alert.created': 'bg-red-900/50 text-red-300 border-red-700/50',
     'incident.created': 'bg-orange-900/50 text-orange-300 border-orange-700/50',
@@ -122,28 +125,28 @@ function WebhookRow({ wh, onToggle, onTest, onDelete }: {
       <td className="px-4 py-3">
         {wh.is_active ? (
           isUnhealthy ? (
-            <Badge className="bg-amber-900/50 text-amber-400 border-amber-700/50">Degraded</Badge>
+            <Badge className="bg-amber-900/50 text-amber-400 border-amber-700/50">{t('degraded')}</Badge>
           ) : (
-            <Badge className="bg-emerald-900/50 text-emerald-400 border-emerald-700/50">Active</Badge>
+            <Badge className="bg-emerald-900/50 text-emerald-400 border-emerald-700/50">{t('active')}</Badge>
           )
         ) : (
-          <Badge className="bg-slate-800 text-slate-400 border-slate-600">Disabled</Badge>
+          <Badge className="bg-slate-800 text-slate-400 border-slate-600">{t('disabled')}</Badge>
         )}
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">
-        {isUnhealthy && <span className="text-amber-400">{wh.failure_count} failures · </span>}
-        {wh.last_triggered_at ? formatDateShort(wh.last_triggered_at) : 'Never triggered'}
+        {isUnhealthy && <span className="text-amber-400">{t('failures', { n: wh.failure_count })} · </span>}
+        {wh.last_triggered_at ? formatDateShort(wh.last_triggered_at) : t('neverTriggered')}
       </td>
       <td className="px-4 py-3">
         <div className="flex gap-2">
           <Button size="sm" variant="ghost" className="text-xs h-7 px-2 text-slate-400 hover:text-slate-200" onClick={onTest}>
-            Test
+            {t('test')}
           </Button>
           <Button size="sm" variant="ghost" className="text-xs h-7 px-2 text-slate-400 hover:text-slate-200" onClick={onToggle}>
-            {wh.is_active ? 'Disable' : 'Enable'}
+            {wh.is_active ? t('disable') : t('enable')}
           </Button>
           <Button size="sm" variant="ghost" className="text-xs h-7 px-2 text-red-500 hover:text-red-400" onClick={onDelete}>
-            Delete
+            {t('delete')}
           </Button>
         </div>
       </td>
@@ -157,6 +160,7 @@ const SCOPES = ['read', 'write', 'admin', 'webhook'] as const
 const EVENT_TYPES = ['alert.created', 'incident.created', 'ioc.matched', 'anomaly.detected', 'vuln.found'] as const
 
 function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated: (plainKey: string) => void }) {
+  const t = useTranslations('apiGateway')
   const token = useApiToken()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -177,7 +181,7 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
       const result = await api.apifw.createKey({ name, description, scopes, rate_limit_rpm: Number(rpmLimit) || 60 }, token) as APIKey
       onCreated(result.plain_key ?? '')
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error')
+      setError(e instanceof Error ? e.message : t('genericError'))
     } finally {
       setLoading(false)
     }
@@ -186,18 +190,18 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-        <h2 className="mb-4 text-lg font-bold text-slate-100">Create API Key</h2>
+        <h2 className="mb-4 text-lg font-bold text-slate-100">{t('createKey')}</h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Name *</label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. SIEM Integration" className="bg-slate-800 border-slate-700 text-slate-200" />
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldName')}</label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder={t('placeholderKeyName')} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Description</label>
-            <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional description" className="bg-slate-800 border-slate-700 text-slate-200" />
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldDescription')}</label>
+            <Input value={description} onChange={e => setDescription(e.target.value)} placeholder={t('placeholderDescription')} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-2">Scopes *</label>
+            <label className="block text-xs text-slate-400 mb-2">{t('fieldScopes')}</label>
             <div className="flex flex-wrap gap-2">
               {SCOPES.map(s => (
                 <button key={s} onClick={() => toggleScope(s)}
@@ -208,16 +212,16 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
             </div>
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Rate limit (req/min)</label>
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldRate')}</label>
             <Input type="number" value={rpmLimit} onChange={e => setRpmLimit(e.target.value)} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose} className="text-slate-400">Cancel</Button>
+          <Button variant="ghost" onClick={onClose} className="text-slate-400">{t('cancel')}</Button>
           <Button onClick={submit} disabled={loading || !name.trim() || scopes.length === 0}
             className="bg-cyan-600 hover:bg-cyan-500 text-white">
-            {loading ? 'Creating…' : 'Create Key'}
+            {loading ? t('creating') : t('create')}
           </Button>
         </div>
       </div>
@@ -226,6 +230,7 @@ function CreateKeyModal({ onClose, onCreated }: { onClose: () => void; onCreated
 }
 
 function PlainKeyModal({ plainKey, onClose }: { plainKey: string; onClose: () => void }) {
+  const t = useTranslations('apiGateway')
   const [copied, setCopied] = useState(false)
   function copy() {
     navigator.clipboard.writeText(plainKey)
@@ -237,17 +242,17 @@ function PlainKeyModal({ plainKey, onClose }: { plainKey: string; onClose: () =>
       <div className="w-full max-w-lg rounded-xl border border-amber-700/60 bg-slate-900 p-6 shadow-2xl">
         <div className="mb-4 flex items-center gap-2">
           <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-          <h2 className="text-lg font-bold text-amber-300">Save your API key now</h2>
+          <h2 className="text-lg font-bold text-amber-300">{t('saveKeyTitle')}</h2>
         </div>
-        <p className="mb-4 text-sm text-slate-400">This key will not be shown again. Copy it and store it securely.</p>
+        <p className="mb-4 text-sm text-slate-400">{t('saveKeyBody')}</p>
         <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 font-mono text-sm text-cyan-300 break-all select-all">
           {plainKey}
         </div>
         <div className="mt-4 flex justify-end gap-3">
           <Button onClick={copy} className="bg-amber-600 hover:bg-amber-500 text-white">
-            {copied ? '✓ Copied!' : 'Copy to clipboard'}
+            {copied ? t('copied') : t('copy')}
           </Button>
-          <Button variant="ghost" onClick={onClose} className="text-slate-400">Close</Button>
+          <Button variant="ghost" onClick={onClose} className="text-slate-400">{t('close')}</Button>
         </div>
       </div>
     </div>
@@ -255,6 +260,7 @@ function PlainKeyModal({ plainKey, onClose }: { plainKey: string; onClose: () =>
 }
 
 function CreateWebhookModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const t = useTranslations('apiGateway')
   const token = useApiToken()
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -275,7 +281,7 @@ function CreateWebhookModal({ onClose, onCreated }: { onClose: () => void; onCre
       await api.apifw.createWebhook({ name, url, secret, events }, token)
       onCreated()
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error')
+      setError(e instanceof Error ? e.message : t('genericError'))
     } finally {
       setLoading(false)
     }
@@ -284,22 +290,22 @@ function CreateWebhookModal({ onClose, onCreated }: { onClose: () => void; onCre
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-        <h2 className="mb-4 text-lg font-bold text-slate-100">Create Webhook</h2>
+        <h2 className="mb-4 text-lg font-bold text-slate-100">{t('createWebhook')}</h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Name *</label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Slack Alerts" className="bg-slate-800 border-slate-700 text-slate-200" />
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldName')}</label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder={t('placeholderWebhookName')} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">Endpoint URL *</label>
-            <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://hooks.example.com/..." className="bg-slate-800 border-slate-700 text-slate-200" />
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldURL')}</label>
+            <Input value={url} onChange={e => setUrl(e.target.value)} placeholder={t('placeholderURL')} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-1">HMAC Secret (optional)</label>
-            <Input type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder="Signing secret" className="bg-slate-800 border-slate-700 text-slate-200" />
+            <label className="block text-xs text-slate-400 mb-1">{t('fieldSecret')}</label>
+            <Input type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder={t('placeholderSecret')} className="bg-slate-800 border-slate-700 text-slate-200" />
           </div>
           <div>
-            <label className="block text-xs text-slate-400 mb-2">Events *</label>
+            <label className="block text-xs text-slate-400 mb-2">{t('fieldEventTypes')}</label>
             <div className="flex flex-wrap gap-2">
               {EVENT_TYPES.map(ev => (
                 <button key={ev} onClick={() => toggleEvent(ev)}
@@ -312,10 +318,10 @@ function CreateWebhookModal({ onClose, onCreated }: { onClose: () => void; onCre
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose} className="text-slate-400">Cancel</Button>
+          <Button variant="ghost" onClick={onClose} className="text-slate-400">{t('cancel')}</Button>
           <Button onClick={submit} disabled={loading || !name.trim() || !url.trim() || events.length === 0}
             className="bg-purple-600 hover:bg-purple-500 text-white">
-            {loading ? 'Creating…' : 'Create Webhook'}
+            {loading ? t('creating') : t('create')}
           </Button>
         </div>
       </div>
@@ -328,6 +334,7 @@ function CreateWebhookModal({ onClose, onCreated }: { onClose: () => void; onCre
 type Tab = 'keys' | 'webhooks'
 
 export default function APIGatewayPage() {
+  const t = useTranslations('apiGateway')
   const token = useApiToken()
   const [tab, setTab] = useState<Tab>('keys')
   const [showCreateKey, setShowCreateKey] = useState(false)
@@ -380,18 +387,18 @@ export default function APIGatewayPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-100">API Gateway</h1>
-          <p className="text-sm text-slate-400">Manage API keys and outbound webhooks for platform integrations</p>
+          <h1 className="text-xl font-bold text-slate-100">{t('title')}</h1>
+          <p className="text-sm text-slate-400">{t('subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
           {tab === 'keys' && (
             <Button onClick={() => setShowCreateKey(true)} className="bg-cyan-600 hover:bg-cyan-500 text-white text-sm h-8 px-3">
-              + New API Key
+              {t('newKey')}
             </Button>
           )}
           {tab === 'webhooks' && (
             <Button onClick={() => setShowCreateWebhook(true)} className="bg-purple-600 hover:bg-purple-500 text-white text-sm h-8 px-3">
-              + New Webhook
+              {t('newWebhook')}
             </Button>
           )}
         </div>
@@ -400,13 +407,21 @@ export default function APIGatewayPage() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-4 gap-4">
-          <StatCard label="Active API Keys" value={stats.active_keys} />
-          <StatCard label="Requests Today" value={stats.total_requests_today.toLocaleString()} />
-          <StatCard label="Active Webhooks" value={stats.active_webhooks} />
+          <StatCard label={t('activeKeys')} value={stats.active_keys} />
+          <StatCard label={t('requestsToday')} value={stats.total_requests_today.toLocaleString()} />
+          <StatCard label={t('activeWebhooks')} value={stats.active_webhooks}
+            sub={stats.total_webhooks > stats.active_webhooks
+              ? t('awaitingActivation', { n: stats.total_webhooks - stats.active_webhooks })
+              : undefined} />
+          {/* A success rate over zero deliveries is not zero per cent: a
+              tenant whose webhooks fired nothing today was flagged as below
+              threshold alongside one whose every delivery failed. */}
           <StatCard
-            label="Delivery Success Rate"
-            value={`${stats.delivery_success_rate.toFixed(1)}%`}
-            sub={stats.delivery_success_rate < 90 ? '⚠ Below threshold' : undefined}
+            label={t('deliveryRate')}
+            value={stats.deliveries_today > 0 ? `${stats.delivery_success_rate.toFixed(1)}%` : '—'}
+            sub={stats.deliveries_today === 0
+              ? t('noDeliveries')
+              : stats.delivery_success_rate < 90 ? t('belowThreshold') : undefined}
           />
         </div>
       )}
@@ -415,7 +430,7 @@ export default function APIGatewayPage() {
       {stats?.top_endpoints && stats.top_endpoints.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-slate-300">Top Endpoints (24h)</CardTitle>
+            <CardTitle className="text-sm text-slate-300">{t('topEndpoints')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -439,21 +454,24 @@ export default function APIGatewayPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-800">
-        {(['keys', 'webhooks'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === t ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>
-            {t === 'keys' ? `API Keys${keys.length ? ` (${keys.length})` : ''}` : `Webhooks${webhooks.length ? ` (${webhooks.length})` : ''}`}
-          </button>
-        ))}
+        {(['keys', 'webhooks'] as Tab[]).map(name => {
+          const count = name === 'keys' ? keys.length : webhooks.length
+          return (
+            <button key={name} onClick={() => setTab(name)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${tab === name ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-300'}`}>
+              {t(name === 'keys' ? 'tabKeys' : 'tabWebhooks')}{count ? ` (${count})` : ''}
+            </button>
+          )
+        })}
       </div>
 
       {/* API Keys tab */}
       {tab === 'keys' && (
         <>
           {keysLoading && <LoadingState />}
-          {keysError && <ErrorState message="Failed to load API keys" />}
+          {keysError && <ErrorState message={t('loadKeysFailed')} />}
           {!keysLoading && !keysError && keys.length === 0 && (
-            <EmptyState message="No API keys yet — create one to grant external access to the platform." />
+            <EmptyState message={t('noKeys')} />
           )}
           {keys.length > 0 && (
             <Card>
@@ -461,8 +479,8 @@ export default function APIGatewayPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-800">
-                      {['Name', 'Key Prefix', 'Scopes', 'Rate Limit', 'Last Used', 'Status', 'Actions'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+                      {['colName', 'colPrefix', 'colScopes', 'colRate', 'colLastUsed', 'colStatus', 'colActions'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{t(h)}</th>
                       ))}
                     </tr>
                   </thead>
@@ -485,9 +503,9 @@ export default function APIGatewayPage() {
       {tab === 'webhooks' && (
         <>
           {whLoading && <LoadingState />}
-          {whError && <ErrorState message="Failed to load webhooks" />}
+          {whError && <ErrorState message={t('loadWebhooksFailed')} />}
           {!whLoading && !whError && webhooks.length === 0 && (
-            <EmptyState message="No webhooks configured — add one to push events to external systems (Slack, SIEM, SOAR)." />
+            <EmptyState message={t('noWebhooks')} />
           )}
           {webhooks.length > 0 && (
             <Card>
@@ -495,8 +513,8 @@ export default function APIGatewayPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-800">
-                      {['Name', 'URL', 'Events', 'Status', 'Last Activity', 'Actions'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{h}</th>
+                      {['colName', 'colURL', 'colEvents', 'colStatus', 'colLastActivity', 'colActions'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-slate-400 uppercase tracking-wide">{t(h)}</th>
                       ))}
                     </tr>
                   </thead>

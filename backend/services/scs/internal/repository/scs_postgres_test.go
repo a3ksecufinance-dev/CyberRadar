@@ -646,3 +646,87 @@ func TestAFreshTenantGetsZerosRatherThanAnError(t *testing.T) {
 		t.Error("the breakdowns are nil, which serialises as null rather than {}")
 	}
 }
+
+// A vendor's risk follows its assessment.
+//
+// scs_vendors.risk_score had no writer at all: a tier-1 supplier that scored
+// thirty out of a hundred read the same zero as one that scored ninety-five,
+// and the supplier list — ordered by that column — was arbitrary. The guard is
+// in two directions: a graded assessment moves it, an ungraded one does not
+// pretend to.
+func TestAVendorRiskFollowsItsAssessment(t *testing.T) {
+	ctx := context.Background()
+	r, _, tenant := repo(t)
+	v := vendor(t, r, tenant, "infogerance", "managed_service", 1)
+	if v.RiskScore != 0 {
+		t.Fatalf("a vendor nobody has assessed reads %d", v.RiskScore)
+	}
+
+	a, err := r.CreateAssessment(ctx, tenant, &model.CreateAssessmentRequest{
+		VendorID: v.ID, AssessmentType: "security_questionnaire", Assessor: "Achats",
+	}, nil)
+	if err != nil {
+		t.Fatalf("CreateAssessment: %v", err)
+	}
+
+	// Closed without a grade: nothing is known about the risk, so nothing is
+	// claimed about it.
+	completed := "completed"
+	if _, err := r.UpdateAssessment(ctx, tenant, a.ID, &model.UpdateAssessmentRequest{
+		Status: &completed,
+	}); err != nil {
+		t.Fatalf("UpdateAssessment without a score: %v", err)
+	}
+	ungraded, err := r.GetVendor(ctx, tenant, v.ID)
+	if err != nil || ungraded == nil {
+		t.Fatalf("GetVendor: %v", err)
+	}
+	if ungraded.RiskScore != 0 {
+		t.Errorf("an assessment closed without a grade scored the vendor %d", ungraded.RiskScore)
+	}
+	if ungraded.LastAssessmentAt == nil {
+		t.Error("a completed assessment left the vendor unassessed")
+	}
+
+	// Graded at 40/100, tier 1: 60 of gap plus 15 of tier.
+	b, err := r.CreateAssessment(ctx, tenant, &model.CreateAssessmentRequest{
+		VendorID: v.ID, AssessmentType: "audit", Assessor: "Audit interne",
+	}, nil)
+	if err != nil {
+		t.Fatalf("CreateAssessment: %v", err)
+	}
+	score := 40
+	if _, err := r.UpdateAssessment(ctx, tenant, b.ID, &model.UpdateAssessmentRequest{
+		Status: &completed, Score: &score,
+	}); err != nil {
+		t.Fatalf("UpdateAssessment with a score: %v", err)
+	}
+	graded, err := r.GetVendor(ctx, tenant, v.ID)
+	if err != nil || graded == nil {
+		t.Fatalf("GetVendor: %v", err)
+	}
+	if graded.RiskScore != 75 {
+		t.Errorf("a tier-1 vendor graded 40/100 scores %d, want 75", graded.RiskScore)
+	}
+}
+
+// The shape of the vendor score, without a database.
+func TestVendorRiskScore(t *testing.T) {
+	for _, c := range []struct {
+		name                                    string
+		score, maxScore, criticalFindings, tier int
+		want                                    int
+	}{
+		{"a perfect tier-4 vendor carries none", 100, 100, 0, 4, 0},
+		{"a perfect tier-1 vendor still carries its tier", 100, 100, 0, 1, 15},
+		{"half marks, tier 3", 50, 100, 0, 3, 50},
+		{"two critical findings weigh 8 each", 100, 100, 2, 4, 16},
+		{"a max score other than 100 is honoured", 15, 30, 0, 4, 50},
+		{"nothing exceeds 100", 0, 100, 5, 1, 100},
+		{"a missing max score is read as 100", 70, 0, 0, 4, 30},
+	} {
+		if got := vendorRiskScore(c.score, c.maxScore, c.criticalFindings, c.tier); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}

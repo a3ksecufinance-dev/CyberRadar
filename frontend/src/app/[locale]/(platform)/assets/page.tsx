@@ -72,7 +72,7 @@ export default function AssetsPage() {
       <div className="flex gap-3">
         <Input
           className="max-w-xs text-xs"
-          placeholder="Search assets..."
+          placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

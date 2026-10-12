@@ -1,4 +1,5 @@
 'use client'
+import { useTranslations } from 'next-intl'
 import { ArrowRight, AlertTriangle, Scissors } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -47,6 +48,7 @@ function orderedEdges(path: AttackPath): (AttackEdge | undefined)[] {
 }
 
 export default function AttackPathPage() {
+  const t = useTranslations('attackpath')
   const { data: pathsData, isLoading, error, mutate } = useAttackPaths({ limit: '20' })
   const { data: chokeData } = useChokePoints({ limit: '5' })
   const { data: stats } = useAttackStats()
@@ -117,7 +119,7 @@ export default function AttackPathPage() {
       ) : paths.length === 0 ? (
         <Card>
           <CardContent className="p-0">
-            <EmptyState message="No attack paths found. Run a scenario to compute them." />
+            <EmptyState message={t('noPaths')} />
           </CardContent>
         </Card>
       ) : (

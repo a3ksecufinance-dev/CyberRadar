@@ -58,6 +58,15 @@ func riskLevelFromScore(score int) string {
 	}
 }
 
+// emptyToNull is for the columns where "" and "unknown" are not the same
+// thing to the schema.
+func emptyToNull(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 // ─── Devices ──────────────────────────────────────────────────────────────────
 
 func (r *MobileRepository) CreateDevice(ctx context.Context, tenantID uuid.UUID, req model.CreateDeviceRequest) (*model.MobDevice, error) {
@@ -71,6 +80,16 @@ func (r *MobileRepository) CreateDevice(ctx context.Context, tenantID uuid.UUID,
 	}
 	riskScore := deviceRiskScore(false, false, req.IsEncrypted, req.IsScreenLock, 0, 0)
 	riskLevel := riskLevelFromScore(riskScore)
+
+	// mob_devices.udid carries a UNIQUE constraint, and an empty string
+	// satisfies it exactly once. A device enrolled without its UDID — hand
+	// enrolment, an Android that has not reported one yet — therefore worked
+	// for the first phone in the fleet and failed for every one after it,
+	// with "a record with these values already exists" naming nothing.
+	//
+	// NULL is what "not known yet" means to this column, and PostgreSQL
+	// allows as many of those as the fleet has.
+	udid := emptyToNull(req.UDID)
 
 	var d model.MobDevice
 	err := r.db.QueryRow(ctx,
@@ -86,7 +105,7 @@ func (r *MobileRepository) CreateDevice(ctx context.Context, tenantID uuid.UUID,
 		           compliance_issues,risk_score,risk_level,COALESCE(last_location,''),last_seen_at,
 		           last_checkin_at,COALESCE(last_ip,''),COALESCE(carrier,''),tags,COALESCE(notes,''),created_by,created_at,updated_at`,
 		tenantID, req.DeviceName, req.DeviceType, req.Platform, req.OSVersion,
-		req.Model, req.Manufacturer, req.SerialNumber, req.IMEI, req.UDID,
+		req.Model, req.Manufacturer, req.SerialNumber, req.IMEI, udid,
 		ownership, req.OwnerName, req.OwnerID, req.OwnerEmail, req.Department,
 		req.IsEncrypted, req.IsScreenLock, riskScore, riskLevel,
 		req.Carrier, tags,

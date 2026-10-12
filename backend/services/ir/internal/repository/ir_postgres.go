@@ -463,11 +463,31 @@ func (r *IRRepository) UpdateIncident(ctx context.Context, tenantID, id uuid.UUI
 			}
 		case "recovered":
 			if curr.RecoveredAt == nil {
+				// When recovery happened, not when somebody got round to
+				// recording it. Responders close the file afterwards — the
+				// morning after a night of work, or days later for an
+				// incident imported from another tool — and timing the
+				// recovery from that click turned a three-hour restore into
+				// a four-day one on the only figure anybody reads.
+				//
+				// The timeline is the record of what happened; a recovery
+				// event in it is what the responders themselves entered. With
+				// none, the moment of the transition is the best available
+				// answer, which is what this did before.
+				at := now
+				var fromTimeline *time.Time
+				_ = r.db.QueryRow(ctx,
+					`SELECT MAX(event_time) FROM ir_timeline
+					 WHERE tenant_id=$1 AND incident_id=$2 AND event_type = 'recovery'`,
+					tenantID, id).Scan(&fromTimeline)
+				if fromTimeline != nil &&
+					!fromTimeline.Before(curr.DetectedAt) && !fromTimeline.After(now) {
+					at = *fromTimeline
+				}
 				sets = append(sets, fmt.Sprintf("recovered_at=$%d", n))
-				args = append(args, now)
+				args = append(args, at)
 				n++
-				// Compute MTTR: from detected_at to now
-				mttr := int(now.Sub(curr.DetectedAt).Minutes())
+				mttr := int(at.Sub(curr.DetectedAt).Minutes())
 				sets = append(sets, fmt.Sprintf("mttr_minutes=$%d", n))
 				args = append(args, mttr)
 				n++
@@ -540,7 +560,46 @@ func (r *IRRepository) AddTimelineEvent(ctx context.Context, tenantID, incidentI
 	if err != nil {
 		return nil, err
 	}
+	r.refreshMTTD(ctx, tenantID, incidentID)
 	return &ev, nil
+}
+
+// refreshMTTD derives the detection delay from the forensic timeline.
+//
+// mttd_minutes had no writer: the column was declared, read by the statistics
+// query and shown on the incident screen, and never set by anything, so the
+// average time to detect was permanently null — next to a time to recover the
+// same table computes on the first "recovered" transition.
+//
+// The detection delay is the one number the timeline can honestly supply:
+// `detected_at` is when the institution saw the incident, and the earliest
+// event recorded as attacker activity is when the attacker started. Both are
+// facts the responders entered. Nothing else here knows when an attack began,
+// so an incident with no attacker-activity event keeps a null MTTD rather than
+// an invented one — and so does one whose first recorded attacker step comes
+// after the detection, which means the timeline is still being written.
+func (r *IRRepository) refreshMTTD(ctx context.Context, tenantID, incidentID uuid.UUID) {
+	var firstActivity *time.Time
+	if err := r.db.QueryRow(ctx,
+		`SELECT MIN(event_time) FROM ir_timeline
+		 WHERE tenant_id=$1 AND incident_id=$2 AND event_type = 'attacker_activity'`,
+		tenantID, incidentID).Scan(&firstActivity); err != nil || firstActivity == nil {
+		return
+	}
+	var detectedAt time.Time
+	if err := r.db.QueryRow(ctx,
+		`SELECT detected_at FROM ir_incidents WHERE tenant_id=$1 AND id=$2`,
+		tenantID, incidentID).Scan(&detectedAt); err != nil {
+		return
+	}
+	minutes := int(detectedAt.Sub(*firstActivity).Minutes())
+	if minutes < 0 {
+		return
+	}
+	_, _ = r.db.Exec(ctx,
+		`UPDATE ir_incidents SET mttd_minutes=$3, updated_at=NOW()
+		 WHERE tenant_id=$1 AND id=$2`,
+		tenantID, incidentID, minutes)
 }
 
 func (r *IRRepository) GetTimeline(ctx context.Context, tenantID, incidentID uuid.UUID) ([]model.IRTimeline, error) {

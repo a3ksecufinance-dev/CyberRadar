@@ -273,7 +273,7 @@ export default function DashboardPage() {
             title={t('alertsByCategory')}
             breakdown={alertStats.by_category}
             palette="status"
-            emptyMessage="No alerts categorised yet"
+            emptyMessage={t('noAlertsCategorised')}
           />
         </div>
       )}
