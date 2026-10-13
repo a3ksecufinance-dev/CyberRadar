@@ -172,6 +172,7 @@ build: ## Build all service binaries
 	go build -o bin/dspm-service ./services/dspm/cmd/server/
 	go build -o bin/syslog-connector ./services/syslog/cmd/server/
 	go build -o bin/demo-seed ./internal/cmd/demoseed/
+	go build -o bin/bench ./internal/cmd/bench/
 	@echo "Build complete → bin/"
 
 build-tenant: ## Build tenant service only
@@ -240,6 +241,9 @@ e2e: ## Drive the interface in a browser against a running, seeded platform
 
 demo: ## Fill the tenant with a demonstration estate, through the platform's own API
 	go run ./internal/cmd/demoseed/
+
+bench: ## Measure the three figures — ingestion rate, API p95, detection time
+	go run ./internal/cmd/bench/
 
 vault-seed: ## Load development secrets into Vault (dev only)
 	./scripts/vault-seed.sh

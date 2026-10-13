@@ -160,13 +160,33 @@ Les 8 KPI du master plan et les 14 exigences non fonctionnelles, dont
 | Tâche | Charge |
 |---|---:|
 | Banc de charge reproductible (injection syslog et API, jeu de données réaliste) | 15 j |
-| Les trois chiffres : débit d'ingestion, latence API p95, temps de détection | 10 j |
+| Les trois chiffres : débit d'ingestion, latence API p95, temps de détection — **faits** ✓ (`make bench`, [docs/22-mesures.md](../docs/22-mesures.md)) | 10 j |
 | Les cinq autres KPI : MTTD, MTTR sous charge, réduction des faux positifs, couverture d'actifs, disponibilité | 10 j |
 | Les NFR qui deviennent vérifiables : scaling horizontal exercé, reprise < 15 min, latence pipeline < 3 s, `US-CTI-ENR-002` enrichissement < 500 ms | 10 j |
 
 **Sortie** : les 8 KPI publiés dans un tableau de bord, avec la configuration
 matérielle qui les a produits. Et une décision explicite : **tenir le chiffre
 de 100 K EPS, ou le changer**.
+
+> **Les trois premiers sont mesurés** — `make bench`, détail dans
+> [docs/22-mesures.md](../docs/22-mesures.md). Sur quatre cœurs partagés avec
+> toute la plateforme : **276 ev/s tenus** (plafond à 400), **latence p95 de
+> 10 ms seule et 51 ms à huit requêtes en vol**, **détection en 443 ms
+> médians**.
+>
+> La mesure a répondu à la question des 100 K EPS, et la réponse est non :
+> `internal/pkg/kafka/consumer.go` crée chaque sujet avec `NumPartitions: 1`,
+> et une partition n'est lue que par un seul consommateur d'un groupe. Le
+> pipeline ne peut donc pas s'étendre horizontalement — dix instances n'en
+> feraient travailler qu'une. **Le plafond est topologique, pas matériel**, et
+> partitionner les sujets est le préalable à toute extrapolation.
+>
+> Elle a aussi montré l'écart entre les deux bouts : le collecteur accepte à
+> ~5 700 ev/s ce que le pipeline traite à ~280. Kafka absorbe la différence,
+> ce qui est son rôle — mais sous une rafale de 160 000 événements le pipeline
+> a pris **525 586 événements de retard**, soit plus d'une heure, pendant
+> laquelle aucune détection nouvelle n'est sortie. C'est une caractéristique à
+> dire à un exploitant, pas à découvrir en production.
 
 ---
 
