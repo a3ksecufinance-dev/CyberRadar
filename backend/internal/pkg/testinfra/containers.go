@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/docker/go-connections/nat"
+	"github.com/segmentio/kafka-go"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -201,7 +202,60 @@ func startKafkaContainer() (string, error) {
 		return "", fmt.Errorf("start %s: %w", kafkaImage, err)
 	}
 	remember(c)
-	return hostPort(ctx, c, "9092")
+	addr, err := hostPort(ctx, c, "9092")
+	if err != nil {
+		return "", err
+	}
+	// The port is open well before the broker will answer.
+	//
+	// PostgreSQL above waits for a log line as well as its port, because its
+	// entrypoint starts it once for initdb and once for real. A KRaft broker
+	// has the same gap for a different reason: it binds 9092 while the
+	// controller quorum is still electing a leader, so a client that connects
+	// in that window gets LEADER_NOT_AVAILABLE or an empty metadata response
+	// — and kafka-go reports the second as an ordinary empty topic list
+	// rather than an error, which is the quiet kind of failure this package
+	// exists to keep out of the suite.
+	//
+	// Metadata is the first thing every caller needs, so asking for it is
+	// both the readiness check and a rehearsal of the first real call.
+	if err := awaitBroker(ctx, addr); err != nil {
+		return "", err
+	}
+	return addr, nil
+}
+
+// awaitBroker blocks until the broker answers a metadata request.
+//
+// kafka-go directly rather than internal/pkg/kafka: that package's tests are
+// in-package and use this one, so importing it here would close an import
+// cycle the moment somebody writes the obvious test.
+func awaitBroker(ctx context.Context, addr string) error {
+	deadline := time.Now().Add(startupTimeout)
+	var last error
+	for time.Now().Before(deadline) {
+		conn, err := kafka.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			last = err
+		} else {
+			_, err = conn.ReadPartitions()
+			cerr := conn.Close()
+			if err == nil {
+				return nil
+			}
+			last = err
+			if cerr != nil {
+				last = fmt.Errorf("%w (and closing: %v)", err, cerr)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for the broker at %s: %w", addr, ctx.Err())
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("the broker at %s did not answer a metadata request within %s: %w",
+		addr, startupTimeout, last)
 }
 
 func hostPort(ctx context.Context, c testcontainers.Container, port string) (string, error) {
