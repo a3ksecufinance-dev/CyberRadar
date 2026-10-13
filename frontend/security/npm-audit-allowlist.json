@@ -1,0 +1,144 @@
+{
+  "comment": [
+    "Advisories npm audit reports and this application accepts, each with the",
+    "reason, what would clear it, and when it has to be looked at again.",
+    "",
+    "An entry here is not a way to make the pipeline quiet. The gate",
+    "(scripts/npm-audit-gate.py) fails on an entry past its review date, fails on",
+    "an entry that has since gained a fix needing no breaking change, fails on an",
+    "entry claiming to be build-time-only while package.json lists it as a runtime",
+    "dependency, and fails on anything not listed — which is the point of the",
+    "check being blocking at all.",
+    "",
+    "Every entry below waits on one of four major upgrades. They are real work,",
+    "not an excuse: `needs` names which one, so the list sorts into the three",
+    "pieces of work it actually represents.",
+    "",
+    "An entry whose advisory gains a non-breaking fix is not an exception, it is",
+    "work: take the fix."
+  ],
+  "exceptions": [
+    {
+      "package": "next",
+      "severity": "critical",
+      "needs": "next@16",
+      "reason": "Denial of service in the Image Optimizer. This application sets images.unoptimized in next.config.mjs, so the optimizer never runs and the advisory is not reachable here — a claim that holds only as long as that line does. Clearing it means the Next 16 migration, which is a breaking change and a piece of work of its own.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-01-13"
+    },
+    {
+      "package": "next-intl",
+      "severity": "moderate",
+      "needs": "next-intl@4",
+      "reason": "Open redirect in the locale negotiation. The platform's routes all sit behind the authenticated layout and the middleware validates the JWT before any redirect is followed, which narrows it rather than removing it. Cleared by next-intl 4, which is a breaking change and tied to the Next 16 migration.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-01-13"
+    },
+    {
+      "package": "postcss",
+      "severity": "high",
+      "needs": "next@16",
+      "build_time_only": true,
+      "reason": "XSS through an unescaped </style> in the CSS stringifier. Reached only when compiling stylesheets at build time, from stylesheets held in this repository — never at runtime, and never over input from a user. Pinned by Next's own toolchain, so Next 16 is what moves it.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-01-13"
+    },
+    {
+      "package": "eslint-config-next",
+      "severity": "high",
+      "needs": "eslint-config-next@16",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through @next/eslint-plugin-next, and through the glob under it. Linting configuration, run by developers and by CI.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "@next/eslint-plugin-next"
+    },
+    {
+      "package": "@next/eslint-plugin-next",
+      "severity": "high",
+      "needs": "eslint-config-next@16",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through the glob it depends on. Linting only — never part of a build output, never exposed to production input.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "glob"
+    },
+    {
+      "package": "glob",
+      "severity": "high",
+      "needs": "eslint-config-next@16",
+      "build_time_only": true,
+      "reason": "Command injection through the glob CLI's -c/--cmd flag. This project never invokes the glob CLI; the library is used as an API by the lint toolchain. Cleared by eslint-config-next 16.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13"
+    },
+    {
+      "package": "tailwindcss",
+      "severity": "high",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through its build-time toolchain — chokidar, fast-glob, micromatch, postcss-nested and postcss-selector-parser, each accounted for here. Tailwind 4 drops those dependencies, which is what clears the whole group; it is a breaking change — a different configuration format and a different plugin surface — and a piece of work of its own.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "micromatch"
+    },
+    {
+      "package": "braces",
+      "severity": "high",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Stack exhaustion on a deeply nested brace pattern. No fixed version exists: 3.0.3 is both the latest published release and the one the advisory names, so there is nothing to upgrade to. Tailwind 4 drops the dependency entirely, which is what clears it. Reached only from the build's own glob patterns, which are written in this repository.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13"
+    },
+    {
+      "package": "micromatch",
+      "severity": "high",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through braces, which has no fixed version. Cleared when Tailwind 4 drops the chain.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "braces"
+    },
+    {
+      "package": "fast-glob",
+      "severity": "high",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through micromatch, and through the braces under it, which has no fixed version.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "micromatch"
+    },
+    {
+      "package": "chokidar",
+      "severity": "high",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through braces, for which no fixed version exists. The file watcher Tailwind uses in watch mode — it runs on a developer's machine and in no build this pipeline performs.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "braces"
+    },
+    {
+      "package": "postcss-selector-parser",
+      "severity": "moderate",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Quadratic complexity parsing a flat selector, reached at build time over this repository's own stylesheets. The fix is a major version its parent does not accept; Tailwind 4 carries it.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13"
+    },
+    {
+      "package": "postcss-nested",
+      "severity": "moderate",
+      "needs": "tailwindcss@4",
+      "build_time_only": true,
+      "reason": "Carries no advisory of its own: flagged through postcss-selector-parser, whose fix is a major version its parent does not accept.",
+      "reviewed": "2026-10-13",
+      "review_by": "2027-04-13",
+      "inherited_from": "postcss-selector-parser"
+    }
+  ]
+}

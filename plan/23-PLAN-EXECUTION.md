@@ -122,7 +122,7 @@ de la dette plus vite qu'il n'ajoute de la valeur.
 | Au moins un test sur chacun des 15 autres services sans test | 25 j |
 | Parcours de bout en bout scripté et chronométré, en CI | 10 j |
 | Migrations à état (`golang-migrate` sur les 49 existantes) — **fait** ✓ | 12 j |
-| Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants — **`govulncheck` est fait et bloquant** ✓ ; `npm audit` attend la migration Next 16 | 5 j |
+| Sortir `next-auth` de sa version bêta ; `govulncheck` et `npm audit` bloquants — **les deux sont faits et bloquants** ✓, chacun derrière une liste d'exceptions datées | 5 j |
 | Les 5 tables mortes : **supprimées** par la migration `000048` — arbitrage tranché, L12 les recréera en les implémentant | 2 j |
 
 **Sortie** : aucun service à 0 test, `make e2e-chain` vert en CI, deux
@@ -454,9 +454,12 @@ dépende d'une déclaration.
 > présent. **B6 est partiellement fait** : les 49 vulnérabilités que
 > `govulncheck` signalait sont corrigées — Go 1.22 → 1.25, `golang.org/x/net`,
 > `golang-jwt/jwt/v5`, `ClickHouse/ch-go` avec `clickhouse-go` et le SDK
-> OpenTelemetry — et le contrôle est devenu bloquant. `npm audit` reste en
-> rapport : son critique et ses neuf majeures ne se résolvent que par une
-> migration Next 16 et next-intl 4, qui est un lot en soi. **B3 est fait** :
+> OpenTelemetry — et le contrôle est devenu bloquant. `npm audit` l'est
+> devenu à son tour, derrière le même genre de liste : le laisser en rapport
+> l'avait fait dériver de dix avis à quatorze sans que personne le voie, et le
+> commentaire qui les expliquait était devenu faux. Les treize restants sont
+> datés et rattachés à la migration majeure qui les lèvera — Next 16,
+> Tailwind 4, next-intl 4, eslint-config-next 16. **B3 est fait** :
 > les 15 services qui n'avaient aucun test en ont un, écrit contre une vraie
 > base PostgreSQL via `internal/pkg/testinfra`, et plus aucun des 32 services
 > du dépôt n'est sans test. Le lot a trouvé **une cinquantaine de défauts** que
@@ -532,8 +535,9 @@ dépende d'une déclaration.
 > désormais avant d'appliquer quoi que ce soit. Il n'y a pas de migration descendante, par décision
 > et non par omission : l'inverse d'une migration qui porte désormais les
 > données du client est une restauration, pas un `DROP`, et `migrate down` le
-> dit au lieu de le faire. **L0 est donc complet**, à `npm audit` près, qui
-> attend la migration Next 16.
+> dit au lieu de le faire. **L0 est complet.** `npm audit` est bloquant comme
+> `govulncheck` ; ce qui reste n'est plus un contrôle manquant mais trois
+> migrations majeures nommées, chacune avec sa date de revue.
 
 | Indicateur | Départ | Cible | Commande |
 |---|---|---|---|

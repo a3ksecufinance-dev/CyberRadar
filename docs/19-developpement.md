@@ -489,7 +489,24 @@ chose à adopter.
 | **Backend** | Format, build, vet, migrations PostgreSQL + ClickHouse, **publication et installation d'une livraison de contenu signée**, quatre refus asservis à leur motif, tests |
 | **Migrations** | Applique toutes les migrations à une base vierge, **les applique une seconde fois et exige que rien ne s'applique**, puis supprime la table de version, adopte le schéma et exige encore un `up` vide |
 | **Frontend** | `type-check`, `lint`, **`check:messages`**, `build` |
-| **Vulnérabilités** | `govulncheck`, `npm audit` |
+| **Vulnérabilités** | `govulncheck` et `npm audit`, **tous deux bloquants, derrière une liste d'exceptions datées** |
+
+Les deux moitiés du job de vulnérabilités passent par un contrôle du même
+genre : `backend/scripts/govulncheck-gate.py` et
+`frontend/scripts/npm-audit-gate.py`. Chacun échoue sur un avis absent de sa
+liste d'exceptions, sur une exception dont la date de revue est passée, sur
+une exception devenue corrigeable sans rupture — ce n'est plus une exception,
+c'est du travail — et sur un scan qui n'a pas pu tourner, que les deux outils
+rapportent autrement comme un succès.
+
+Le contrôle npm a remplacé un `npm audit --audit-level=high` en
+`continue-on-error`. Entre deux lectures de ce journal, le compte était passé
+de dix avis à quatorze et le commentaire qui les expliquait était devenu faux,
+sans que personne le voie : un rapport que personne n'est tenu de lire n'est
+pas un contrôle. Les treize avis restants sont dans
+`frontend/security/npm-audit-allowlist.json`, chacun rattaché à la migration
+majeure qui le lèvera — Next 16, Tailwind 4, next-intl 4, eslint-config-next 16.
+
 
 Le job backend passe par **la chaîne publiée complète** — construire, signer,
 publier dans un canal, installer ce que le canal dit courant — et non par le

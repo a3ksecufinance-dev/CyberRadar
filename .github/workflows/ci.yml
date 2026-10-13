@@ -650,19 +650,24 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      # Reports rather than gates, and it is the one half of this job that
-      # still does.
+      # Blocking, through the same kind of gate as govulncheck above.
       #
-      # npm audit reports 1 critical and 9 high, every one of which only a
-      # Next 16 and next-intl 4 migration resolves — both breaking changes, and
-      # a piece of work of their own. The critical one is a denial of service in
-      # the Image Optimizer, which this application disables
-      # (images.unoptimized in next.config.mjs), so it is not reachable here.
+      # This was `npm audit --audit-level=high` with continue-on-error, which
+      # is the arrangement that reads well and does nothing: between two
+      # readings of that log the count went from ten advisories to fourteen,
+      # and the comment here explaining them became wrong without anybody
+      # noticing. It said all of them needed Next 16 or next-intl 4; in fact
+      # one was fixable on the spot with no breaking change, and five more
+      # belong to the Tailwind 4 toolchain, a migration it did not mention.
       #
-      # Gating on it today would mean a red pipeline on every commit until that
-      # migration lands, which teaches everyone to ignore the pipeline. It
-      # becomes blocking with the migration, not before.
+      # Blocking on all of them outright is not possible: `braces` has no
+      # fixed version at all — 3.0.3 is both the latest release and the one
+      # the advisory names — so the pipeline could never be green, which
+      # teaches everyone to ignore it. So the gate holds the exceptions, each
+      # with a reason and a review date, and fails on anything else, on an
+      # exception past its date, on one that has since gained a non-breaking
+      # fix, on one claiming to be build-time-only while package.json lists it
+      # as a runtime dependency, and on a scan that could not run.
       - name: npm audit
         working-directory: frontend
-        continue-on-error: true
-        run: npm audit --audit-level=high
+        run: python3 scripts/npm-audit-gate.py
