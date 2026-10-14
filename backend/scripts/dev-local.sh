@@ -444,6 +444,11 @@ infra_kafka() {
 		transaction.state.log.replication.factor=1
 		transaction.state.log.min.isr=1
 		auto.create.topics.enable=true
+		# A topic the producer creates on the fly takes this, not EnsureTopic's
+		# setting — which is how six of the eight topics ended up with a single
+		# partition while the two the consumer ensures had six. A partition is
+		# read by one consumer of a group, so one partition is a ceiling.
+		num.partitions=${CRP_KAFKA_PARTITIONS:-6}
 	EOF
 	if [[ ! -f "$data/meta.properties" ]]; then
 		local uuid; uuid="$("$KAFKA_HOME/bin/kafka-storage.sh" random-uuid)"

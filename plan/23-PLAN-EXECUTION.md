@@ -187,6 +187,14 @@ de 100 K EPS, ou le changer**.
 > a pris **525 586 événements de retard**, soit plus d'une heure, pendant
 > laquelle aucune détection nouvelle n'est sortie. C'est une caractéristique à
 > dire à un exploitant, pas à découvrir en production.
+>
+> **US-CDF-STR-004 est faite depuis** : les sujets naissent avec six partitions,
+> `EnsureTopic` élève ceux qui existaient déjà, et le gain est mesuré —
+> **189 ev/s avec une instance du pipeline, 349 avec deux, soit ×1,85**. Le
+> plafond n'est donc plus topologique. Ce qui reste à instruire est le coût
+> unitaire d'un événement : à ~5 ms de traitement, atteindre 100 K EPS
+> demanderait de l'ordre de cinq cents instances, ce qui se traite dans le
+> traitement, pas dans la topologie.
 
 ---
 

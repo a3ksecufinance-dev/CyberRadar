@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/event"
@@ -355,13 +357,52 @@ func (c *Consumer) Stats() kafka.ReaderStats {
 // How long to wait for a topic to exist and elect a leader before giving up.
 const topicReadyWait = 60 * time.Second
 
-// EnsureTopic creates a topic if it is missing and waits until it has a leader.
+// DefaultPartitions is how many partitions a topic is created with.
+//
+// It was one, and one is a ceiling rather than a default: a Kafka partition is
+// read by exactly one consumer of a group, so a single-partition topic cannot
+// be shared however many instances of a service are deployed — nine of ten
+// would sit idle. Measuring the platform found this before a customer did
+// (docs/22-mesures.md).
+//
+// Six is a starting point, not a tuning: it is the number of consumers that
+// can share the work, so it has to be at least the largest instance count
+// anybody plans to run, and raising it later rebalances keys across
+// partitions. Six costs nothing noticeable on one broker and leaves room to
+// grow to six instances without touching the topics again.
+const DefaultPartitions = 6
+
+// Partitions reads the partition count a deployment wants.
+//
+// Environment rather than a config struct: EnsureTopic is called from thirty
+// services and from the test helpers, and threading a new field through all of
+// them to carry one number would be the larger change.
+func Partitions() int {
+	raw := os.Getenv("KAFKA_PARTITIONS")
+	if raw == "" {
+		return DefaultPartitions
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return DefaultPartitions
+	}
+	return n
+}
+
+// EnsureTopic creates a topic if it is missing, raises its partition count if
+// it is below what this deployment asks for, and waits until it has a leader.
 //
 // Creation is idempotent: a topic that already exists comes back as
 // TopicAlreadyExists, which is success. The wait is what matters as much as the
 // creation — CreateTopics returns once the controller has accepted the record,
 // before the partition has a leader, and a reader or writer that arrives in
 // that window behaves as if the topic were not there.
+//
+// The partition raise is what makes the setting mean anything after the first
+// run. CreateTopics does nothing to a topic that exists, so a platform that
+// had run once with one partition would have kept it for ever, silently, and
+// the only sign would have been throughput that refused to improve however
+// many instances were added.
 func EnsureTopic(brokers []string, topic string, wait time.Duration, logger zerolog.Logger) error {
 	if len(brokers) == 0 || topic == "" {
 		return errors.New("a broker address and a topic are required")
@@ -373,9 +414,10 @@ func EnsureTopic(brokers []string, topic string, wait time.Duration, logger zero
 	}
 	defer conn.Close() //nolint:errcheck // closing on the way out
 
+	want := Partitions()
 	switch err := conn.CreateTopics(kafka.TopicConfig{
 		Topic:             topic,
-		NumPartitions:     1,
+		NumPartitions:     want,
 		ReplicationFactor: 1,
 	}); {
 	case err == nil, errors.Is(err, kafka.TopicAlreadyExists):
@@ -383,6 +425,14 @@ func EnsureTopic(brokers []string, topic string, wait time.Duration, logger zero
 		// Not fatal on its own: a cluster that forbids creation may still have
 		// the topic, and the wait below is what decides.
 		logger.Warn().Err(err).Str("topic", topic).Msg("kafka_topic_not_created")
+	}
+
+	if err := raisePartitions(brokers[0], topic, want, logger); err != nil {
+		// Also not fatal: a managed cluster may refuse, and a platform that
+		// runs on fewer partitions than it wanted is slower, not broken. It is
+		// said out loud rather than swallowed.
+		logger.Warn().Err(err).Str("topic", topic).Int("wanted", want).
+			Msg("kafka_partitions_not_raised")
 	}
 
 	deadline := time.Now().Add(wait)
@@ -401,4 +451,46 @@ func EnsureTopic(brokers []string, topic string, wait time.Duration, logger zero
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// raisePartitions brings an existing topic up to want, and never down.
+//
+// Kafka cannot reduce a partition count — the request is refused — so this
+// only ever grows one, and says nothing when the topic is already wide enough.
+// Growing redistributes future keys across the new partitions; it does not
+// move what is already written, which is why it is safe to do on a running
+// platform and why the ordering a key buys is only ever per partition.
+func raisePartitions(broker, topic string, want int, logger zerolog.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	conn, err := kafka.DialContext(ctx, "tcp", broker)
+	if err != nil {
+		return fmt.Errorf("reach %s: %w", broker, err)
+	}
+	parts, err := conn.ReadPartitions(topic)
+	cerr := conn.Close()
+	if err != nil {
+		return fmt.Errorf("read the partitions of %s: %w", topic, err)
+	}
+	if cerr != nil {
+		return fmt.Errorf("close the connection to %s: %w", broker, cerr)
+	}
+	if len(parts) >= want {
+		return nil
+	}
+
+	client := &kafka.Client{Addr: kafka.TCP(broker)}
+	res, err := client.CreatePartitions(ctx, &kafka.CreatePartitionsRequest{
+		Topics: []kafka.TopicPartitionsConfig{{Name: topic, Count: int32(want)}},
+	})
+	if err != nil {
+		return fmt.Errorf("raise %s from %d to %d partitions: %w", topic, len(parts), want, err)
+	}
+	if topicErr, ok := res.Errors[topic]; ok && topicErr != nil {
+		return fmt.Errorf("raise %s from %d to %d partitions: %w", topic, len(parts), want, topicErr)
+	}
+	logger.Info().Str("topic", topic).Int("from", len(parts)).Int("to", want).
+		Msg("kafka_partitions_raised")
+	return nil
 }

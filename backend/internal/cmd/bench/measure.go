@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -237,48 +238,104 @@ func (b *bench) syntheticEvent(now time.Time) string {
 // hundred events a second "sustained", while the pipeline fell half a million
 // events behind and detection stopped working for a quarter of an hour.
 func (b *bench) consumed(ctx context.Context) (int64, error) {
-	client := &kafka.Client{Addr: kafka.TCP(b.brokers[0])}
-	res, err := client.OffsetFetch(ctx, &kafka.OffsetFetchRequest{
-		GroupID: pipelineGroup,
-		Topics:  map[string][]int{event.TopicNormalized: {0}},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("ask what %s has committed: %w", pipelineGroup, err)
-	}
-	for _, parts := range res.Topics {
-		for _, pt := range parts {
-			if pt.CommittedOffset >= 0 {
-				return pt.CommittedOffset, nil
-			}
-		}
-	}
-	return 0, nil
+	return b.committedAcross(ctx, pipelineGroup, event.TopicNormalized)
 }
 
-const pipelineGroup = "crp-pipeline"
+// partitionsOf lists a topic's partition numbers.
+//
+// Every offset this bench reads has to be summed over them. Reading partition
+// zero alone was right while every topic had one partition and silently wrong
+// the moment they had six: the first ladder run after partitioning reported
+// that the pipeline had consumed 667 of 4000 events, which is 4000/6 — a
+// perfect measurement of one sixth of the work, and a regression that never
+// happened.
+func (b *bench) partitionsOf(ctx context.Context, topic string) ([]int, error) {
+	conn, err := kafka.DialContext(ctx, "tcp", b.brokers[0])
+	if err != nil {
+		return nil, fmt.Errorf("reach the broker: %w", err)
+	}
+	parts, err := conn.ReadPartitions(topic)
+	cerr := conn.Close()
+	if err != nil {
+		return nil, fmt.Errorf("read the partitions of %s: %w", topic, err)
+	}
+	if cerr != nil {
+		return nil, fmt.Errorf("close the broker connection: %w", cerr)
+	}
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		out = append(out, p.ID)
+	}
+	sort.Ints(out)
+	return out, nil
+}
 
-// topicEnds reads the end offset of the topics the verdict rests on, from the
-// broker rather than from anything the platform reports about itself.
-func (b *bench) topicEnds(ctx context.Context) (map[string]int64, error) {
-	out := map[string]int64{}
-	for _, topic := range []string{event.TopicNormalized, event.TopicDLQ} {
-		conn, err := kafka.DialLeader(ctx, "tcp", b.brokers[0], topic, 0)
+// endAcross is how much has been written to a topic, over every partition.
+func (b *bench) endAcross(ctx context.Context, topic string) (int64, error) {
+	ids, err := b.partitionsOf(ctx, topic)
+	if err != nil {
+		// A topic nothing has written to yet does not exist, and that is an
+		// offset of zero rather than a failure — the dead-letter topic is in
+		// that state on a healthy platform.
+		return 0, nil
+	}
+	var total int64
+	for _, id := range ids {
+		conn, err := kafka.DialLeader(ctx, "tcp", b.brokers[0], topic, id)
 		if err != nil {
-			// A topic nothing has written to yet does not exist, and that is
-			// an offset of zero rather than a failure — the dead-letter topic
-			// is in that state on a healthy platform.
-			out[topic] = 0
 			continue
 		}
 		last, err := conn.ReadLastOffset()
 		cerr := conn.Close()
 		if err != nil {
-			return nil, fmt.Errorf("read the end of %s: %w", topic, err)
+			return 0, fmt.Errorf("read the end of %s[%d]: %w", topic, id, err)
 		}
 		if cerr != nil {
-			return nil, fmt.Errorf("close the connection to %s: %w", topic, cerr)
+			return 0, fmt.Errorf("close the connection to %s[%d]: %w", topic, id, cerr)
 		}
-		out[topic] = last
+		total += last
+	}
+	return total, nil
+}
+
+// committedAcross is how far a group has read a topic, over every partition.
+func (b *bench) committedAcross(ctx context.Context, group, topic string) (int64, error) {
+	ids, err := b.partitionsOf(ctx, topic)
+	if err != nil {
+		return 0, nil
+	}
+	client := &kafka.Client{Addr: kafka.TCP(b.brokers[0])}
+	res, err := client.OffsetFetch(ctx, &kafka.OffsetFetchRequest{
+		GroupID: group,
+		Topics:  map[string][]int{topic: ids},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("ask what %s has committed on %s: %w", group, topic, err)
+	}
+	var total int64
+	for _, parts := range res.Topics {
+		for _, pt := range parts {
+			if pt.CommittedOffset > 0 {
+				total += pt.CommittedOffset
+			}
+		}
+	}
+	return total, nil
+}
+
+const pipelineGroup = "crp-pipeline"
+
+// topicEnds reads how much has been written to the topics the verdict rests
+// on, from the broker rather than from anything the platform reports about
+// itself, and over every partition.
+func (b *bench) topicEnds(ctx context.Context) (map[string]int64, error) {
+	out := map[string]int64{}
+	for _, topic := range []string{event.TopicNormalized, event.TopicDLQ} {
+		end, err := b.endAcross(ctx, topic)
+		if err != nil {
+			return nil, err
+		}
+		out[topic] = end
 	}
 	return out, nil
 }
@@ -380,36 +437,13 @@ func (b *bench) engineLag(ctx context.Context) (int64, error) {
 }
 
 func (b *bench) stageLag(ctx context.Context, group, topic string) (int64, error) {
-	conn, err := kafka.DialLeader(ctx, "tcp", b.brokers[0], topic, 0)
+	end, err := b.endAcross(ctx, topic)
 	if err != nil {
-		return 0, fmt.Errorf("reach the broker: %w", err)
+		return 0, err
 	}
-	end, err := conn.ReadLastOffset()
-	cerr := conn.Close()
+	committed, err := b.committedAcross(ctx, group, topic)
 	if err != nil {
-		return 0, fmt.Errorf("read the end of %s: %w", topic, err)
-	}
-	if cerr != nil {
-		return 0, fmt.Errorf("close the broker connection: %w", cerr)
-	}
-
-	client := &kafka.Client{Addr: kafka.TCP(b.brokers[0])}
-	res, err := client.OffsetFetch(ctx, &kafka.OffsetFetchRequest{
-		GroupID: group,
-		Topics:  map[string][]int{topic: {0}},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("ask what %s has committed: %w", group, err)
-	}
-	committed := int64(-1)
-	for _, parts := range res.Topics {
-		for _, pt := range parts {
-			committed = pt.CommittedOffset
-		}
-	}
-	if committed < 0 {
-		// Nothing committed yet: everything on the topic is still to read.
-		return end, nil
+		return 0, err
 	}
 	lag := end - committed
 	if lag < 0 {

@@ -48,40 +48,64 @@ rafale, la plateforme accepte tout et détecte en retard.** Une rafale de
 plus d'une heure de rattrapage, pendant laquelle aucune détection nouvelle
 n'est sortie.
 
-### Le plafond est structurel, pas matériel
+### Le plafond était structurel — il ne l'est plus
 
-```
-crp.events.normalized    1 partition
-crp.events.enriched      1 partition
-crp.events.alerts        1 partition
-…                        1 partition
-```
+À la première mesure, tous les sujets avaient **une seule partition**. Dans un
+groupe de consommateurs Kafka, une partition n'est lue que par un seul
+consommateur : déployer dix instances du pipeline n'en aurait fait travailler
+qu'une, les neuf autres restant inactives. Le débit ne s'augmentait qu'en
+rendant un seul processus plus rapide.
 
-`internal/pkg/kafka/consumer.go` crée chaque sujet avec `NumPartitions: 1`.
-Dans un groupe de consommateurs Kafka, **une partition n'est lue que par un
-seul consommateur**. Déployer dix instances du pipeline n'en ferait donc
-travailler qu'une ; les neuf autres resteraient inactives.
+C'est corrigé (US-CDF-STR-004). Les sujets naissent avec six partitions,
+`KAFKA_PARTITIONS` le règle, et `EnsureTopic` **élève** le compte d'un sujet
+déjà créé — sans quoi une plateforme ayant tourné une fois aurait gardé sa
+partition unique pour toujours, sans autre symptôme qu'un débit refusant de
+s'améliorer quel qu'ait été le nombre d'instances ajoutées.
 
-Le débit du pipeline ne s'augmente aujourd'hui qu'en rendant un seul processus
-plus rapide. **C'est la première chose à changer** avant toute discussion de
-dimensionnement, et c'est un changement de topologie, pas d'infrastructure.
+**Mesuré, sur la même machine :**
+
+| Instances du pipeline | Débit tenu | Plafond |
+|---|---|---|
+| 1 | 189 ev/s | 400 ev/s |
+| 2 | **349 ev/s** | 600 ev/s |
+
+**×1,85 en doublant les instances.** Avant le changement, le facteur aurait été
+de 1,0. Les journaux des deux instances confirment le partage : la seconde a
+traité 12 216 des 24 000 événements du palier.
+
+Le reste de l'écart au facteur 2 est la machine — quatre cœurs déjà partagés
+entre vingt-neuf services, l'infrastructure et le banc.
+
+> **Ce qui reste séquentiel.** Chaque instance traite **un message à la fois** :
+> `FetchMessage` → traitement → `commit`. À 190 ev/s par instance, le traitement
+> d'un événement coûte environ 5 ms. Le débit s'obtient donc aujourd'hui en
+> ajoutant des instances, jusqu'à six — au-delà, il faudra soit plus de
+> partitions, soit un traitement concurrent dans le processus, qui est un
+> changement de sémantique de commit et non un réglage.
 
 ## La réponse à la question des 100 K EPS
 
 Le plan d'exécution demandait une décision explicite : tenir le chiffre de
 100 000 événements par seconde, ou le changer.
 
-**Il ne peut pas être tenu dans la topologie actuelle**, et le matériel n'y
-changerait rien : une partition par sujet plafonne le pipeline à un processus.
-Avant de citer un ordre de grandeur devant un client, il faut
+Les deux premières étapes sont faites : les sujets sont partitionnés, et la
+mise à l'échelle est mesurée à ×1,85 pour deux instances. **Le chiffre ne peut
+toujours pas être annoncé**, mais pour une raison différente et plus saine : il
+reste à l'extrapoler sur du matériel de production, ce qu'aucune mesure prise
+sur quatre cœurs partagés ne permet.
 
-1. partitionner les sujets du pipeline, et vérifier que plusieurs instances
-   se répartissent réellement les partitions ;
-2. relancer `make bench` et constater le gain ;
-3. seulement alors extrapoler, sur du matériel de production.
+Ce qu'on peut dire aujourd'hui, et qui est vrai :
 
-Tant que ces trois étapes ne sont pas faites, le chiffre à citer est celui
-qu'on a mesuré, avec sa machine.
+- le débit **s'additionne** avec les instances, jusqu'au nombre de partitions ;
+- une instance traite ~190 ev/s sur quatre cœurs partagés avec toute la
+  plateforme ;
+- atteindre 100 000 ev/s demanderait, à ce coût unitaire, de l'ordre de
+  500 instances — autrement dit le coût par événement doit baisser, pas
+  seulement le nombre de machines augmenter.
+
+Ce dernier point est l'arbitrage à instruire, et il se traite dans le
+traitement d'un événement, pas dans la topologie. Tant qu'il ne l'est pas, le
+chiffre à citer est celui qu'on a mesuré, avec sa machine.
 
 ## La méthode, et pourquoi elle est ainsi
 
