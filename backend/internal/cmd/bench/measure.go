@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/event"
+	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -631,8 +632,32 @@ func (b *bench) alertFor(ctx context.Context, entity string, since time.Time) (b
 // A ladder measures what the platform accepts; this measures what it
 // processes, which is the smaller and more useful of the two. With no sender
 // competing for the machine, the rate a backlog drains at is the pipeline's
-// own throughput.
-func (b *bench) reportLag(ctx context.Context) error {
+// own throughput — and it is the only figure that answers what one event
+// costs, because the ladder's answer mixes in the generator, the collector
+// and the cores they share.
+//
+// With -lag-backlog it makes its own backlog rather than waiting for one,
+// writing straight to the normalized topic so that the collector is not in
+// the measurement. With it at zero it observes whatever backlog is there.
+//
+// Two conditions, both learned by getting them wrong:
+//
+//   - Exactly one pipeline instance must be running. Partitions are shared
+//     between the instances of a group, so a second one left running silently
+//     halves what this attributes to the first. A measured ×2.4 improvement
+//     once read as ×1.06 for exactly that reason.
+//   - Nothing else may run on the machine, a compilation included. On four
+//     shared cores a parallel `go test` moves the figure by more than most of
+//     the changes worth measuring.
+func (b *bench) reportLag(ctx context.Context, backlog int) error {
+	if backlog > 0 {
+		published, err := b.fillNormalized(ctx, backlog)
+		if err != nil {
+			return fmt.Errorf("remplissage du sujet: %w", err)
+		}
+		fmt.Printf("   %d événements mis en attente en %s\n", backlog, published.Round(time.Millisecond))
+	}
+
 	first, err := b.engineLag(ctx)
 	if err != nil {
 		return err
@@ -643,28 +668,106 @@ func (b *bench) reportLag(ctx context.Context) error {
 		return nil
 	}
 
+	// Sampled once a second rather than taken as one delta over a minute: a
+	// single delta averages over any change of regime inside it, and the
+	// regime does change — a run that read 300 ev/s for its first thirty
+	// seconds and 110 for the rest would report 205, a rate it never held.
 	const observe = 60 * time.Second
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(observe):
+	rates := make([]float64, 0, int(observe/time.Second))
+	prev := first
+	deadline := time.Now().Add(observe)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+		now, err := b.engineLag(ctx)
+		if err != nil {
+			return err
+		}
+		rates = append(rates, float64(prev-now))
+		prev = now
+		if now <= engineIdleLag {
+			break
+		}
 	}
 
-	second, err := b.engineLag(ctx)
-	if err != nil {
-		return err
+	fmt.Printf("   retard restant   %d événements\n", prev)
+	if len(rates) == 0 {
+		return nil
 	}
-	drained := first - second
-	fmt.Printf("   retard après %s  %d événements\n", observe, second)
-	if drained <= 0 {
+	rate := median(rates)
+	if rate <= 0 {
 		fmt.Printf("   le retard ne diminue pas — le pipeline n'avance plus, ou reçoit autant qu'il traite\n")
 		return nil
 	}
-	rate := float64(drained) / observe.Seconds()
-	fmt.Printf("   drainage         %.0f ev/s  (%d événements en %s)\n", rate, drained, observe)
-	if second > 0 {
+	fmt.Printf("   drainage         %.0f ev/s médians sur %d relevés — %.1f ms par événement\n",
+		rate, len(rates), 1000/rate)
+	if prev > engineIdleLag {
 		fmt.Printf("   à ce rythme       %s pour rattraper\n",
-			time.Duration(float64(second)/rate*float64(time.Second)).Round(time.Second))
+			time.Duration(float64(prev)/rate*float64(time.Second)).Round(time.Second))
 	}
 	return nil
+}
+
+// fillNormalized writes events straight to the normalized topic.
+//
+// Straight, and not through the collector: the collector accepts far faster
+// than the pipeline consumes, so sending through it would measure the two
+// together and attribute the slower one's cost to the pair.
+func (b *bench) fillNormalized(ctx context.Context, n int) (time.Duration, error) {
+	w := &kafka.Writer{
+		Addr:         kafka.TCP(b.brokers...),
+		Topic:        event.TopicNormalized,
+		Balancer:     &kafka.LeastBytes{},
+		BatchSize:    500,
+		BatchTimeout: 10 * time.Millisecond,
+		RequiredAcks: kafka.RequireOne,
+	}
+	defer w.Close()
+
+	tenant := uuid.NewString()
+	batch := make([]kafka.Message, 0, 500)
+	began := time.Now()
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := w.WriteMessages(ctx, batch...); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		return nil
+	}
+	for i := 0; i < n; i++ {
+		e := event.NormalizedEvent{
+			EventID:       uuid.New(),
+			TenantID:      tenant,
+			Timestamp:     time.Now().UTC(),
+			IngestedAt:    time.Now().UTC(),
+			Source:        "bench-lag",
+			SourceType:    "bench-lag",
+			ConnectorID:   benchConnectorID,
+			Action:        "login",
+			Category:      event.CategoryIAM,
+			Severity:      event.SeverityLow,
+			Outcome:       event.OutcomeSuccess,
+			SchemaVersion: 1,
+		}
+		raw, err := json.Marshal(e)
+		if err != nil {
+			return 0, err
+		}
+		batch = append(batch, kafka.Message{Key: []byte(e.EventID.String()), Value: raw})
+		if len(batch) == cap(batch) {
+			if err := flush(); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return 0, err
+	}
+	return time.Since(began), nil
 }

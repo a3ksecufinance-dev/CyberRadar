@@ -1,13 +1,14 @@
 # Les trois chiffres
 
-> Mesurés le 13 octobre 2026 avec `make bench`, sur la machine décrite plus
+> Mesurés le 14 octobre 2026 avec `make bench`, sur la machine décrite plus
 > bas. **Ce sont des mesures, pas des spécifications.** La commande est dans le
 > dépôt pour être relancée sur le matériel d'un client ; c'est elle qui engage,
 > pas le nombre ci-dessous.
 
 | | Mesuré | Comment |
 |---|---|---|
-| **Débit d'ingestion** | **276 ev/s tenus** · plafond à 400 ev/s | Échelle de paliers, verdict pris sur ce que le pipeline a **consommé** |
+| **Débit d'ingestion** | **376 ev/s tenus** · plafond à 600 ev/s | Échelle de paliers, verdict pris sur ce que le pipeline a **consommé** |
+| **Coût d'un événement** | **3,6 ms**, une instance | Retard créé puis drainé, relevé chaque seconde (`-only lag`) |
 | **Latence API p95** | **10 ms** seule · **51 ms** à 8 requêtes en vol | 500 requêtes après échauffement, mesure côté client |
 | **Temps de détection** | **p50 443 ms** · p95 624 ms | De l'événement remis au collecteur à l'alerte lisible par l'API |
 
@@ -77,11 +78,110 @@ Le reste de l'écart au facteur 2 est la machine — quatre cœurs déjà partag
 entre vingt-neuf services, l'infrastructure et le banc.
 
 > **Ce qui reste séquentiel.** Chaque instance traite **un message à la fois** :
-> `FetchMessage` → traitement → `commit`. À 190 ev/s par instance, le traitement
-> d'un événement coûte environ 5 ms. Le débit s'obtient donc aujourd'hui en
-> ajoutant des instances, jusqu'à six — au-delà, il faudra soit plus de
-> partitions, soit un traitement concurrent dans le processus, qui est un
-> changement de sémantique de commit et non un réglage.
+> `FetchMessage` → traitement → `commit`. Le débit s'obtient donc en ajoutant
+> des instances, jusqu'à six — au-delà, il faudra soit plus de partitions, soit
+> un traitement concurrent dans le processus, qui est un changement de
+> sémantique de commit et non un réglage.
+
+### Les 5 ms par événement étaient une fenêtre d'attente
+
+Le point précédent laissait une question ouverte : à ~5 ms par événement,
+atteindre 100 K EPS demanderait des centaines d'instances. La question était
+donc *où passent ces 5 ms* — et la réponse n'était dans aucun des endroits
+attendus. Ni l'enrichissement, ni le rapprochement d'indicateurs, ni
+l'écriture ClickHouse, qui est tamponnée par lots de mille.
+
+Elles passaient dans le **producteur Kafka**. `kafka-go` garde un lot ouvert
+pendant `BatchTimeout` — 5 ms — en espérant qu'un autre message le rejoigne,
+pour amortir l'aller-retour sur plusieurs messages à la fois. C'est le bon
+réglage pour un producteur appelé par beaucoup de goroutines : une poignée de
+requêtes HTTP concurrentes remplit le lot bien avant l'échéance.
+
+C'est le mauvais réglage pour la boucle du pipeline, qui est séquentielle.
+Aucun second message ne peut rejoindre le lot : la seule goroutine qui
+pourrait en envoyer un est précisément celle qui attend. La fenêtre entière
+est donc payée **sur chaque événement**.
+
+Mesuré isolément, un `Publish` séquentiel coûte **6,35 ms** avec la fenêtre à
+5 ms et **1,75 ms** avec la fenêtre à 1 ms — neuf exécutions, écart maximal de
+0,05 ms. `ProducerConfig.BatchTimeout` rend la fenêtre réglable ; le pipeline
+la met à 1 ms, le défaut ne bouge pas pour les autres producteurs, qui eux ont
+de la concurrence à amortir.
+
+**Mesuré de bout en bout, une instance, retard créé puis drainé :**
+
+| Fenêtre de lot | Débit drainé | Coût d'un événement |
+|---|---|---|
+| 5 ms | 124 ev/s | 8,1 ms |
+| **1 ms** | **298 ev/s** | **3,4 ms** |
+| 5 ms, repassé en dernier | 126 ev/s | 8,0 ms |
+
+Les trois paliers ci-dessus lisent l'offset validé du **pipeline** seul.
+`-only lag` suit le plus en retard des deux étages, pipeline et moteur de
+règles, et rend donc un peu moins — 278 ev/s, 3,6 ms — pour la même machine
+dans le même état. L'écart est la définition, pas la mesure.
+
+**×2,4.** Le gain de bout en bout (4,7 ms par événement) correspond à
+l'économie mesurée isolément sur le `Publish` (4,6 ms) à 0,1 ms près : les deux
+instruments, indépendants, donnent la même réponse. Le troisième palier reprend
+le premier réglage en dernier, pour que l'ordre des essais n'explique pas
+l'écart.
+
+Sur l'échelle de paliers, le même changement porte le débit tenu de **276 à
+376 ev/s** et le plafond de 400 à 600.
+
+### Comment cette mesure a failli être fausse trois fois
+
+Elle mérite d'être écrite, parce que chacune des trois erreurs produisait un
+résultat crédible.
+
+**Deux instances au lieu d'une.** Le script d'échange d'instance tuait le shell
+qui enveloppait le processus, pas le processus. Les deux versions tournaient
+donc ensemble et se partageaient les partitions. L'échelle a rendu 294 contre
+311 ev/s : « le changement ne sert à rien », conclusion qui aurait été publiée.
+Le même changement vaut ×2,4 une fois une seule instance en marche.
+
+**Une compilation en parallèle.** Un `go test -race` lancé pendant un relevé :
+sur quatre cœurs partagés, il déplace le chiffre plus que la plupart des
+changements qu'on cherche à mesurer.
+
+**L'échelle elle-même.** Elle ne pouvait pas répondre à la question. Elle
+mesure ce que la plateforme *accepte*, à travers le générateur, le collecteur
+et les cœurs partagés. Pour le coût d'un événement *dans le pipeline*, il faut
+un retard créé directement sur le sujet normalisé et drainé sans personne en
+face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
+plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
+les changements de régime qu'il contient.
+
+## Deux pertes silencieuses, trouvées en lisant le chemin chaud
+
+Chercher où passaient les millisecondes voulait dire lire `Handle` ligne à
+ligne. Deux défauts s'y trouvaient, sans rapport avec la performance, et tous
+deux de la même espèce : un événement disparaissait et rien ne le disait.
+
+**Le tampon ClickHouse était partagé sans verrou.** La boucle de consommation
+appelle `Write`, qui ajoute au tampon ; une goroutine distincte appelle `Flush`
+toutes les cinq secondes, qui le vide. Les deux touchaient la même tranche sans
+synchronisation. Un ajout et une troncature qui s'entrelacent perdent des
+événements que le consommateur a **déjà validés comme traités** : ils ne
+reviendront pas. Le détecteur de courses de Go le confirme sur l'ancien code,
+et reste muet sur le nouveau.
+
+**Un échec de publication était journalisé puis oublié.** Le sujet enrichi est
+ce que lit le moteur de règles. Si la publication échouait, le code écrivait
+une ligne de journal et retournait `nil` — l'offset était validé, et
+l'événement sortait définitivement du chemin de détection. C'est la panne la
+plus discrète possible pour une plateforme dont le métier est de ne rien
+manquer.
+
+Il part maintenant en file de rebut, et n'est pas rejoué : ClickHouse détient
+déjà la ligne et `cyber_events` est un `MergeTree` simple, donc un rejeu la
+dupliquerait. Et si la file de rebut échoue à son tour, l'erreur remonte et
+l'offset n'est pas validé — c'est le seul cas où une ligne en double vaut mieux
+que l'alternative, qui est de perdre l'événement sans trace nulle part.
+
+Quatre tests couvrent ces chemins, chacun vérifié par mutation : remis dans
+leur état d'avant, ils échouent.
 
 ## La réponse à la question des 100 K EPS
 
@@ -97,15 +197,16 @@ sur quatre cœurs partagés ne permet.
 Ce qu'on peut dire aujourd'hui, et qui est vrai :
 
 - le débit **s'additionne** avec les instances, jusqu'au nombre de partitions ;
-- une instance traite ~190 ev/s sur quatre cœurs partagés avec toute la
-  plateforme ;
-- atteindre 100 000 ev/s demanderait, à ce coût unitaire, de l'ordre de
-  500 instances — autrement dit le coût par événement doit baisser, pas
-  seulement le nombre de machines augmenter.
+- une instance traite ~300 ev/s sur quatre cœurs partagés avec toute la
+  plateforme, soit 3,4 ms par événement ;
+- ce coût a déjà été divisé par 2,4 en retirant une attente qui ne servait à
+  rien ; ce qui reste est du travail réel, pas de l'attente.
 
-Ce dernier point est l'arbitrage à instruire, et il se traite dans le
-traitement d'un événement, pas dans la topologie. Tant qu'il ne l'est pas, le
-chiffre à citer est celui qu'on a mesuré, avec sa machine.
+À 3,4 ms par événement, 100 000 ev/s demanderait encore de l'ordre de
+340 instances. Le coût unitaire doit donc continuer de baisser, et la prochaine
+étape connue n'est plus un réglage : c'est le traitement concurrent dans le
+processus, qui change la sémantique du commit. Tant qu'elle n'est pas
+instruite, le chiffre à citer reste celui qu'on a mesuré, avec sa machine.
 
 ## La méthode, et pourquoi elle est ainsi
 

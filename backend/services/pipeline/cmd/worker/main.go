@@ -20,6 +20,13 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// sequentialBatchTimeout is the batch window given to the producers this
+// worker calls from its consumer loop. It is short on purpose: see where it is
+// used. One millisecond still lets a burst coalesce when the ClickHouse writer
+// flushes and several events queue behind it, without charging every event a
+// full window.
+const sequentialBatchTimeout = time.Millisecond
+
 func main() {
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger := log.With().Str("service", "pipeline-worker").Logger()
@@ -52,15 +59,23 @@ func main() {
 	defer cancel()
 
 	// ── Kafka producers ───────────────────────────────────────────────────────
+	// The consumer loop is sequential — fetch, handle, commit — so these two
+	// producers are called with one message at a time, and the caller waits.
+	// The default batch window is then pure dead time: no second message can
+	// arrive to share it, because the only goroutine that could send one is the
+	// one blocked waiting. Measured on the dev machine, the window alone was
+	// most of the per-event cost.
 	enrichedPub := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
-		Brokers: brokers,
-		Topic:   event.TopicEnriched,
+		Brokers:      brokers,
+		Topic:        event.TopicEnriched,
+		BatchTimeout: sequentialBatchTimeout,
 	}, logger)
 	defer enrichedPub.Close()
 
 	alertPub := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
-		Brokers: brokers,
-		Topic:   event.TopicAlerts,
+		Brokers:      brokers,
+		Topic:        event.TopicAlerts,
+		BatchTimeout: sequentialBatchTimeout,
 	}, logger)
 	defer alertPub.Close()
 

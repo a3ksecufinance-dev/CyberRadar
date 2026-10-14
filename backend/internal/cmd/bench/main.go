@@ -78,7 +78,8 @@ func main() {
 		rounds   = flag.Int("detection-rounds", 10, "how many times the detection path is timed")
 		deadline = flag.Duration("detection-deadline", 90*time.Second, "how long one detection round waits for its alert")
 		drain    = flag.Duration("drain-deadline", 10*time.Minute, "how long to let the rule engine catch up before measuring detection")
-		only     = flag.String("only", "", "run one of: throughput, latency, detection")
+		only     = flag.String("only", "", "run one of: throughput, latency, detection, lag")
+		lagFill  = flag.Int("lag-backlog", 0, "with -only lag: events to put on the normalized topic first, instead of waiting for a backlog")
 		shared   = flag.Bool("shared-machine", true, "the platform runs on this same machine, and the report must say so")
 	)
 	flag.Parse()
@@ -127,7 +128,7 @@ func main() {
 	// yields the figure the ladder cannot: watching a backlog drain measures
 	// what the pipeline processes per second with no sender in the way.
 	if *only == "lag" {
-		if err := b.reportLag(ctx); err != nil {
+		if err := b.reportLag(ctx, *lagFill); err != nil {
 			fatal(err)
 		}
 		return

@@ -62,3 +62,14 @@ func ms(d time.Duration) string {
 	}
 	return fmt.Sprintf("%.2f s", d.Seconds())
 }
+
+// median of a set of rates. Separate from sample, which holds durations and
+// reports tail quantiles; a drain rate wants its middle, not its tail.
+func median(xs []float64) float64 {
+	if len(xs) == 0 {
+		return 0
+	}
+	s := append([]float64(nil), xs...)
+	sort.Float64s(s)
+	return s[len(s)/2]
+}

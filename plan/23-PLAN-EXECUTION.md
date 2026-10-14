@@ -191,10 +191,29 @@ de 100 K EPS, ou le changer**.
 > **US-CDF-STR-004 est faite depuis** : les sujets naissent avec six partitions,
 > `EnsureTopic` élève ceux qui existaient déjà, et le gain est mesuré —
 > **189 ev/s avec une instance du pipeline, 349 avec deux, soit ×1,85**. Le
-> plafond n'est donc plus topologique. Ce qui reste à instruire est le coût
+> plafond n'est donc plus topologique. Ce qui restait à instruire était le coût
 > unitaire d'un événement : à ~5 ms de traitement, atteindre 100 K EPS
 > demanderait de l'ordre de cinq cents instances, ce qui se traite dans le
 > traitement, pas dans la topologie.
+>
+> **L2b a instruit ce coût**, et l'essentiel n'était pas du traitement : c'était
+> une attente. Le producteur Kafka gardait son lot ouvert 5 ms en espérant un
+> second message, alors que la boucle du pipeline est séquentielle et qu'aucun
+> second message ne pouvait arriver — la fenêtre était payée en entier sur
+> chaque événement. Fenêtre rendue réglable, mise à 1 ms dans le pipeline :
+> **124 → 298 ev/s drainés par instance, ×2,4**, et sur l'échelle **276 → 376
+> ev/s tenus**. Le coût unitaire passe de 8,1 à 3,4 ms.
+>
+> À ce coût, 100 K EPS demande encore ~340 instances. La prochaine étape n'est
+> plus un réglage : c'est le traitement concurrent dans le processus, qui
+> change la sémantique du commit et doit être arbitré comme tel.
+>
+> La lecture du chemin chaud qu'a demandée cette mesure a aussi trouvé **deux
+> pertes silencieuses** sans rapport avec la performance : le tampon ClickHouse
+> partagé entre deux goroutines sans verrou, et un échec de publication vers le
+> sujet enrichi journalisé puis oublié, offset validé. Les deux faisaient
+> disparaître des événements sans que rien ne le dise. Corrigées, avec quatre
+> tests vérifiés par mutation.
 
 ---
 
