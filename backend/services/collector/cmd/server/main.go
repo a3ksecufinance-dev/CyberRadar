@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +20,7 @@ import (
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/collector/internal/handler"
+	"github.com/cyberradar/platform/services/collector/internal/repository"
 	"github.com/cyberradar/platform/services/collector/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -60,7 +63,24 @@ func main() {
 	}, logger)
 	defer dlqProducer.Close()
 
-	collectorSvc := service.NewCollectorService(producer, dlqProducer, logger)
+	// ── ClickHouse, for what the collector learns about its sources ──────────
+	// The service held no database at all and therefore could not answer the
+	// first question an operator asks — which of my sources stopped sending.
+	// It reads crp_audit.cyber_events, which the pipeline fills, and writes
+	// crp_fabric.connectors, which held nothing until now.
+	chOpts, err := clickhouse.ParseDSN(mustEnv("CLICKHOUSE_DSN"))
+	if err != nil {
+		logger.Fatal().Err(err).Msg("clickhouse dsn parse failed")
+	}
+	chOpts.DialTimeout = 10 * time.Second
+	chConn, err := clickhouse.Open(chOpts)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("clickhouse open failed")
+	}
+	defer chConn.Close()
+
+	health := repository.NewHealthRepository(chConn)
+	collectorSvc := service.NewCollectorService(producer, dlqProducer, health, logger)
 	collectorHandler := handler.NewCollectorHandler(collectorSvc)
 
 	r := chi.NewRouter()

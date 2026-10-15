@@ -2,11 +2,13 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -15,6 +17,8 @@ import (
 	"github.com/cyberradar/platform/internal/pkg/authctx"
 	"github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/testinfra"
+	"github.com/cyberradar/platform/services/collector/internal/model"
+	"github.com/cyberradar/platform/services/collector/internal/repository"
 	"github.com/cyberradar/platform/services/collector/internal/service"
 )
 
@@ -48,7 +52,7 @@ func newAPI(t *testing.T) *api {
 	t.Cleanup(func() { _ = dlq.Close() })
 
 	r := chi.NewRouter()
-	NewCollectorHandler(service.NewCollectorService(producer, dlq, logger)).RegisterRoutes(r)
+	NewCollectorHandler(service.NewCollectorService(producer, dlq, &acceptingHealth{}, logger)).RegisterRoutes(r)
 	return &api{router: r, topic: f.Topic}
 }
 
@@ -68,6 +72,9 @@ var (
 	// A service account without the permission: refused the other way round.
 	serviceWithoutPermission = caller{tenant: tenantA, serviceID: "other-agent"}
 	anonymous                = caller{}
+	// A person who answers for the collection: no service account, holding
+	// the read permission. The one caller the source-health route is for.
+	analyst = caller{tenant: tenantA, perms: []string{"connectors:read"}}
 )
 
 func (a *api) do(t *testing.T, c caller, path string, body any) *httptest.ResponseRecorder {
@@ -301,5 +308,81 @@ func TestTheTenantComesFromTheTokenAndNotTheBody(t *testing.T) {
 	bare := httptest.NewRequest(http.MethodPost, "/events/ingest", nil)
 	if got := mustTenantID(bare); got != "" {
 		t.Errorf("mustTenantID on an unauthenticated request gave %q, want \"\"", got)
+	}
+}
+
+// acceptingHealth stands in for the store so that the routes can be exercised
+// without ClickHouse. What it keeps is not under test here — see the service
+// package for that — only that the handler reaches it.
+type acceptingHealth struct{}
+
+func (acceptingHealth) RecordHeartbeat(context.Context, string, *model.ConnectorHeartbeat) error {
+	return nil
+}
+
+func (acceptingHealth) Sources(context.Context, string, time.Duration, time.Duration) ([]repository.SourceHealth, error) {
+	return []repository.SourceHealth{}, nil
+}
+
+// ─── Source health is a read, for a person ──────────────────────────────────
+
+// newAuthAPI builds the routes without a broker.
+//
+// An authorisation test has no business starting Kafka: what it checks is who
+// the router lets through, and the producers are never reached on the paths
+// it exercises. Needing a container to answer "may an analyst read this"
+// would make the answer available only where Docker is.
+func newAuthAPI(t *testing.T) *api {
+	t.Helper()
+	r := chi.NewRouter()
+	NewCollectorHandler(service.NewCollectorService(nil, nil, &acceptingHealth{}, zerolog.New(io.Discard))).
+		RegisterRoutes(r)
+	return &api{router: r}
+}
+
+// get is like do, for the one route that is not a POST.
+func (a *api) get(t *testing.T, c caller, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if c.tenant != "" {
+		req = req.WithContext(authctx.With(req.Context(), authctx.Identity{
+			TenantID:    uuid.MustParse(c.tenant),
+			Permissions: c.perms,
+			ServiceID:   c.serviceID,
+		}))
+	}
+	rec := httptest.NewRecorder()
+	a.router.ServeHTTP(rec, req)
+	return rec
+}
+
+// "Which of my sources went quiet" is asked by whoever answers for the
+// collection, not by an agent. Behind RequireServiceAccount — where this route
+// was first written, by inheriting the group above — no person could ask it.
+func TestSourceHealthIsReadableByAPersonHoldingTheReadPermission(t *testing.T) {
+	a := newAuthAPI(t)
+
+	if rec := a.get(t, analyst, "/sources/health"); rec.Code != http.StatusOK {
+		t.Fatalf("a person holding connectors:read got %d, want 200: %s", rec.Code, rec.Body)
+	}
+}
+
+// And it is a read: the right to inject events into the detection pipeline is
+// not the right to see which sources are silent. Granting one to obtain the
+// other would hand an analyst the ability to write telemetry.
+func TestSourceHealthDoesNotAcceptTheIngestPermissionInstead(t *testing.T) {
+	a := newAuthAPI(t)
+
+	for _, c := range []struct {
+		name   string
+		caller caller
+	}{
+		{"an agent holding only events:ingest", agent},
+		{"a person holding only events:ingest", personWithPermission},
+		{"nobody", anonymous},
+	} {
+		if rec := a.get(t, c.caller, "/sources/health"); rec.Code == http.StatusOK {
+			t.Errorf("%s was allowed to read source health", c.name)
+		}
 	}
 }

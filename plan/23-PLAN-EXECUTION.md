@@ -258,7 +258,7 @@ de 100 K EPS, ou le changer**.
 
 | Bloc | US | Charge |
 |---|---:|---:|
-| Cadre de connecteurs : SDK, cycle de vie, santé, configuration, mise à jour | `US-CDF-CON-001` à `004` | 50 j |
+| Cadre de connecteurs : SDK, cycle de vie, **santé** ✓, configuration, mise à jour | `US-CDF-CON-001` à `004` | 50 j |
 | Découverte passive depuis les logs | `US-CAI-DIS-003` | 20 j |
 | Découverte réseau active | `US-CAI-DIS-001`, `002` | 25 j |
 | Connecteurs cloud AWS, Azure, GCP | `US-CAI-DIS-004` | 40 j |
@@ -299,8 +299,20 @@ domaines en aval alimentés par lui.
 >
 > La donnée est là, la question n'est jamais posée. Le premier bloc de L3 est
 > donc un **chemin de lecture sur la santé des sources**, pas un nouveau
-> contrat d'ingestion. Reste à décider où il vit — c'est un choix de surface
-> produit, pas de mesure.
+> contrat d'ingestion.
+>
+> **Fait (L3a), dans le collecteur.** `GET /api/v1/sources/health` répond, et
+> le heartbeat ne ment plus : il écrit dans `crp_fabric.connectors` ou échoue,
+> au lieu de répondre `ok` sans rien garder. Vérifié contre la plateforme
+> vivante — la route a nommé `demo-connector` muet depuis 19 h 31, et un
+> heartbeat a produit la première ligne que cette table ait jamais contenue.
+> L'état d'une source vient des événements et non d'une colonne : elle est
+> vivante parce qu'elle a parlé. Les seuils sont des paramètres de la requête,
+> un pare-feu et un flux trimestriel ne se taisant pas à la même échelle.
+>
+> Reste du bloc : l'enregistrement d'un connecteur (nom, configuration,
+> version) et sa mise à jour, qui sont de l'écriture et demandent une
+> interface, pas seulement une route.
 
 ---
 

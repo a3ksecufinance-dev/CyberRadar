@@ -301,6 +301,10 @@ service_env() {
 				"MFA_ISSUER=CyberRadar") ;;
 		audit-service)
 			SVC_ENV+=("CLICKHOUSE_DSN=$CLICKHOUSE_DSN") ;;
+		collector-service)
+			# The collector reads crp_audit.cyber_events to answer which
+			# sources have gone quiet, and writes crp_fabric.connectors.
+			SVC_ENV+=("CLICKHOUSE_DSN=$CLICKHOUSE_DSN") ;;
 		ueba-service)
 			SVC_ENV+=("CLICKHOUSE_DSN=$CLICKHOUSE_DSN" "REDIS_URL=redis://:$REDIS_PASS@localhost:6379/8") ;;
 		siem-service)

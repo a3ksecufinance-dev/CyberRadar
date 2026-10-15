@@ -412,6 +412,9 @@ services:
       - CRP_TRUSTED_PROXY_CIDRS=${CRP_TRUSTED_PROXY_CIDRS:-}
       - SERVICE_PORT=8005
       - KAFKA_BROKERS=kafka:9092
+      # Reads crp_audit.cyber_events to answer which sources have gone quiet,
+      # writes crp_fabric.connectors.
+      - CLICKHOUSE_DSN=clickhouse://crp_user:${CLICKHOUSE_PASSWORD-crp_password_dev}@clickhouse:9000/crp_audit
       - JWT_PUBLIC_KEY_PATH=/etc/crp/jwt/public.pem
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - LOG_LEVEL=debug
@@ -420,6 +423,8 @@ services:
       - "8005:8005"
     depends_on:
       kafka:
+        condition: service_healthy
+      clickhouse:
         condition: service_healthy
     networks:
       - crp-network

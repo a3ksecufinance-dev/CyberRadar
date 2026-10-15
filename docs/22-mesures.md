@@ -153,6 +153,61 @@ face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
 plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
 les changements de régime qu'il contient.
 
+## Ce qui s'est tu
+
+`GET /api/v1/sources/health`, sur le collecteur.
+
+Pour un SOC, « mon pare-feu n'envoie plus rien depuis trois heures » est la
+question qu'on pose en premier : une source muette n'est pas un trou dans un
+graphique, c'est du trafic que personne ne regarde, et c'est ainsi que les
+incidents réels passent à travers.
+
+La plateforme ne savait pas y répondre, alors qu'elle en détenait tous les
+éléments — chaque événement porte son `connector_id` et sa `source`. Mesuré
+sur le domaine de démonstration au moment de l'écrire :
+
+```
+source            événements   silencieux depuis   état
+crp-bench                560   47m22s              late
+demo-connector          1357   19h31m43s           silent
+```
+
+Le `demo-connector` était muet depuis dix-neuf heures et rien ne le disait.
+
+**L'état vient des événements, pas d'une colonne.** Une source est vivante
+parce qu'elle a parlé, pas parce qu'une ligne l'affirme. Les seuils `late` et
+`silent` sont des paramètres de la requête : un pare-feu et un flux de
+conformité trimestriel se taisent à des échelles sans rapport, et une seule
+paire de valeurs ne peut pas convenir aux deux.
+
+**Le heartbeat ne ment plus.** `POST /events/heartbeat` acceptait un rapport de
+vivacité, écrivait une ligne de journal, répondait `{"status":"ok"}` et ne
+stockait rien. Un agent était donc informé que son signal avait été reçu
+alors qu'aucune trace n'en était gardée. Il écrit maintenant dans
+`crp_fabric.connectors` — table qui existait avec les bons champs et n'avait
+jamais rien contenu — et, sans magasin où l'écrire, il échoue au lieu de
+prétendre.
+
+Un test de l'époque s'appelait `TestHeartbeatIsAcceptedAndRecordsNothingYet`
+et épinglait le défaut dans son propre commentaire : *« la vivacité d'un
+connecteur est une ligne de journal et non une ligne de table, donc aucun
+tableau de bord ne peut dire qu'un connecteur s'est tu »*. Le manque était
+connu ; il est fermé.
+
+### Une permission d'écriture pour une lecture
+
+Première version de la route : placée dans le groupe existant, donc derrière
+`RequireServiceAccount` **et** `events:ingest`. Deux erreurs dans une seule
+ligne. Un compte de service exigé pour une question que seule une personne
+pose, et le droit d'**injecter** des événements dans la chaîne de détection
+exigé pour **lire** quelles sources sont muettes — donner le second pour
+obtenir le premier aurait remis à un analyste la capacité d'écrire de la
+télémétrie.
+
+La route est désormais seule, derrière `connectors:read`. Deux tests
+l'épinglent, vérifiés par mutation : remise dans le groupe précédent, la
+personne autorisée est refusée et l'agent passe.
+
 ## Les cinq autres KPI
 
 `./bin/bench -only kpi`. La première chose à en dire est qu'ils ne sont pas

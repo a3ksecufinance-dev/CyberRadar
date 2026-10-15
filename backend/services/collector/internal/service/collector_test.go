@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/internal/pkg/testinfra"
 	"github.com/cyberradar/platform/services/collector/internal/model"
+	"github.com/cyberradar/platform/services/collector/internal/repository"
 )
 
 // The ingestion path, end to end: a batch of raw lines in, normalized events on
@@ -72,7 +74,7 @@ func newIngestion(t *testing.T) *ingestion {
 	}
 
 	return &ingestion{
-		svc:      NewCollectorService(producer, dlqProducer, quiet()),
+		svc:      NewCollectorService(producer, dlqProducer, &recordingHealth{}, quiet()),
 		events:   reader(f.Topic),
 		dead:     reader(dlqTopic),
 		topic:    f.Topic,
@@ -279,7 +281,7 @@ func TestWithoutADeadLetterTopicTheEventIsDroppedNotMisrouted(t *testing.T) {
 	}, quiet())
 	t.Cleanup(func() { _ = producer.Close() })
 
-	svc := NewCollectorService(producer, nil, quiet())
+	svc := NewCollectorService(producer, nil, &recordingHealth{}, quiet())
 	resp, err := svc.Ingest(context.Background(), tenant, &model.IngestRequest{
 		ConnectorID: uuid.NewString(),
 		Source:      "x", SourceType: "firewall",
@@ -368,10 +370,15 @@ func TestEveryFormatSurvivesTheWholePath(t *testing.T) {
 	i.empty(t, i.dead, "the dead-letter topic")
 }
 
-// A heartbeat is accepted and reported as handled. It writes nothing yet, which
-// is worth pinning: a connector's liveness is currently a log line and not a
-// row, so no dashboard can say a connector has gone quiet.
-func TestHeartbeatIsAcceptedAndRecordsNothingYet(t *testing.T) {
+// A heartbeat is recorded, and is not an event.
+//
+// This test used to be called TestHeartbeatIsAcceptedAndRecordsNothingYet and
+// pinned the opposite: "a connector's liveness is currently a log line and not
+// a row, so no dashboard can say a connector has gone quiet". That gap is
+// closed, and what remains worth pinning is the other half — a liveness report
+// is not telemetry and must not reach the event topic, where it would be
+// counted as traffic from the very source it is reporting about.
+func TestAHeartbeatIsRecordedAndIsNotAnEvent(t *testing.T) {
 	i := newIngestion(t)
 
 	err := i.svc.Heartbeat(context.Background(), tenant, &model.ConnectorHeartbeat{
@@ -386,4 +393,76 @@ func TestHeartbeatIsAcceptedAndRecordsNothingYet(t *testing.T) {
 	}
 	i.empty(t, i.events, "the event topic after a heartbeat")
 	i.empty(t, i.dead, "the dead-letter topic after a heartbeat")
+}
+
+// ─── The heartbeat, and what it is for ───────────────────────────────────────
+
+// recordingHealth keeps what the collector hands it.
+type recordingHealth struct {
+	beats []model.ConnectorHeartbeat
+	err   error
+}
+
+func (h *recordingHealth) RecordHeartbeat(_ context.Context, _ string, hb *model.ConnectorHeartbeat) error {
+	if h.err != nil {
+		return h.err
+	}
+	h.beats = append(h.beats, *hb)
+	return nil
+}
+
+func (h *recordingHealth) Sources(context.Context, string, time.Duration, time.Duration) ([]repository.SourceHealth, error) {
+	return nil, h.err
+}
+
+// A liveness report exists to be kept. It used to be written to the log and
+// dropped, and the agent was answered "ok" — so the platform could not say
+// which of its sources had gone quiet, which is the first question a SOC
+// asks about its collection.
+func TestAHeartbeatIsStored(t *testing.T) {
+	health := &recordingHealth{}
+	svc := NewCollectorService(nil, nil, health, quiet())
+
+	hb := &model.ConnectorHeartbeat{
+		ConnectorID:  "11111111-1111-4111-8111-111111111111",
+		Source:       "pare-feu-siege",
+		SourceType:   "firewall",
+		EventsQueued: 12,
+		Version:      "1.4.0",
+	}
+	if err := svc.Heartbeat(context.Background(), "tenant-a", hb); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+
+	if len(health.beats) != 1 {
+		t.Fatalf("the store received %d beats, want 1", len(health.beats))
+	}
+	if got := health.beats[0].Source; got != "pare-feu-siege" {
+		t.Errorf("stored source %q, want %q", got, "pare-feu-siege")
+	}
+}
+
+// Without a store there is nothing to keep the beat in, and answering "ok"
+// would be the same lie in a different place.
+func TestAHeartbeatWithNowhereToGoIsRefused(t *testing.T) {
+	svc := NewCollectorService(nil, nil, nil, quiet())
+	err := svc.Heartbeat(context.Background(), "tenant-a", &model.ConnectorHeartbeat{
+		ConnectorID: "11111111-1111-4111-8111-111111111111",
+		Source:      "pare-feu-siege",
+	})
+	if err == nil {
+		t.Fatal("Heartbeat accepted a report it could not keep")
+	}
+}
+
+// A store that fails must not be reported as a success either.
+func TestAFailedStoreIsNotReportedAsReceived(t *testing.T) {
+	svc := NewCollectorService(nil, nil, &recordingHealth{err: errors.New("clickhouse down")}, quiet())
+	err := svc.Heartbeat(context.Background(), "tenant-a", &model.ConnectorHeartbeat{
+		ConnectorID: "11111111-1111-4111-8111-111111111111",
+		Source:      "pare-feu-siege",
+	})
+	if err == nil {
+		t.Fatal("Heartbeat reported success although the store refused the beat")
+	}
 }
