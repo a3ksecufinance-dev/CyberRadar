@@ -161,7 +161,7 @@ Les 8 KPI du master plan et les 14 exigences non fonctionnelles, dont
 |---|---:|
 | Banc de charge reproductible (injection syslog et API, jeu de données réaliste) | 15 j |
 | Les trois chiffres : débit d'ingestion, latence API p95, temps de détection — **faits** ✓ (`make bench`, [docs/22-mesures.md](../docs/22-mesures.md)) | 10 j |
-| Les cinq autres KPI : MTTD, MTTR sous charge, réduction des faux positifs, couverture d'actifs, disponibilité | 10 j |
+| Les cinq autres KPI : MTTD, MTTR sous charge, réduction des faux positifs, couverture d'actifs, disponibilité — **quatre faits** ✓, la réduction des faux positifs demande un corpus (`bench -only kpi`) | 10 j |
 | Les NFR qui deviennent vérifiables : scaling horizontal exercé, reprise < 15 min, latence pipeline < 3 s, `US-CTI-ENR-002` enrichissement < 500 ms — **faits** ✓ (`bench -only nfr`) | 10 j |
 
 **Sortie** : les 8 KPI publiés dans un tableau de bord, avec la configuration
@@ -230,8 +230,25 @@ de 100 K EPS, ou le changer**.
 > chiffre par instance, parce que ne pas le savoir avait failli faire publier
 > un ×1,06 là où il y avait un ×2,4.
 >
-> Restent les cinq autres KPI (MTTD, MTTR sous charge, réduction des faux
-> positifs, couverture d'actifs, disponibilité).
+> **L2d a traité les cinq autres KPI** (`bench -only kpi`), en séparant ce
+> qu'ils sont : couverture d'actifs **33 / 125** et disponibilité **100 %** sur
+> la fenêtre relevée sont des propriétés de l'installation ; MTTD **153 min** et
+> MTTR **180 min** sont des calculs du produit sur six incidents, et portent
+> leur dénominateur parce que six incidents ne font pas une moyenne ; la
+> **réduction des faux positifs n'est pas mesurable ici** et la réponse honnête
+> est de dire ce qu'elle demande — un corpus d'alertes étiquetées et le taux de
+> l'outil remplacé, tous deux collectés sur un site pendant une double
+> exploitation.
+>
+> Chercher à mesurer la couverture a révélé qu'elle était **sous-déclarée de
+> 43 %** : l'inventaire ne marquait un actif comme vu que si l'adresse IP de
+> l'événement figurait dans sa fiche, et ignorait le nom d'hôte. 53 actifs
+> émettaient, leurs 53 noms étaient déjà inventoriés, 30 seulement étaient
+> comptés. Corrigé, avec deux tests vérifiés par mutation dont un sur la
+> frontière de locataire, et vérifié sur la plateforme vivante.
+>
+> **L2 est clos** à l'exception de la réduction des faux positifs, qui est un
+> travail de données sur site et non de mesure.
 
 ---
 

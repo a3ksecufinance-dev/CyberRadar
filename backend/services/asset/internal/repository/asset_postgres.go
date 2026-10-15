@@ -352,12 +352,28 @@ func (r *AssetRepository) RiskProfile(ctx context.Context, tenantID uuid.UUID) (
 	return &p, nil
 }
 
-// UpdateLastSeen touches the last_seen_at timestamp.
+// UpdateLastSeen touches the last_seen_at timestamp of assets carrying an IP.
 func (r *AssetRepository) UpdateLastSeen(ctx context.Context, tenantID uuid.UUID, ip string) error {
 	const q = `
 		UPDATE assets SET last_seen_at = NOW()
 		WHERE tenant_id = $1 AND $2 = ANY(ip_addresses) AND deleted_at IS NULL`
 	_, err := r.db.Exec(ctx, q, tenantID, ip)
+	return err
+}
+
+// UpdateLastSeenByHostname does the same for an asset named by hostname.
+//
+// Matching on the address alone leaves an asset that names itself silent.
+// Measured on the demonstration estate: fifty-three assets produced telemetry
+// and every one of their hostnames was already in the inventory, yet only
+// thirty were marked as seen — the other twenty-three sent events from an
+// address the inventory did not list. Coverage then reads 24 % where it is
+// 42 %, and the assets that look like blind spots are the ones being watched.
+func (r *AssetRepository) UpdateLastSeenByHostname(ctx context.Context, tenantID uuid.UUID, hostname string) error {
+	const q = `
+		UPDATE assets SET last_seen_at = NOW()
+		WHERE tenant_id = $1 AND hostname = $2 AND deleted_at IS NULL`
+	_, err := r.db.Exec(ctx, q, tenantID, hostname)
 	return err
 }
 

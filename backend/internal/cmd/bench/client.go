@@ -25,6 +25,7 @@ var services = map[string]struct {
 	"collector": {8005, "COLLECTOR_SERVICE_URL"},
 	"asset":     {8006, "ASSET_SERVICE_URL"},
 	"siem":      {8008, "SIEM_SERVICE_URL"},
+	"ir":        {8026, "IR_SERVICE_URL"},
 }
 
 func baseURLs() map[string]string {

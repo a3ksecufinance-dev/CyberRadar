@@ -88,11 +88,12 @@ func main() {
 		rounds   = flag.Int("detection-rounds", 10, "how many times the detection path is timed")
 		deadline = flag.Duration("detection-deadline", 90*time.Second, "how long one detection round waits for its alert")
 		drain    = flag.Duration("drain-deadline", 10*time.Minute, "how long to let the rule engine catch up before measuring detection")
-		only     = flag.String("only", "", "run one of: throughput, latency, detection, lag, nfr")
+		only     = flag.String("only", "", "run one of: throughput, latency, detection, lag, nfr, kpi")
 		lagFill  = flag.Int("lag-backlog", 0, "with -only lag: events to put on the normalized topic first, instead of waiting for a backlog")
 		nfrCount = flag.Int("nfr-events", 200, "with -only nfr: events timed through the whole chain")
 		nfrFill  = flag.Int("nfr-backlog", 6000, "with -only nfr: backlog used to measure the recovery rate (0 to skip)")
 		nfrRate  = flag.Int("nfr-rate", 10, "with -only nfr: events per second, kept well under capacity so latency is not queueing")
+		kpiWin   = flag.Duration("kpi-window", 20*time.Second, "with -only kpi: how long availability is probed")
 		shared   = flag.Bool("shared-machine", true, "the platform runs on this same machine, and the report must say so")
 	)
 	flag.Parse()
@@ -169,6 +170,18 @@ func main() {
 		fmt.Printf("     Mesuré ici : 348 ev/s à une instance, 597 à deux, soit ×1,72.\n\n")
 		return
 	}
+	// The five KPI the master plan names beyond the bench's own three. A mode
+	// of its own because they are not all the same kind of thing — two the
+	// platform's own properties, two numbers it computes about a customer's
+	// operations, one that cannot be answered from here at all.
+	if *only == "kpi" {
+		fmt.Printf("\033[1m── Les cinq autres KPI\033[0m\n\n")
+		if err := b.reportKPI(ctx, *kpiWin); err != nil {
+			fatal(err)
+		}
+		return
+	}
+
 	var report strings.Builder
 
 	if run("throughput") {

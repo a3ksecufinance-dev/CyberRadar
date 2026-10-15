@@ -153,6 +153,77 @@ face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
 plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
 les changements de régime qu'il contient.
 
+## Les cinq autres KPI
+
+`./bin/bench -only kpi`. La première chose à en dire est qu'ils ne sont pas
+tous la même sorte de chose, et qu'un tableau qui les aligne sans le dire
+trompe son lecteur.
+
+| KPI | Mesuré | Ce que le chiffre est |
+|---|---|---|
+| Couverture d'actifs | **33 / 125 — 26 %** | une propriété de l'installation, mesurable |
+| Disponibilité | **100 %** sur la fenêtre relevée | une propriété de l'installation, bornée par la fenêtre |
+| MTTD | **153 min** sur 6 incidents | un calcul du produit, sur les incidents du client |
+| MTTR | **180 min** sur 6 incidents | idem |
+| Réduction des faux positifs | **non mesurable en l'état** | — |
+
+**La couverture compte les muets au dénominateur.** Un actif inventorié qui
+n'émet rien est un angle mort ; le compter comme couvert transforme une mesure
+en réconfort. 26 % est un chiffre de jeu de démonstration, pas une
+caractéristique du produit.
+
+**La disponibilité est bornée par sa fenêtre, et la borne est imprimée avec
+elle.** Vingt secondes de relevés ne disent rien d'un chiffre annuel. Ce qui
+est établi est que la mesure existe, se prend sur les mêmes portes qu'un
+utilisateur — identité, collecte, inventaire, détection, réponse — et se
+reproduit.
+
+**MTTD et MTTR portent leur dénominateur.** Six incidents ne font pas une
+moyenne. Ce que ces deux lignes établissent est que le calcul s'exécute de
+bout en bout sur des enregistrements réels ; le chiffre, lui, sera celui du
+client sur ses incidents à lui. Publier 153 min comme une caractéristique
+produit serait un abus.
+
+**La réduction des faux positifs n'est pas mesurable ici, et c'est la réponse
+honnête.** Elle compare un taux à un autre et il manque les deux : un corpus
+d'alertes étiquetées vrai/faux par quelqu'un qui sait, et le taux de l'outil
+remplacé. Ni l'un ni l'autre ne se fabrique depuis une machine de
+développement ; les deux se collectent sur un site, pendant une période de
+double exploitation. Un chiffre produit ici serait inventé.
+
+### La couverture était sous-déclarée de 43 %
+
+En cherchant à la mesurer, un défaut du produit est apparu. L'inventaire ne
+marquait un actif comme vu que si **l'adresse IP** de l'événement figurait
+déjà dans sa fiche. Un événement qui nomme son hôte par son nom ne comptait
+pas.
+
+Sur le domaine de démonstration : **53 actifs produisaient de la télémétrie, et
+les 53 noms d'hôtes étaient déjà dans l'inventaire** — mais seuls 30 étaient
+marqués comme vus. Les 23 autres émettaient depuis une adresse que l'inventaire
+ne listait pas (DHCP, NAT, ou simplement une fiche saisie une fois). La
+couverture affichait 24 % là où elle valait 42 %, et les actifs qui
+ressemblaient à des angles morts étaient précisément ceux qu'on surveillait.
+
+Corrigé : un événement qui nomme son hôte marque cet hôte comme vu. Deux tests
+contre une vraie base, vérifiés par mutation, dont un sur la frontière de
+locataire — la télémétrie d'un client ne doit pas marquer comme vivant l'hôte
+homonyme d'un autre. Et vérifié sur la plateforme vivante : trois actifs
+« jamais vus » le sont devenus après un événement les nommant, émis depuis une
+adresse figurant dans aucun inventaire.
+
+### Un zéro qui n'en était pas un
+
+La première exécution de ce mode annonçait un inventaire vide et zéro
+incident, sur une base qui en contenait 125 et 6. La cause n'était pas la
+plateforme : le client du banc déballe déjà l'enveloppe standard, et mes
+structures de décodage en déclaraient une seconde. Aucun champ ne
+correspondait, tout lisait zéro, et rien ne signalait l'erreur.
+
+C'est la forme de panne la plus dangereuse d'un outil de mesure : il ne tombe
+pas, il rapporte zéro. Un zéro sur un tableau de bord de couverture se lit
+« rien à surveiller ».
+
 ## Les exigences non fonctionnelles, rendues vérifiables
 
 Le plan d'exécution en nomme quatre sous L2 et demande qu'elles **deviennent

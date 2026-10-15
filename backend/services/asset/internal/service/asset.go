@@ -177,6 +177,13 @@ func (s *AssetService) TouchLastSeen(ctx context.Context, tenantID uuid.UUID, ip
 	}
 }
 
+// TouchLastSeenByHostname does the same for an asset the event names.
+func (s *AssetService) TouchLastSeenByHostname(ctx context.Context, tenantID uuid.UUID, hostname string) {
+	if err := s.repo.UpdateLastSeenByHostname(ctx, tenantID, hostname); err != nil {
+		s.logger.Debug().Err(err).Str("hostname", hostname).Msg("last_seen_update_failed")
+	}
+}
+
 // UpsertDiscoveryCandidate records a new auto-detected host.
 func (s *AssetService) UpsertDiscoveryCandidate(ctx context.Context, tenantID uuid.UUID, ip, hostname, sourceType, connectorID string) {
 	if err := s.repo.UpsertDiscoveryCandidate(ctx, tenantID, ip, hostname, sourceType, connectorID); err != nil {

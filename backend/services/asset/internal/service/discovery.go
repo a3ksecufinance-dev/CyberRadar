@@ -41,6 +41,14 @@ func (w *DiscoveryWorker) handle(ctx context.Context, msg pkgkafka.Message) erro
 		return nil
 	}
 
+	// ── Touch last_seen_at for the asset the event names ─────────────────────
+	// By hostname as well as by address. An event that says which host it came
+	// from is evidence that host is alive, whatever address it used; keying
+	// only on the address leaves it counted as an unmonitored blind spot.
+	if e.AssetHostname != nil && *e.AssetHostname != "" {
+		w.assetSvc.TouchLastSeenByHostname(ctx, tenantID, *e.AssetHostname)
+	}
+
 	// ── Touch last_seen_at for known IPs ─────────────────────────────────────
 	if e.IPSource != nil && *e.IPSource != "" {
 		w.assetSvc.TouchLastSeen(ctx, tenantID, *e.IPSource)
