@@ -35,8 +35,17 @@ METHODS = ("Get", "Post", "Put", "Patch", "Delete", "Head", "Options")
 # Parentheses nested two deep: enough for authmw.RequirePermission("x:y").
 BAL = r'(?:[^()]|\((?:[^()]|\([^()]*\))*\))*'
 
+# \s* after the dot: gofmt breaks a long chain across lines, so
+#
+#     r.With(authmw.RequirePermission("connectors:read")).
+#             Get("/sources/health", h.SourceHealth)
+#
+# is the same route as the one-line form — and without this the generator saw
+# no route at all, the reference silently omitted it, and `make docs-api-check`
+# passed. A gate that misses what it is watching for is worse than none: the
+# collector's source-health route shipped undocumented and green.
 call_re = re.compile(
-    r'\br\.(?:With\((?P<with>' + BAL + r')\)\.)?(?P<m>' + "|".join(METHODS) + r')\(\s*"(?P<p>[^"]*)"')
+    r'\br\.(?:With\((?P<with>' + BAL + r')\)\.\s*)?(?P<m>' + "|".join(METHODS) + r')\(\s*"(?P<p>[^"]*)"')
 route_re = re.compile(r'\br\.(?:Route|Group)\(\s*(?:"(?P<p>[^"]*)")?\s*,?\s*func\s*\(')
 use_re = re.compile(r'\br\.Use\(\s*authmw\.RequirePermission(?P<by>ByMethod)?\(\s*"(?P<v>[^"]+)"')
 perm_re = re.compile(r'RequirePermission\(\s*"([^"]+)"')

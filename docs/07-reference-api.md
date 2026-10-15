@@ -4,7 +4,7 @@
 
 # Référence API
 
-> 477 routes sur 30 services.
+> 483 routes sur 30 services.
 > Dérivé du code, pas tenu à la main — voir `backend/scripts/gen-api-reference.py`.
 > Conventions, enveloppe de réponse et codes d'erreur : [`06-api.md`](06-api.md).
 
@@ -22,7 +22,7 @@ Chaque service expose en plus `GET /health`, sans authentification.
 | [`asset`](#asset) | 8006 | 11 |
 | [`attackpath`](#attackpath) | 8012 | 14 |
 | [`audit`](#audit) | 8003 | 4 |
-| [`collector`](#collector) | 8005 | 2 |
+| [`collector`](#collector) | 8005 | 3 |
 | [`compliance`](#compliance) | 8018 | 22 |
 | [`copilot`](#copilot) | 8016 | 13 |
 | [`cspm`](#cspm) | 8025 | 17 |
@@ -44,7 +44,7 @@ Chaque service expose en plus `GET /health`, sans authentification.
 | [`scs`](#scs) | 8027 | 21 |
 | [`siem`](#siem) | 8008 | 22 |
 | [`soar`](#soar) | 8014 | 14 |
-| [`tenant`](#tenant) | 8001 | 22 |
+| [`tenant`](#tenant) | 8001 | 27 |
 | [`ti`](#ti) | 8010 | 13 |
 | [`ueba`](#ueba) | 8009 | 8 |
 | [`vuln`](#vuln) | 8011 | 14 |
@@ -129,12 +129,13 @@ Sans API HTTP : `syslog` — voir [`09-ingestion.md`](09-ingestion.md).
 
 ## collector
 
-`:8005` · 2 routes
+`:8005` · 3 routes
 
 | Méthode | Chemin | Permission |
 |---|---|---|
 | `POST` | `/api/v1/events/heartbeat` | `events:ingest` |
 | `POST` | `/api/v1/events/ingest` | `events:ingest` |
+| `GET` | `/api/v1/sources/health` | `connectors:read` |
 
 ## compliance
 
@@ -657,7 +658,7 @@ Sans API HTTP : `syslog` — voir [`09-ingestion.md`](09-ingestion.md).
 
 ## tenant
 
-`:8001` · 22 routes
+`:8001` · 27 routes
 
 | Méthode | Chemin | Permission |
 |---|---|---|
@@ -669,6 +670,11 @@ Sans API HTTP : `syslog` — voir [`09-ingestion.md`](09-ingestion.md).
 | `PUT` | `/api/v1/behaviour-policies/active` | `ueba:write` |
 | `GET` | `/api/v1/behaviour-policies/history` | `ueba:read` |
 | `GET` | `/api/v1/behaviour-policies/presets` | `ueba:read` |
+| `GET` | `/api/v1/connectors` | `connectors:read` |
+| `POST` | `/api/v1/connectors` | `connectors:write` |
+| `DELETE` | `/api/v1/connectors/{connectorID}` | `connectors:delete` |
+| `GET` | `/api/v1/connectors/{connectorID}` | `connectors:read` |
+| `PATCH` | `/api/v1/connectors/{connectorID}` | `connectors:write` |
 | `GET` | `/api/v1/remediation-policies/active` | `vulnerabilities:read` |
 | `PUT` | `/api/v1/remediation-policies/active` | `vulnerabilities:write` |
 | `GET` | `/api/v1/remediation-policies/history` | `vulnerabilities:read` |
