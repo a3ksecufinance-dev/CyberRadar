@@ -153,6 +153,57 @@ face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
 plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
 les changements de régime qu'il contient.
 
+## Les exigences non fonctionnelles, rendues vérifiables
+
+Le plan d'exécution en nomme quatre sous L2 et demande qu'elles **deviennent
+vérifiables** — ce qui n'est pas la même chose qu'être tenues. Une exigence que
+personne ne sait mesurer n'est pas une exigence, c'est un espoir.
+
+`make bench` les mesure maintenant : `./bin/bench -only nfr`.
+
+| Exigence | Budget | Mesuré | |
+|---|---|---|---|
+| Latence du pipeline | 3 s | **p50 10 ms · p95 11 ms** | ✓ |
+| Enrichissement (`US-CTI-ENR-002`) | 500 ms | **< 11 ms** (borne) | ✓ |
+| Reprise après interruption | 15 min | **348 ev/s → 313 200 événements rattrapés** | ✓ |
+| Mise à l'échelle horizontale | — | **348 ev/s à une instance, 597 à deux — ×1,72** | ✓ |
+
+**La latence est celle d'une traversée, pas celle d'une file.** La première
+version de cette mesure envoyait ses deux cents événements d'un coup et lisait
+784 ms. Ce chiffre était juste et ne voulait rien dire : à 3,4 ms par
+événement, deux cents événements envoyés ensemble forment une file de sept
+dixièmes de seconde, et ce qui ressort est le temps de vidange d'une rafale.
+Les envois sont donc espacés, bien en dessous de ce qu'une instance tient, pour
+que la file reste vide et qu'il ne reste que la chaîne : collecteur, Kafka,
+pipeline. **10 ms.**
+
+**L'enrichissement est une borne, et c'est dit.** Il n'écrit pas d'horodatage,
+donc rien ne l'isole du reste de la chaîne. Ce qui est publié est la borne
+supérieure que la chaîne entière lui impose. Elle suffit : 11 ms contre un
+budget de 500. Un chiffre exact demanderait un champ `enriched_at` et sa
+migration, ce qui ne se justifiera que le jour où la borne cessera de suffire.
+
+**La reprise est dite en capacité, pas en durée.** Arrêter un service et le
+redémarrer est une procédure d'exploitant, pas une mesure de banc. Ce dont un
+exploitant a besoin est l'autre formulation de la même chose : *jusqu'où
+puis-je prendre du retard en restant dans le quart d'heure*. À une instance,
+313 200 événements.
+
+### Le banc compte les instances, et le dit
+
+La ligne la plus importante de ce mode n'est pas une mesure, c'est
+`instances du pipeline`. Elle est là parce que son absence a failli faire
+publier une conclusion fausse le jour même : deux instances tournaient
+ensemble, se partageaient les partitions, et l'amélioration mesurée à ×2,4
+s'est lue ×1,06. Le banc lit désormais le nombre de membres du groupe de
+consommateurs et **refuse de laisser attribuer un chiffre par instance sans
+dire combien il y en avait**.
+
+Le même piège s'est reproduit dans la lecture du sujet enrichi : les partitions
+lues l'une après l'autre, la première consommait tout le délai et la mesure
+rendait 34 événements sur 200 — exactement un sixième, pour six partitions.
+Les lectures sont concurrentes depuis.
+
 ## Le banc écrit dans le locataire de la démonstration
 
 À dire avant de lancer `make bench` sur une plateforme qui sert aussi à

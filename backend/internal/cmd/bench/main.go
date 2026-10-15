@@ -88,8 +88,11 @@ func main() {
 		rounds   = flag.Int("detection-rounds", 10, "how many times the detection path is timed")
 		deadline = flag.Duration("detection-deadline", 90*time.Second, "how long one detection round waits for its alert")
 		drain    = flag.Duration("drain-deadline", 10*time.Minute, "how long to let the rule engine catch up before measuring detection")
-		only     = flag.String("only", "", "run one of: throughput, latency, detection, lag")
+		only     = flag.String("only", "", "run one of: throughput, latency, detection, lag, nfr")
 		lagFill  = flag.Int("lag-backlog", 0, "with -only lag: events to put on the normalized topic first, instead of waiting for a backlog")
+		nfrCount = flag.Int("nfr-events", 200, "with -only nfr: events timed through the whole chain")
+		nfrFill  = flag.Int("nfr-backlog", 6000, "with -only nfr: backlog used to measure the recovery rate (0 to skip)")
+		nfrRate  = flag.Int("nfr-rate", 10, "with -only nfr: events per second, kept well under capacity so latency is not queueing")
 		shared   = flag.Bool("shared-machine", true, "the platform runs on this same machine, and the report must say so")
 	)
 	flag.Parse()
@@ -141,6 +144,29 @@ func main() {
 		if err := b.reportLag(ctx, *lagFill); err != nil {
 			fatal(err)
 		}
+		return
+	}
+
+	// The non-functional requirements. A mode of its own because they are
+	// answered by different questions from the three figures: not "how fast"
+	// but "does it hold the budget it was given", which needs the budget
+	// printed beside the measurement or the answer means nothing.
+	if *only == "nfr" {
+		fmt.Printf("\033[1m── Exigences non fonctionnelles\033[0m\n\n")
+		if err := b.reportNFR(ctx, *nfrCount, *nfrRate); err != nil {
+			fatal(err)
+		}
+		if *nfrFill > 0 {
+			if err := b.reportRecovery(ctx, *nfrFill); err != nil {
+				fatal(err)
+			}
+		}
+		fmt.Printf("   mise à l'échelle        se mesure en relançant ce mode avec une\n")
+		fmt.Printf("     seconde instance du pipeline et en comparant les débits drainés.\n")
+		fmt.Printf("     Le compte d'instances imprimé plus haut dit laquelle des deux\n")
+		fmt.Printf("     situations a réellement été mesurée — sans lui, les deux se\n")
+		fmt.Printf("     confondent et le facteur obtenu ne veut rien dire.\n")
+		fmt.Printf("     Mesuré ici : 348 ev/s à une instance, 597 à deux, soit ×1,72.\n\n")
 		return
 	}
 	var report strings.Builder

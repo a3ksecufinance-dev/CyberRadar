@@ -162,7 +162,7 @@ Les 8 KPI du master plan et les 14 exigences non fonctionnelles, dont
 | Banc de charge reproductible (injection syslog et API, jeu de données réaliste) | 15 j |
 | Les trois chiffres : débit d'ingestion, latence API p95, temps de détection — **faits** ✓ (`make bench`, [docs/22-mesures.md](../docs/22-mesures.md)) | 10 j |
 | Les cinq autres KPI : MTTD, MTTR sous charge, réduction des faux positifs, couverture d'actifs, disponibilité | 10 j |
-| Les NFR qui deviennent vérifiables : scaling horizontal exercé, reprise < 15 min, latence pipeline < 3 s, `US-CTI-ENR-002` enrichissement < 500 ms | 10 j |
+| Les NFR qui deviennent vérifiables : scaling horizontal exercé, reprise < 15 min, latence pipeline < 3 s, `US-CTI-ENR-002` enrichissement < 500 ms — **faits** ✓ (`bench -only nfr`) | 10 j |
 
 **Sortie** : les 8 KPI publiés dans un tableau de bord, avec la configuration
 matérielle qui les a produits. Et une décision explicite : **tenir le chiffre
@@ -214,6 +214,24 @@ de 100 K EPS, ou le changer**.
 > sujet enrichi journalisé puis oublié, offset validé. Les deux faisaient
 > disparaître des événements sans que rien ne le dise. Corrigées, avec quatre
 > tests vérifiés par mutation.
+>
+> **L2c a rendu les quatre NFR vérifiables** (`bench -only nfr`) : latence du
+> pipeline **p50 10 ms, p95 11 ms** contre un budget de 3 s ; enrichissement
+> **borné à 11 ms** contre 500 ms, borne qui suffit donc sans ajouter de champ
+> `enriched_at` ; reprise **313 200 événements rattrapés dans le quart
+> d'heure** à une instance ; mise à l'échelle **348 ev/s à une instance, 597 à
+> deux, ×1,72**.
+>
+> Deux corrections de méthode y ont été nécessaires, et chacune produisait
+> d'abord un chiffre crédible : la latence mesurée sur une rafale lisait 784 ms
+> alors qu'elle mesurait une file d'attente, et la lecture séquentielle des
+> partitions rendait 34 événements sur 200 — un sixième, pour six partitions.
+> Le banc imprime désormais **le nombre d'instances du pipeline** avant tout
+> chiffre par instance, parce que ne pas le savoir avait failli faire publier
+> un ×1,06 là où il y avait un ×2,4.
+>
+> Restent les cinq autres KPI (MTTD, MTTR sous charge, réduction des faux
+> positifs, couverture d'actifs, disponibilité).
 
 ---
 
