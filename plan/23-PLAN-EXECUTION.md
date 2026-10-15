@@ -272,6 +272,36 @@ de 100 K EPS, ou le changer**.
 **Sortie** : un parc réel découvert sans saisie manuelle, et les quatre
 domaines en aval alimentés par lui.
 
+> **Par où commencer, relevé sur l'installation plutôt que supposé.** Le
+> contrat de connecteur externe **existe déjà** et fonctionne : un connecteur
+> échange `client_id` / `client_secret` contre un jeton
+> (`/api/v1/auth/service-token`) puis publie ses événements au collecteur.
+> C'est ce que font le banc et le semeur de démonstration. Le premier bloc n'a
+> donc pas à inventer ce contrat.
+>
+> Ce qui manque est la **santé**, et le manque est précis :
+>
+> - `POST /events/heartbeat` accepte un rapport de vivacité, écrit une ligne de
+>   journal, répond `{"status":"ok"}` et **ne stocke rien**. L'appelant est
+>   informé que son signal a été reçu ; il ne l'a pas été.
+> - La table `crp_fabric.connectors` existe avec exactement les bons champs —
+>   `last_seen_at`, `events_total`, `events_failed`, `status` — et elle est
+>   **vide**. Rien ne l'écrit.
+> - Aucun service ne lit `crp_audit.cyber_events` : seul le pipeline y écrit.
+>   Il n'existe donc **aucun chemin de lecture** pour « quelle source s'est
+>   tue », alors que chaque événement porte son `connector_id` et sa `source`.
+>
+> Mesuré sur le domaine de démonstration : le connecteur `demo-connector` était
+> **silencieux depuis 19 heures** et rien dans la plateforme ne le disait. Pour
+> un SOC, « mon pare-feu n'envoie plus rien depuis trois heures » est la
+> question qu'on pose en premier : une source muette est un angle mort non
+> détecté, et c'est ainsi que les incidents réels passent à travers.
+>
+> La donnée est là, la question n'est jamais posée. Le premier bloc de L3 est
+> donc un **chemin de lecture sur la santé des sources**, pas un nouveau
+> contrat d'ingestion. Reste à décider où il vit — c'est un choix de surface
+> produit, pas de mesure.
+
 ---
 
 ### L4 — L'inventaire · ~170 j · 29 US
