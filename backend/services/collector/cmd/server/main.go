@@ -104,12 +104,18 @@ func main() {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		// No identity provider here: this service holds no PostgreSQL connection,
-		// so it cannot resolve what a person authenticated elsewhere may do, and
-		// the web interface never calls it — it serves service-to-service traffic,
-		// which carries the platform's own tokens. Giving it a pool would be the
-		// way to change that; authmw.ProviderFromEnv refuses without one rather
-		// than authenticating people and granting them nothing.
+		// No identity provider here: this service holds no PostgreSQL
+		// connection, so it cannot resolve a role into the permissions it
+		// grants. Giving it a pool would be the way to change that;
+		// authmw.ProviderFromEnv refuses without one rather than
+		// authenticating people and granting them nothing.
+		//
+		// That is a narrower limit than "no person calls this service", which
+		// is what this comment used to say and is no longer true: source
+		// health is read by whoever answers for the collection. A person's
+		// token carries its permissions, and RequirePermission reads them
+		// from the token, so the route authorises without resolving anything.
+		// What the missing pool costs is role resolution, not people.
 		r.Use(authmw.RequireJWT(jwtVerifier, logger))
 		collectorHandler.RegisterRoutes(r)
 	})
