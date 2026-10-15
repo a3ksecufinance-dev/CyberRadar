@@ -629,8 +629,8 @@ dépende d'une déclaration.
 | Couverture des dépôts de B3 | ~~0 %~~ → **71 à 83 %** sur les 15 | ≥ 60 % | `go test -cover ./internal/repository/` |
 | Chaîne de bout en bout | ~~aucune~~ → **verte, 5 à 65 s** ✓ | verte en CI | `make e2e-chain` |
 | Migrations rejouables | ~~non~~ → **oui, 49 à état** ✓ | deux applications sans erreur | `make migrate && make migrate` |
-| KPI mesurés | **0 / 8** | 8 | tableau de bord L2 |
-| NFR vérifiées | **0 / 14** | 14 | bancs L2 |
+| KPI mesurés | ~~0 / 8~~ → **7 / 8** ✓ | 8 | `make bench`, `bench -only kpi` |
+| NFR vérifiées | ~~0 / 14~~ → **5 / 14**, 3 partielles | 14 | `bench -only nfr` |
 | Tables sans code | ~~5 / 142~~ → **0 / 137** ✓ | 0 | script de [`22`](22-ECART-PREVU-MESURE.md) §3 |
 | Unités déployables | **32** | 8–10 | `ls bin` |
 | Secrets dans le dépôt | **oui** | 0 | `git ls-files \| grep -E '\.pem$\|\.key$'` |
@@ -638,6 +638,26 @@ dépende d'une déclaration.
 **Le premier est trompeur seul** : les US n'ont pas le même poids, et un lot
 peut avancer de 200 jours en fermant 9 US (L6). Suivre les huit ensemble, ou
 suivre la charge consommée par lot.
+
+**Le détail des 14 NFR**, parce que « 5 sur 14 » cache trois états différents :
+
+| NFR | État |
+|---|---|
+| `NFR-CDF-002` Latence pipeline < 3 s | ✓ **mesurée** — p95 11 ms |
+| `NFR-CDF-004` / `NFR-FND-002` Scaling horizontal | ✓ **mesurée** — ×1,72 à deux instances |
+| `NFR-FND-004` Recovery < 15 min | ✓ **mesurée** — 313 200 événements rattrapés |
+| `NFR-FND-005` Latence API < 200 ms | ✓ **mesurée** — p95 10 ms seule, 51 ms à 8 en vol |
+| `NFR-CAI-004` / `NFR-CDF-003` / `NFR-FND-001` Uptime 99,99 % | ◐ **partielle** — 100 % sur une fenêtre de secondes, ce qui ne dit rien d'un chiffre annuel. Il faut une sonde qui tourne en continu et un historique |
+| `NFR-CDF-001` 100 K EPS | ◐ **instruite, non tenue** — 376 ev/s sur quatre cœurs partagés ; l'extrapolation demande du matériel de production |
+| `NFR-CDF-005` Zéro perte de données | ◐ **deux pertes silencieuses corrigées** (L2b), mais aucune mesure ne l'établit encore |
+| `NFR-CAI-001` 1 M+ actifs | ✗ non mesurée |
+| `NFR-CAI-002` Découverte < 5 min | ✗ non mesurée — dépend de L3 |
+| `NFR-CAI-003` Précision > 95 % | ✗ non mesurée — dépend de L3 |
+| `NFR-FND-003` Zero downtime upgrade | ✗ non mesurée — dépend de L1 |
+
+Les quatre « ✓ » sont celles que la ligne L2 nommait. Les sept restantes
+dépendent d'un lot qui n'est pas fait, ou d'un dispositif qui tourne dans la
+durée — ce qu'une machine de développement ne fournit pas.
 
 ---
 
