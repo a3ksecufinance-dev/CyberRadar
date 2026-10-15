@@ -15,6 +15,7 @@ type SIEMService struct {
 	ruleRepo  *repository.RuleRepository
 	alertRepo *repository.AlertRepository
 	caseRepo  *repository.CaseRepository
+	eventRepo *repository.EventRepository
 	logger    zerolog.Logger
 }
 
@@ -23,9 +24,16 @@ func NewSIEMService(
 	ruleRepo *repository.RuleRepository,
 	alertRepo *repository.AlertRepository,
 	caseRepo *repository.CaseRepository,
+	eventRepo *repository.EventRepository,
 	logger zerolog.Logger,
 ) *SIEMService {
-	return &SIEMService{ruleRepo: ruleRepo, alertRepo: alertRepo, caseRepo: caseRepo, logger: logger}
+	return &SIEMService{
+		ruleRepo:  ruleRepo,
+		alertRepo: alertRepo,
+		caseRepo:  caseRepo,
+		eventRepo: eventRepo,
+		logger:    logger,
+	}
 }
 
 // ─── Rules ────────────────────────────────────────────────────────────────────
@@ -204,4 +212,19 @@ func (s *SIEMService) AddObservable(ctx context.Context, tenantID, caseID uuid.U
 		return nil, apierrors.Internal("add observable", err)
 	}
 	return obs, nil
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+// SearchEvents returns the normalized events matching the filter.
+//
+// The tenant on the filter comes from the authenticated caller, never from the
+// request, and the repository refuses a filter without one.
+func (s *SIEMService) SearchEvents(ctx context.Context, f model.EventFilter) ([]*model.Event, int64, error) {
+	return s.eventRepo.Search(ctx, f)
+}
+
+// GetEvent returns one event of this tenant.
+func (s *SIEMService) GetEvent(ctx context.Context, tenantID, eventID uuid.UUID) (*model.Event, error) {
+	return s.eventRepo.Get(ctx, tenantID, eventID)
 }

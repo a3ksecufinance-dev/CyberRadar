@@ -97,10 +97,14 @@ func main() {
 	// ── Repositories ──────────────────────────────────────────────────────────
 	ruleRepo := repository.NewRuleRepository(pool)
 	alertRepo := repository.NewAlertRepository(chConn)
+	// Reads crp_audit.cyber_events, which the pipeline fills. Until this
+	// existed nothing read that table: an analyst could see an alert and not
+	// the events around it.
+	eventRepo := repository.NewEventRepository(chConn)
 	caseRepo := repository.NewCaseRepository(pool)
 
 	// ── SIEM service ──────────────────────────────────────────────────────────
-	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, logger)
+	siemSvc := service.NewSIEMService(ruleRepo, alertRepo, caseRepo, eventRepo, logger)
 	siemHandler := handler.NewSIEMHandler(siemSvc)
 
 	// The detection content the platform ships, and the lineage from a tenant's

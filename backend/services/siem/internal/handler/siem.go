@@ -50,6 +50,18 @@ func (h *SIEMHandler) RegisterRoutes(r chi.Router) {
 		r.Post("/{alertID}/case", h.PromoteToCase)
 	})
 
+	// Events are read-only and carry their own permission.
+	//
+	// Not alerts:read: an alert is a conclusion the platform drew, the event
+	// stream is everything it saw. Someone trusted to triage conclusions is
+	// not automatically trusted with every authentication, every transaction
+	// and every raw payload the estate produced.
+	r.Route("/siem/events", func(r chi.Router) {
+		r.Use(authmw.RequirePermission("events:read"))
+		r.Get("/", h.SearchEvents)
+		r.Get("/{eventID}", h.GetEvent)
+	})
+
 	r.Route("/siem/cases", func(r chi.Router) {
 		r.Use(authmw.RequirePermissionByMethod("incidents"))
 		r.Get("/", h.ListCases)

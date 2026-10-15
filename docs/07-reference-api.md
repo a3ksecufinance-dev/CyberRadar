@@ -4,7 +4,7 @@
 
 # Référence API
 
-> 483 routes sur 30 services.
+> 485 routes sur 30 services.
 > Dérivé du code, pas tenu à la main — voir `backend/scripts/gen-api-reference.py`.
 > Conventions, enveloppe de réponse et codes d'erreur : [`06-api.md`](06-api.md).
 
@@ -42,7 +42,7 @@ Chaque service expose en plus `GET /health`, sans authentification.
 | [`pam`](#pam) | 8007 | 16 |
 | [`risk`](#risk) | 8023 | 21 |
 | [`scs`](#scs) | 8027 | 21 |
-| [`siem`](#siem) | 8008 | 22 |
+| [`siem`](#siem) | 8008 | 24 |
 | [`soar`](#soar) | 8014 | 14 |
 | [`tenant`](#tenant) | 8001 | 27 |
 | [`ti`](#ti) | 8010 | 13 |
@@ -608,7 +608,7 @@ Sans API HTTP : `syslog` — voir [`09-ingestion.md`](09-ingestion.md).
 
 ## siem
 
-`:8008` · 22 routes
+`:8008` · 24 routes
 
 | Méthode | Chemin | Permission |
 |---|---|---|
@@ -623,6 +623,8 @@ Sans API HTTP : `syslog` — voir [`09-ingestion.md`](09-ingestion.md).
 | `GET` | `/api/v1/siem/cases/{caseID}/comments` | `incidents:read` |
 | `POST` | `/api/v1/siem/cases/{caseID}/comments` | `incidents:write` |
 | `POST` | `/api/v1/siem/cases/{caseID}/observables` | `incidents:write` |
+| `GET` | `/api/v1/siem/events` | `events:read` |
+| `GET` | `/api/v1/siem/events/{eventID}` | `events:read` |
 | `GET` | `/api/v1/siem/rule-library` | `rules:read` |
 | `GET` | `/api/v1/siem/rule-library/coverage` | `rules:read` |
 | `GET` | `/api/v1/siem/rule-library/{code}` | `rules:read` |
