@@ -87,6 +87,12 @@ func main() {
 	remediationSvc := service.NewRemediationPolicyService(remediationRepo, logger)
 	remediationHandler := handler.NewRemediationPolicyHandler(remediationSvc)
 
+	// The connector registry: what a tenant declared about where its
+	// telemetry comes from. What those connectors have actually done is the
+	// collector's answer, from the events, and is not copied here.
+	connectorRepo := repository.NewConnectorRepository(dbPool)
+	connectorHandler := handler.NewConnectorHandler(service.NewConnectorService(connectorRepo))
+
 	behaviourRepo := repository.NewBehaviourPolicyRepository(dbPool)
 	behaviourSvc := service.NewBehaviourPolicyService(behaviourRepo, logger)
 	behaviourHandler := handler.NewBehaviourPolicyHandler(behaviourSvc)
@@ -145,6 +151,7 @@ func main() {
 		remediationHandler.RegisterRoutes(r)
 		behaviourHandler.RegisterRoutes(r)
 		attackHandler.RegisterRoutes(r)
+		connectorHandler.RegisterRoutes(r)
 	})
 
 	// ─── Server ──────────────────────────────────────────────

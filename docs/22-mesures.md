@@ -153,6 +153,63 @@ face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
 plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
 les changements de régime qu'il contient.
 
+## Le registre des connecteurs
+
+`/api/v1/connectors`, sur le service **tenant** — pas sur le collecteur.
+
+La séparation est le point du lot. Ce qu'un connecteur **est** — son nom, son
+type, son format, ses réglages, le silence qu'on lui tolère — est de la
+configuration déclarée par quelqu'un, mutable, relationnelle : elle vit en
+PostgreSQL, auprès des autres politiques par locataire que ce service possède
+déjà. Ce qu'un connecteur **a fait** reste chez le collecteur, qui le lit des
+événements eux-mêmes. Rien n'est copié d'un côté à l'autre, donc les deux ne
+peuvent pas se contredire — et si l'on avait tenu un compteur d'événements
+dans le registre, c'est la version fausse qui se serait retrouvée à l'écran.
+
+Prouvé sur la plateforme vivante, les cinq routes : enregistrement (201),
+nom en double (409), lecture, désactivation seule, suppression (204) puis
+suppression répétée (404).
+
+**Une mise à jour partielle ne révoque rien.** Désactiver un connecteur ne
+doit pas effacer sa configuration : un appelant qui envoie un champ ne dit
+rien des autres, et traiter son silence comme « remets à zéro » est la façon
+habituelle dont un écran de configuration détruit un réglage fait la veille.
+Vérifié : après un `PATCH {"enabled": false}`, l'hôte, le port, le format et
+le seuil de silence sont intacts.
+
+**Un nom est unique par locataire, et seulement par locataire.** C'est ce
+qu'un opérateur tape quand quelque chose ne va pas, donc deux sources d'une
+même banque ne peuvent pas le partager — mais deux banques peuvent très bien
+appeler leur pare-feu de la même façon.
+
+### Une faute de frappe annoncée comme une panne serveur
+
+Premier essai par l'API : un format inconnu répondait **500 « An internal
+error occurred »**. La validation renvoyait un `fmt.Errorf` ordinaire, que
+`httperr` ne sait pas classer et traite donc comme une défaillance du
+serveur. Un opérateur qui écrit `xml` au lieu de `json` était envoyé au
+support pour une erreur qu'il pouvait corriger en une seconde.
+
+C'est exactement le défaut que `httperr` avait été écrit pour supprimer — son
+propre commentaire le décrit. Il était revenu par une porte que les tests
+unitaires ne regardaient pas : ils vérifiaient qu'une validation refuse, pas
+ce que l'appelant reçoit. Les refus portent maintenant leur nature, la
+réponse est **400 `BAD_INPUT`** avec le message, et dix cas le fixent.
+
+### Un `SKIP` se lit `ok`
+
+Deux vérifications par mutation de ce lot n'ont rien vérifié du tout :
+PostgreSQL était tombé entre-temps, les tests ont été **sautés**, et `go test`
+a affiché `ok`. Le dépôt met lui-même en garde contre ça dans un commentaire
+voisin ; je suis tombé dedans quand même. Les mutations ont été refaites en
+exigeant un `--- FAIL` explicite et en refusant un `SKIP`.
+
+La première version de la mutation sur la frontière de locataire était
+faible par ailleurs : elle rendait le SQL invalide, donc le test échouait sur
+une erreur de type plutôt que sur la fuite. Reprise avec une requête valide
+qui ignore simplement le locataire, elle montre un étranger renommer puis
+supprimer le connecteur d'autrui — ce que le test voit.
+
 ## Ce qui s'est tu
 
 `GET /api/v1/sources/health`, sur le collecteur.

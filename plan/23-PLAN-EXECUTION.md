@@ -258,7 +258,7 @@ de 100 K EPS, ou le changer**.
 
 | Bloc | US | Charge |
 |---|---:|---:|
-| Cadre de connecteurs : SDK, cycle de vie, **santé** ✓, configuration, mise à jour | `US-CDF-CON-001` à `004` | 50 j |
+| Cadre de connecteurs : SDK, cycle de vie, **santé** ✓, **configuration** ✓, **mise à jour** ✓ | `US-CDF-CON-001` à `004` | 50 j |
 | Découverte passive depuis les logs | `US-CAI-DIS-003` | 20 j |
 | Découverte réseau active | `US-CAI-DIS-001`, `002` | 25 j |
 | Connecteurs cloud AWS, Azure, GCP | `US-CAI-DIS-004` | 40 j |
@@ -310,9 +310,19 @@ domaines en aval alimentés par lui.
 > vivante parce qu'elle a parlé. Les seuils sont des paramètres de la requête,
 > un pare-feu et un flux trimestriel ne se taisant pas à la même échelle.
 >
-> Reste du bloc : l'enregistrement d'un connecteur (nom, configuration,
-> version) et sa mise à jour, qui sont de l'écriture et demandent une
-> interface, pas seulement une route.
+> **Fait aussi (L3b), dans le service tenant** : `/api/v1/connectors`
+> enregistre, liste, modifie et supprime. Le registre n'est pas chez le
+> collecteur parce que ce qu'un connecteur *est* est de la configuration
+> relationnelle et mutable, qui vit auprès des autres politiques par
+> locataire ; ce qu'il *a fait* reste chez le collecteur, lu des événements.
+> Rien n'est copié, donc les deux ne peuvent pas se contredire.
+>
+> Les cinq routes sont prouvées sur la plateforme vivante. Une mise à jour
+> partielle ne révoque pas les champs qu'elle ne nomme pas, et un nom est
+> unique par locataire et seulement par locataire.
+>
+> Reste du bloc : le SDK, et une interface pour que tout cela se fasse sans
+> curl.
 
 ---
 
