@@ -153,6 +153,24 @@ face — c'est ce que fait `-only lag -lag-backlog N`, relevé chaque seconde
 plutôt qu'en un seul écart sur une minute, parce qu'un écart unique moyenne
 les changements de régime qu'il contient.
 
+## Le banc écrit dans le locataire de la démonstration
+
+À dire avant de lancer `make bench` sur une plateforme qui sert aussi à
+montrer quelque chose. Le banc s'authentifie avec une identité réelle, donc
+ses événements atterrissent dans le locataire de cette identité — le même que
+celui du domaine de démonstration. Ils sont *distinguables* (`source =
+'crp-bench'`), ce qui n'est pas la même chose que *séparés*.
+
+Quelques exécutions suffisent à ensevelir le jeu de démonstration. Mesuré
+ici : **151 403 événements de banc contre 1 357 réels**, tous ceux du banc en
+`LOW`. Un graphique de répartition des sévérités montrait alors 99 % de `LOW`
+— c'est-à-dire la signature d'un générateur de charge, pas celle d'une banque.
+
+`make bench-clean` affiche ce qui porte la marque du banc et ne supprime rien ;
+`make bench-clean ARGS=--yes` supprime ces lignes-là et aucune autre. Après
+nettoyage, le locataire de démonstration retrouve sa répartition : 736 `MEDIUM`,
+599 `LOW`, 20 `HIGH`, 2 `CRITICAL` sur 1 357 événements.
+
 ## Deux pertes silencieuses, trouvées en lisant le chemin chaud
 
 Chercher où passaient les millisecondes voulait dire lire `Handle` ligne à

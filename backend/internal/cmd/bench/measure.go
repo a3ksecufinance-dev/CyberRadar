@@ -197,7 +197,7 @@ func (b *bench) sendBatch(ctx context.Context, n int) (received, published, fail
 	}
 	err = b.connector.post(ctx, "collector", "/api/v1/events/ingest", map[string]any{
 		"connector_id": benchConnectorID,
-		"source":       "crp-bench",
+		"source":       benchSource,
 		"source_type":  "application",
 		"format":       "json",
 		"events":       events,
@@ -557,7 +557,7 @@ func (b *bench) oneDetection(ctx context.Context, round int) (time.Duration, err
 	}
 	if err := b.connector.post(ctx, "collector", "/api/v1/events/ingest", map[string]any{
 		"connector_id": benchConnectorID,
-		"source":       "crp-bench",
+		"source":       benchSource,
 		"source_type":  "application",
 		"format":       "json",
 		"events":       events,
@@ -746,8 +746,8 @@ func (b *bench) fillNormalized(ctx context.Context, n int) (time.Duration, error
 			TenantID:      tenant,
 			Timestamp:     time.Now().UTC(),
 			IngestedAt:    time.Now().UTC(),
-			Source:        "bench-lag",
-			SourceType:    "bench-lag",
+			Source:        benchSource,
+			SourceType:    benchSource,
 			ConnectorID:   benchConnectorID,
 			Action:        "login",
 			Category:      event.CategoryIAM,

@@ -43,6 +43,16 @@ import (
 // events distinguishable from the demonstration's.
 const benchConnectorID = "b3c40000-0000-4000-8000-000000000001"
 
+// benchSource marks every event this bench writes.
+//
+// Distinguishable is not the same as separate. The bench authenticates as a
+// real identity, so its events land in that identity's tenant — the same one
+// the demonstration estate uses. A few runs bury the estate: 151 403 bench
+// events against 1 357 demonstration ones, all of the bench's at LOW, which
+// is what a severity chart then shows. `make bench-clean` deletes exactly the
+// rows carrying this marker.
+const benchSource = "crp-bench"
+
 type bench struct {
 	admin     *client
 	connector *client

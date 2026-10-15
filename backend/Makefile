@@ -245,6 +245,10 @@ demo: ## Fill the tenant with a demonstration estate, through the platform's own
 bench: ## Measure the three figures — ingestion rate, API p95, detection time
 	go run ./internal/cmd/bench/
 
+.PHONY: bench-clean
+bench-clean: ## Show the events `make bench` wrote (ARGS=--yes to delete them)
+	./scripts/bench-clean.sh $(ARGS)
+
 vault-seed: ## Load development secrets into Vault (dev only)
 	./scripts/vault-seed.sh
 
