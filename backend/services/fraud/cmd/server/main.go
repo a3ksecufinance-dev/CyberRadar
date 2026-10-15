@@ -67,10 +67,24 @@ func main() {
 		logger.Fatal().Err(err).Msg("identity provider")
 	}
 
-	// ── Kafka producer (publishes fraud events) ───────────────────────────────
+	// ── Kafka producers ───────────────────────────────────────────────────────
+	// Two, deliberately, because they carry different promises.
+	//
+	// crp.events.fraud is the integration topic: a stable place for a client
+	// to hang their own consumer. Nothing in the platform reads it.
+	//
+	// crp.events.enriched is the topic the SIEM rule engine consumes. A
+	// flagged transaction published there becomes a detectable event — it can
+	// be counted in a window, grouped by ordering account, and correlated with
+	// what happened on the IT estate at the same moment. Without it, a
+	// transaction scored 90 updates a column and nothing else.
 	producer := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers: brokers,
 		Topic:   "crp.events.fraud",
+	}, logger)
+	detectionPub := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
+		Brokers: brokers,
+		Topic:   event.TopicEnriched,
 	}, logger)
 
 	// ── Kafka consumer: ingest banking events from pipeline ───────────────────
@@ -79,7 +93,7 @@ func main() {
 
 	// ── Repositories / services ───────────────────────────────────────────────
 	fraudRepo := repository.NewFraudRepository(pool)
-	fraudSvc := service.NewFraudService(fraudRepo, producer, logger)
+	fraudSvc := service.NewFraudService(fraudRepo, producer, detectionPub, logger)
 	fraudH := handler.NewFraudHandler(fraudSvc)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────

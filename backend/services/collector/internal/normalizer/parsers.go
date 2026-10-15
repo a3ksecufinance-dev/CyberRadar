@@ -631,3 +631,27 @@ func categoryFromSourceType(st string) event.Category {
 		return event.CategoryOther
 	}
 }
+
+// businessImpactFromSourceType marks an event as touching the core banking
+// system, the SWIFT estate, or both.
+//
+// These two flags are the only thing in the canonical event that says "this is
+// a banking flow, not an IT log". The rule engine can already query them
+// (`cbs_impact` and `swift_impact` are in KnownFields), the pipeline already
+// writes them to ClickHouse — and until now **nothing ever assigned them**.
+// Every event in the platform carried zero, so a detection conditioned on
+// either one matched nothing, silently, while looking like coverage.
+//
+// Derived from the source type for the same reason the category is: it is the
+// one piece of business context the connector declares and the payload does
+// not. A SWIFT flow is a core banking flow too, so it sets both.
+func businessImpactFromSourceType(st string) (cbs, swift uint8) {
+	switch strings.ToLower(strings.TrimSpace(st)) {
+	case "swift":
+		return 1, 1
+	case "cbs", "banking", "payment", "atm", "monetique", "card", "wire":
+		return 1, 0
+	default:
+		return 0, 0
+	}
+}

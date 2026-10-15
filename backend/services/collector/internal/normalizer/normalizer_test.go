@@ -804,3 +804,96 @@ func TestCEFExtensionsAreRobustToOddInput(t *testing.T) {
 		}
 	}
 }
+
+// The two flags that say "this is a banking flow".
+//
+// `cbs_impact` and `swift_impact` existed in the schema, in the ClickHouse
+// insert and in the rule engine's known fields — and no code ever assigned
+// them. A rule conditioned on either matched nothing, for every event, in
+// every deployment, while presenting itself as working coverage.
+//
+// That is the worst failure mode this platform has: not an error, a silence.
+// These cases exist so it cannot come back unnoticed.
+func TestBankingSourcesCarryTheirBusinessImpact(t *testing.T) {
+	cases := []struct {
+		sourceType string
+		wantCBS    uint8
+		wantSWIFT  uint8
+	}{
+		{"cbs", 1, 0},
+		{"banking", 1, 0},
+		{"payment", 1, 0},
+		{"atm", 1, 0},
+		{"monetique", 1, 0},
+		{"card", 1, 0},
+		{"wire", 1, 0},
+		{"swift", 1, 1}, // a SWIFT flow is a core banking flow too
+		{"SWIFT", 1, 1}, // the connector's casing is not the client's problem
+		{"  cbs  ", 1, 0},
+		{"firewall", 0, 0},
+		{"edr", 0, 0},
+		{"", 0, 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.sourceType, func(t *testing.T) {
+			raw := event.RawEvent{
+				ID:          uuid.New(),
+				TenantID:    tenant,
+				ConnectorID: connector,
+				Source:      "core-01",
+				SourceType:  c.sourceType,
+				Format:      event.FormatJSON,
+				ReceivedAt:  receivedAt,
+				Raw:         `{"action":"transfer"}`,
+			}
+			ev, err := Normalize(raw)
+			if err != nil {
+				t.Fatalf("Normalize(%q) = error %v", c.sourceType, err)
+			}
+			if ev.CBSImpact != c.wantCBS {
+				t.Errorf("source_type %q: cbs_impact = %d, want %d",
+					c.sourceType, ev.CBSImpact, c.wantCBS)
+			}
+			if ev.SWIFTImpact != c.wantSWIFT {
+				t.Errorf("source_type %q: swift_impact = %d, want %d",
+					c.sourceType, ev.SWIFTImpact, c.wantSWIFT)
+			}
+		})
+	}
+}
+
+// Set in base(), so it holds for all six formats — not five.
+func TestEveryFormatCarriesTheBankingFlags(t *testing.T) {
+	payloads := map[event.Format]string{
+		event.FormatJSON:     `{"action":"transfer"}`,
+		event.FormatCEF:      `CEF:0|CRP|CBS|1.0|100|Transfer|5|src=10.0.0.1`,
+		event.FormatSyslog:   `<34>1 2024-01-01T00:00:00Z core-01 cbs 1 - - transfer accepted`,
+		event.FormatLEEF:     `LEEF:1.0|CRP|CBS|1.0|100|src=10.0.0.1`,
+		event.FormatWinEvent: `{"EventID":4624,"Computer":"core-01"}`,
+		event.FormatCLF:      `10.0.0.1 - - [01/Jan/2024:00:00:00 +0000] "GET /tx HTTP/1.1" 200 12`,
+	}
+
+	for format, payload := range payloads {
+		t.Run(string(format), func(t *testing.T) {
+			ev, err := Normalize(event.RawEvent{
+				ID:          uuid.New(),
+				TenantID:    tenant,
+				ConnectorID: connector,
+				Source:      "core-01",
+				SourceType:  "cbs",
+				Format:      format,
+				ReceivedAt:  receivedAt,
+				Raw:         payload,
+			})
+			if err != nil {
+				t.Fatalf("Normalize(%s) = error %v", format, err)
+			}
+			if ev.CBSImpact != 1 {
+				t.Errorf("format %s: cbs_impact = %d, want 1 — a flag set for "+
+					"some formats and not others is coverage nobody can audit",
+					format, ev.CBSImpact)
+			}
+		})
+	}
+}
