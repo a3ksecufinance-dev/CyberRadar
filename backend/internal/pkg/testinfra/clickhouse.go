@@ -71,6 +71,50 @@ func TruncateClickHouse(t *testing.T, conn driver.Conn) {
 	}
 }
 
+// pinger is the one thing pingUntilReady needs. driver.Conn satisfies it.
+type pinger interface {
+	Ping(context.Context) error
+}
+
+// pingUntilReady pings until the server answers, or the context runs out.
+//
+// A listening port is not a ready server. testcontainers declares the
+// ClickHouse container ready as soon as 9000 accepts a connection, but a
+// published port is bound by Docker's proxy the moment the container starts —
+// before ClickHouse has a listener behind it. The first ping then lands on a
+// socket that accepts and immediately resets.
+//
+// That is exactly how this failed in CI: "Container is ready" and "ping: read
+// tcp [::1]->[::1]: connection reset by peer" logged in the same millisecond,
+// on ::1, which is what localhost resolves to first on a GitHub runner.
+//
+// A single Ping under a two-minute deadline does not cover it: the deadline
+// bounds one attempt, it does not produce a second. Only retrying does.
+//
+// The Kafka helper learned this and says so at length; the lesson was never
+// carried across to ClickHouse, whose container comment asserts "the caller
+// pings the server afterwards, which is the real check" — true, and not a
+// check at all when it only gets one try.
+//
+// sync.Once makes the cost worse than one red test: the error is cached for
+// the life of the process, so every ClickHouse test in that binary fails on a
+// race that lasted a few hundred milliseconds.
+func pingUntilReady(ctx context.Context, p pinger, interval time.Duration) error {
+	started := time.Now()
+	for attempt := 1; ; attempt++ {
+		err := p.Ping(ctx)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("no answer after %s and %d attempts: %w",
+				time.Since(started).Round(time.Millisecond), attempt, err)
+		case <-time.After(interval):
+		}
+	}
+}
+
 var (
 	chOnce sync.Once
 	chConn driver.Conn
@@ -100,7 +144,7 @@ func sharedClickHouse() (driver.Conn, error) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := conn.Ping(ctx); err != nil {
+		if err := pingUntilReady(ctx, conn, 500*time.Millisecond); err != nil {
 			chErr = fmt.Errorf("ping: %w", err)
 			return
 		}

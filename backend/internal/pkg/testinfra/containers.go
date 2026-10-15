@@ -129,7 +129,10 @@ func startClickHouseContainer() (string, error) {
 			// "Ready for connections" never appears on the stream
 			// testcontainers reads, and every start failed after the strategy's
 			// own sixty-second timeout — whatever deadline the set carried.
-			// The caller pings the server afterwards, which is the real check.
+			// The caller pings the server afterwards, retrying until it
+			// answers, which is the real check: the port is bound by Docker's
+			// proxy before ClickHouse listens behind it, so "ready" here means
+			// only that the socket exists. See pingUntilReady.
 			WaitingFor: wait.ForListeningPort("9000/tcp").
 				WithStartupTimeout(startupTimeout),
 		},
