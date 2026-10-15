@@ -261,10 +261,24 @@ jwt-keys: ## Generate the RSA key pair used to sign JWTs (dev only)
 # every target below iterates over the modules listed in go.work.
 MODULES := internal $(patsubst %/,%,$(wildcard services/*/))
 
+# The failing modules are named again at the end, and as a GitHub Actions
+# error annotation when running there.
+#
+# Because the log of a failed run is not always reachable — the API serves it
+# from a host some clients refuse to follow — and a run that says only
+# "exit code 2" across thirty-three modules cannot be diagnosed at all. The
+# annotation is readable through the API and shows on the pull request, so
+# the next person sees which module broke without opening the web interface.
 test: ## Run all tests
-	@fail=0; for m in $(MODULES); do \
-		(cd $$m && go test ./... -timeout 120s) || fail=1; \
-	done; exit $$fail
+	@fail=0; broken=""; for m in $(MODULES); do \
+		(cd $$m && go test ./... -timeout 120s) || { fail=1; broken="$$broken $$m"; }; \
+	done; \
+	if [ -n "$$broken" ]; then \
+		echo ""; \
+		echo "modules with failing tests:$$broken"; \
+		[ -n "$$GITHUB_ACTIONS" ] && echo "::error title=Tests failed::modules:$$broken"; \
+	fi; \
+	exit $$fail
 
 test-tenant: ## Run tenant service tests
 	cd services/tenant && go test ./... -v
