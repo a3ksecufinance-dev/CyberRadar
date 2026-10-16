@@ -9,32 +9,32 @@ import (
 // AuditEvent represents an immutable audit log entry.
 // SECURITY: Once written, audit events must never be modified or deleted.
 type AuditEvent struct {
-	ID           uuid.UUID `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	Timestamp    time.Time `json:"timestamp"`
+	ID        uuid.UUID `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Timestamp time.Time `json:"timestamp"`
 
 	// Actor
-	ActorID      string    `json:"actor_id"`
-	ActorType    string    `json:"actor_type"`    // user, service, system, api
-	ActorEmail   string    `json:"actor_email"`
+	ActorID    string `json:"actor_id"`
+	ActorType  string `json:"actor_type"` // user, service, system, api
+	ActorEmail string `json:"actor_email"`
 
 	// Action
-	Action       string    `json:"action"`        // login, config_change, alert_suppression, etc.
-	ResourceType string    `json:"resource_type"` // tenant, user, connector, rule, etc.
-	ResourceID   string    `json:"resource_id"`
+	Action       string `json:"action"`        // login, config_change, alert_suppression, etc.
+	ResourceType string `json:"resource_type"` // tenant, user, connector, rule, etc.
+	ResourceID   string `json:"resource_id"`
 
 	// Context
-	IPAddress    string    `json:"ip_address"`
-	UserAgent    string    `json:"user_agent"`
-	SessionID    string    `json:"session_id"`
-	RequestID    string    `json:"request_id"`
+	IPAddress string `json:"ip_address"`
+	UserAgent string `json:"user_agent"`
+	SessionID string `json:"session_id"`
+	RequestID string `json:"request_id"`
 
 	// Outcome
-	Result       string    `json:"result"`        // success, failure
-	Details      string    `json:"details"`       // JSON payload
+	Result  string `json:"result"`  // success, failure
+	Details string `json:"details"` // JSON payload
 
 	// Integrity
-	Checksum     string    `json:"checksum"`      // SHA-256 of canonical fields
+	Checksum string `json:"checksum"` // SHA-256 of canonical fields
 }
 
 // AuditEventFilter holds search parameters for querying audit logs.

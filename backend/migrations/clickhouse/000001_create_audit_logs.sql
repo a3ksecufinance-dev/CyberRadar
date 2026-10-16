@@ -106,7 +106,22 @@ CREATE TABLE IF NOT EXISTS crp_audit.cyber_events (
 ENGINE = MergeTree()
 PARTITION BY (tenant_id, toYYYYMM(timestamp))
 ORDER BY (tenant_id, timestamp, event_id)
-TTL
-    timestamp + INTERVAL 30 DAY TO DISK 'warm',
-    timestamp + INTERVAL 365 DAY TO DISK 'cold'
+-- No TTL here, deliberately.
+--
+-- This table carried a tiering policy moving parts to disks named 'warm' and
+-- 'cold' after 30 and 365 days. A schema cannot assume those disks exist: on
+-- any single-disk deployment the statement fails with "No such disk", and this
+-- migration — the audit log, the one table a regulator asks for — was never
+-- created at all.
+--
+-- Tiering is a deployment decision, so it belongs to the deployment. Declare a
+-- storage_configuration with the two disks and a policy, then apply it:
+--
+--   ALTER TABLE crp_audit.audit_logs MODIFY TTL
+--       toDateTime(timestamp) + INTERVAL 30 DAY  TO DISK 'warm',
+--       toDateTime(timestamp) + INTERVAL 365 DAY TO DISK 'cold';
+--
+-- What must never appear here is a plain expiry: an audit record that deletes
+-- itself on a timer is the opposite of what this table is for. Retention is
+-- set by the operator against their own obligation, not by a default.
 SETTINGS index_granularity = 8192;

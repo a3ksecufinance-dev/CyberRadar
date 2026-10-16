@@ -1,0 +1,48 @@
+# CRP-EXF-0002 — Transfert vers une destination au renseignement
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-EXF-0002
+title: Transfert vers une destination au renseignement
+description: Un transfert dont la destination figure au renseignement.
+category: Security
+severity: CRITICAL
+mitre:
+  tactic: TA0010
+  technique: T1567
+conditions:
+  field_matches:
+  - op: contains
+    field: ioc_matched
+    value: '@ip_destination'
+  - op: contains
+    field: action
+    value: transfer
+actions:
+- type: notify
+- type: block_ip
+dedup_window_s: 300
+rationale: >-
+  La conjonction des deux — un transfert, et une destination que le renseignement connaît
+  — laisse peu de place au doute.
+false_positives: >-
+  Très peu. Un faux positif ici est presque toujours un indicateur de mauvaise qualité.
+response: >-
+  Bloquer, préserver les journaux de flux, et enclencher l'évaluation de notification : c'est
+  le cas où le délai réglementaire commence à courir.
+frameworks:
+- DORA
+- PCIDSS
+controls:
+- DORA-17.1
+- PCI-10.4.1
+requires: []
+enabled_by_default: true
+tags:
+- exfiltration
+- renseignement
+- standard

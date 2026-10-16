@@ -63,18 +63,18 @@ type APIKeyUsage struct {
 
 // Webhook defines an outbound HTTP callback for platform events.
 type Webhook struct {
-	ID               uuid.UUID  `json:"id"`
-	TenantID         uuid.UUID  `json:"tenant_id"`
-	Name             string     `json:"name"`
-	URL              string     `json:"url"`
-	Events           []string   `json:"events"`
-	IsActive         bool       `json:"is_active"`
-	FailureCount     int        `json:"failure_count"`
-	LastTriggeredAt  *time.Time `json:"last_triggered_at,omitempty"`
-	LastStatusCode   *int       `json:"last_status_code,omitempty"`
-	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	ID              uuid.UUID  `json:"id"`
+	TenantID        uuid.UUID  `json:"tenant_id"`
+	Name            string     `json:"name"`
+	URL             string     `json:"url"`
+	Events          []string   `json:"events"`
+	IsActive        bool       `json:"is_active"`
+	FailureCount    int        `json:"failure_count"`
+	LastTriggeredAt *time.Time `json:"last_triggered_at,omitempty"`
+	LastStatusCode  *int       `json:"last_status_code,omitempty"`
+	CreatedBy       *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 	// Secret is never returned in API responses.
 }
 
@@ -95,10 +95,19 @@ type WebhookDelivery struct {
 
 // APIFWStats is the platform-wide API usage summary.
 type APIFWStats struct {
-	ActiveKeys          int     `json:"active_keys"`
-	TotalRequestsToday  int     `json:"total_requests_today"`
-	ActiveWebhooks      int     `json:"active_webhooks"`
-	DeliverySuccessRate float64 `json:"delivery_success_rate"` // 0–100
+	ActiveKeys         int `json:"active_keys"`
+	TotalRequestsToday int `json:"total_requests_today"`
+	ActiveWebhooks     int `json:"active_webhooks"`
+	// TotalWebhooks is every webhook the tenant has declared, activated or
+	// not. Without it the screen cannot tell "none configured" from
+	// "configured and awaiting activation" — the ordinary state between an
+	// integration being set up and the day it goes live.
+	TotalWebhooks int `json:"total_webhooks"`
+	// DeliveriesToday is the denominator of the rate below. Without it a
+	// tenant whose webhooks have fired nothing today is indistinguishable
+	// from one whose every delivery failed: both carry a rate of zero.
+	DeliveriesToday     int            `json:"deliveries_today"`
+	DeliverySuccessRate float64        `json:"delivery_success_rate"` // 0–100
 	TopEndpoints        []EndpointStat `json:"top_endpoints"`
 }
 

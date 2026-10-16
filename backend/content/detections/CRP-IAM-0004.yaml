@@ -1,0 +1,42 @@
+# CRP-IAM-0004 — Élévation de privilèges
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-IAM-0004
+title: Élévation de privilèges
+description: Une action d'élévation de privilèges, réussie ou non.
+category: IAM
+severity: HIGH
+mitre:
+  tactic: TA0004
+  technique: T1548
+conditions:
+  field_matches:
+  - op: contains
+    field: action
+    value: privilege
+actions:
+- type: notify
+dedup_window_s: 300
+rationale: >-
+  L'élévation est l'étape qui sépare un pied dans la porte d'une compromission. Elle est rarement
+  légitime sur un serveur de production en dehors d'une fenêtre de changement.
+false_positives: >-
+  Les outils d'administration et de déploiement en produisent. Exclure les comptes de service
+  connus plutôt que de baisser la sévérité.
+response: >-
+  Vérifier la fenêtre de changement. Hors fenêtre, isoler l'hôte avant d'enquêter.
+frameworks:
+- DORA
+- ISO27001
+controls:
+- DORA-10.3
+- A.8.2
+requires: []
+enabled_by_default: true
+tags:
+- standard

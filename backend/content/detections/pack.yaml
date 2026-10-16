@@ -1,0 +1,28 @@
+# The CyberRadar detection pack.
+#
+# These files are the catalogue. They are reconciled with the database by
+# `contentctl`, which publishes a new version of any detection whose content
+# changed, retires any the pack no longer carries, and leaves the rest — and
+# their version numbers — entirely alone.
+#
+# Changing a detection means editing its file and raising the version below.
+# No migration, no rebuild, no deployment window: the content ships at the
+# cadence content needs rather than the cadence code needs.
+#
+# Two things are worth knowing before editing one:
+#
+#   · There is no version number in a detection file. It is derived from the
+#     content, so a change cannot ship under the old number by being forgotten.
+#   · Every field a condition names has to be one the rule engine reads.
+#     `contentctl -check` refuses a pack that breaks this, because a detection
+#     keyed on an unknown field loads, matches nothing, and presents itself as
+#     coverage — which is worse than no detection at all.
+
+name: CyberRadar Detection Pack
+version: "2026.10.1"
+released: 2026-10-01
+description: >
+  Les détections livrées avec la plateforme : accès aux identifiants,
+  exécution, commande et contrôle, exfiltration, découverte, déplacement
+  latéral et fraude. Chacune porte son raisonnement, ce qui la déclenche
+  légitimement, et quoi faire quand elle part.

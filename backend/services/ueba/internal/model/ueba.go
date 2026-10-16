@@ -42,11 +42,14 @@ const (
 
 // EntityProfile holds the learned behavioral baseline and risk scores for one entity.
 type EntityProfile struct {
-	ID               uuid.UUID  `json:"id"`
-	TenantID         uuid.UUID  `json:"tenant_id"`
-	EntityID         uuid.UUID  `json:"entity_id"`
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	EntityID uuid.UUID `json:"entity_id"`
+	// EntityName is what the source called this entity. EntityID may be derived
+	// from it, so this is the only human-readable form a console can show.
+	EntityName       string     `json:"entity_name,omitempty"`
 	EntityType       string     `json:"entity_type"`
-	NormalHours      []int32    `json:"normal_hours"`      // UTC hours seen (0-23)
+	NormalHours      []int32    `json:"normal_hours"` // UTC hours seen (0-23)
 	NormalCountries  []string   `json:"normal_countries"`
 	NormalIPPrefixes []string   `json:"normal_ip_prefixes"` // /24 CIDR blocks
 	NormalEventTypes []string   `json:"normal_event_types"`

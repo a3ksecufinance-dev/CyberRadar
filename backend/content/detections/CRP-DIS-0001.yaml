@@ -1,0 +1,49 @@
+# CRP-DIS-0001 — Balayage réseau depuis une adresse interne
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-DIS-0001
+title: Balayage réseau depuis une adresse interne
+description: Vingt actions de découverte ou plus depuis une même adresse en cinq minutes.
+category: Network
+severity: MEDIUM
+mitre:
+  tactic: TA0007
+  technique: T1046
+conditions:
+  threshold:
+    count: 20
+    group_by:
+    - ip_source
+    window_seconds: 300
+  field_matches:
+  - op: eq
+    field: mitre_technique
+    value: T1046
+actions:
+- type: notify
+dedup_window_s: 600
+rationale: >-
+  La reconnaissance interne précède le déplacement latéral. C'est l'un des rares moments où
+  l'attaquant est bruyant.
+false_positives: >-
+  Les scanners de vulnérabilité et les outils d'inventaire, qui font exactement cela pour
+  de bonnes raisons. Les exclure par adresse, pas en montant le seuil.
+response: >-
+  Vérifier que l'adresse appartient à un outil déclaré. Sinon, identifier l'hôte et ce qu'il
+  a trouvé.
+frameworks:
+- DORA
+- ISO27001
+controls:
+- DORA-10.3
+- A.8.16
+requires: []
+enabled_by_default: true
+tags:
+- découverte
+- standard

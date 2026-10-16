@@ -1,9 +1,10 @@
 'use client'
 import { useApiGet } from './useApi'
+import { ROUTES } from '@/lib/api'
 import type { PlatformOverview, KPIPoint } from '@/types'
 
 export function useDashboardOverview() {
-  return useApiGet<PlatformOverview>('dashboard', '/api/v1/dashboard/overview', undefined, {
+  return useApiGet<PlatformOverview>('dashboard', ROUTES.dashboard.overview, undefined, {
     refreshInterval: 60_000,
   })
 }
@@ -11,8 +12,8 @@ export function useDashboardOverview() {
 export function useKPITimeseries(domain: string, metricKey: string, interval = '1h') {
   return useApiGet<KPIPoint[]>(
     'dashboard',
-    `/api/v1/dashboard/kpi/timeseries?domain=${domain}&metric_key=${metricKey}&interval=${interval}`,
-    undefined,
+    ROUTES.dashboard.kpiTimeseries,
+    { domain, metric_key: metricKey, interval },
     { refreshInterval: 300_000 },
   )
 }

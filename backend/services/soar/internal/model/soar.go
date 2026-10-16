@@ -8,41 +8,41 @@ import (
 
 // ── Incident statuses ─────────────────────────────────────────────────────────
 const (
-	IncidentStatusOpen        = "open"
-	IncidentStatusInProgress  = "in_progress"
-	IncidentStatusContained   = "contained"
-	IncidentStatusResolved    = "resolved"
-	IncidentStatusClosed      = "closed"
+	IncidentStatusOpen       = "open"
+	IncidentStatusInProgress = "in_progress"
+	IncidentStatusContained  = "contained"
+	IncidentStatusResolved   = "resolved"
+	IncidentStatusClosed     = "closed"
 )
 
 // ── Playbook trigger types ────────────────────────────────────────────────────
 const (
-	TriggerManual    = "manual"
-	TriggerAlert     = "alert"
-	TriggerIOCMatch  = "ioc_match"
-	TriggerAnomaly   = "anomaly"
-	TriggerVuln      = "vuln"
-	TriggerSchedule  = "schedule"
+	TriggerManual   = "manual"
+	TriggerAlert    = "alert"
+	TriggerIOCMatch = "ioc_match"
+	TriggerAnomaly  = "anomaly"
+	TriggerVuln     = "vuln"
+	TriggerSchedule = "schedule"
 )
 
 // ── Action types ──────────────────────────────────────────────────────────────
 const (
-	ActionBlockIP         = "block_ip"
-	ActionUnblockIP       = "unblock_ip"
-	ActionDisableUser     = "disable_user"
-	ActionEnableUser      = "enable_user"
-	ActionIsolateHost     = "isolate_host"
-	ActionUnisolateHost   = "unisolate_host"
-	ActionEnrichIOC       = "enrich_ioc"
-	ActionAddToBlocklist  = "add_to_blocklist"
-	ActionCreateTicket    = "create_ticket"
-	ActionCloseTicket     = "close_ticket"
+	ActionBlockIP          = "block_ip"
+	ActionUnblockIP        = "unblock_ip"
+	ActionDisableUser      = "disable_user"
+	ActionEnableUser       = "enable_user"
+	ActionIsolateHost      = "isolate_host"
+	ActionUnisolateHost    = "unisolate_host"
+	ActionEnrichIOC        = "enrich_ioc"
+	ActionAddToBlocklist   = "add_to_blocklist"
+	ActionCreateTicket     = "create_ticket"
+	ActionCloseTicket      = "close_ticket"
 	ActionSendNotification = "send_notification"
-	ActionRunSIEMQuery    = "run_siem_query"
-	ActionTagEntity       = "tag_entity"
-	ActionMarkCompromised = "mark_compromised"
-	ActionCreateIncident  = "create_incident"
-	ActionWait            = "wait"
+	ActionRunSIEMQuery     = "run_siem_query"
+	ActionTagEntity        = "tag_entity"
+	ActionMarkCompromised  = "mark_compromised"
+	ActionCreateIncident   = "create_incident"
+	ActionWait             = "wait"
 )
 
 // ── SLA durations by severity ─────────────────────────────────────────────────
@@ -127,21 +127,21 @@ type PlaybookStep struct {
 
 // Execution is a running or completed playbook instance.
 type Execution struct {
-	ID             uuid.UUID      `json:"id"`
-	TenantID       uuid.UUID      `json:"tenant_id"`
-	PlaybookID     uuid.UUID      `json:"playbook_id"`
-	IncidentID     *uuid.UUID     `json:"incident_id,omitempty"`
-	TriggerEvent   map[string]any `json:"trigger_event,omitempty"`
-	Status         string         `json:"status"`
-	StepsTotal     int            `json:"steps_total"`
-	StepsCompleted int            `json:"steps_completed"`
-	StepsFailed    int            `json:"steps_failed"`
-	ResultSummary  map[string]any `json:"result_summary,omitempty"`
-	ErrorMessage   string         `json:"error_message,omitempty"`
-	TriggeredBy    *uuid.UUID     `json:"triggered_by,omitempty"`
-	StartedAt      *time.Time     `json:"started_at,omitempty"`
-	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID             uuid.UUID       `json:"id"`
+	TenantID       uuid.UUID       `json:"tenant_id"`
+	PlaybookID     uuid.UUID       `json:"playbook_id"`
+	IncidentID     *uuid.UUID      `json:"incident_id,omitempty"`
+	TriggerEvent   map[string]any  `json:"trigger_event,omitempty"`
+	Status         string          `json:"status"`
+	StepsTotal     int             `json:"steps_total"`
+	StepsCompleted int             `json:"steps_completed"`
+	StepsFailed    int             `json:"steps_failed"`
+	ResultSummary  map[string]any  `json:"result_summary,omitempty"`
+	ErrorMessage   string          `json:"error_message,omitempty"`
+	TriggeredBy    *uuid.UUID      `json:"triggered_by,omitempty"`
+	StartedAt      *time.Time      `json:"started_at,omitempty"`
+	CompletedAt    *time.Time      `json:"completed_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 	Steps          []ExecutionStep `json:"steps,omitempty"`
 }
 
@@ -162,18 +162,18 @@ type ExecutionStep struct {
 
 // SOARStats is the dashboard summary.
 type SOARStats struct {
-	OpenIncidents      int `json:"open_incidents"`
-	CriticalIncidents  int `json:"critical_incidents"`
-	InProgressIncidents int `json:"in_progress_incidents"`
-	ResolvedToday      int `json:"resolved_today"`
-	SLABreached        int `json:"sla_breached"`
-	TotalPlaybooks     int `json:"total_playbooks"`
-	ActivePlaybooks    int `json:"active_playbooks"`
-	ExecutionsToday    int `json:"executions_today"`
-	ExecutionSuccess   int `json:"execution_success_today"`
-	ExecutionFailed    int `json:"execution_failed_today"`
-	MeanTimeToContain  float64 `json:"mean_time_to_contain_hours"`
-	MeanTimeToResolve  float64 `json:"mean_time_to_resolve_hours"`
+	OpenIncidents       int     `json:"open_incidents"`
+	CriticalIncidents   int     `json:"critical_incidents"`
+	InProgressIncidents int     `json:"in_progress_incidents"`
+	ResolvedToday       int     `json:"resolved_today"`
+	SLABreached         int     `json:"sla_breached"`
+	TotalPlaybooks      int     `json:"total_playbooks"`
+	ActivePlaybooks     int     `json:"active_playbooks"`
+	ExecutionsToday     int     `json:"executions_today"`
+	ExecutionSuccess    int     `json:"execution_success_today"`
+	ExecutionFailed     int     `json:"execution_failed_today"`
+	MeanTimeToContain   float64 `json:"mean_time_to_contain_hours"`
+	MeanTimeToResolve   float64 `json:"mean_time_to_resolve_hours"`
 }
 
 // ── Request / filter models ───────────────────────────────────────────────────
@@ -205,11 +205,11 @@ type UpdateIncidentRequest struct {
 }
 
 type CreatePlaybookRequest struct {
-	Name              string         `json:"name"         validate:"required,min=2,max=200"`
-	Description       string         `json:"description"`
-	TriggerType       string         `json:"trigger_type" validate:"required,oneof=manual alert ioc_match anomaly vuln schedule"`
-	TriggerConditions map[string]any `json:"trigger_conditions"`
-	IsActive          bool           `json:"is_active"`
+	Name              string                      `json:"name"         validate:"required,min=2,max=200"`
+	Description       string                      `json:"description"`
+	TriggerType       string                      `json:"trigger_type" validate:"required,oneof=manual alert ioc_match anomaly vuln schedule"`
+	TriggerConditions map[string]any              `json:"trigger_conditions"`
+	IsActive          bool                        `json:"is_active"`
 	Steps             []CreatePlaybookStepRequest `json:"steps" validate:"required,min=1"`
 }
 

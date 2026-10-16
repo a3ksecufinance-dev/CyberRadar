@@ -6,6 +6,7 @@ import (
 
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/dashboard/internal/model"
 	"github.com/google/uuid"
 )
@@ -72,11 +73,11 @@ func (r *KPIRepository) QueryTimeSeries(ctx context.Context, q model.KPIQueryReq
 		  AND snapped_at BETWEEN {since:DateTime} AND {until:DateTime}
 		GROUP BY ts
 		ORDER BY ts`,
-		clickhouse.Named("tenant", q.TenantID),
+		clickhouse.Named("tenant", q.TenantID.String()),
 		clickhouse.Named("domain", q.Domain),
 		clickhouse.Named("metric_key", q.MetricKey),
-		clickhouse.Named("since", q.Since),
-		clickhouse.Named("until", q.Until),
+		clickhouse.Named("since", db.CHTime(q.Since)),
+		clickhouse.Named("until", db.CHTime(q.Until)),
 	)
 	if err != nil {
 		return nil, err
@@ -102,7 +103,7 @@ func (r *KPIRepository) LatestSnapshots(ctx context.Context, tenantID uuid.UUID,
 		WHERE tenant_id={tenant:UUID} AND domain={domain:String}
 		  AND snapped_at >= now() - INTERVAL 1 HOUR
 		GROUP BY metric_key`,
-		clickhouse.Named("tenant", tenantID),
+		clickhouse.Named("tenant", tenantID.String()),
 		clickhouse.Named("domain", domain),
 	)
 	if err != nil {
@@ -132,10 +133,10 @@ func (r *KPIRepository) RiskTimeline(ctx context.Context, tenantID uuid.UUID, en
 		  AND entity_id={entity_id:UUID}
 		  AND hour >= {since:DateTime}
 		ORDER BY hour`,
-		clickhouse.Named("tenant", tenantID),
+		clickhouse.Named("tenant", tenantID.String()),
 		clickhouse.Named("entity_type", entityType),
-		clickhouse.Named("entity_id", eid),
-		clickhouse.Named("since", since),
+		clickhouse.Named("entity_id", eid.String()),
+		clickhouse.Named("since", db.CHTime(since)),
 	)
 	if err != nil {
 		return nil, err

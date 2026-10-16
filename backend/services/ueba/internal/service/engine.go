@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/cache"
 	"github.com/cyberradar/platform/internal/pkg/event"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
 	"github.com/cyberradar/platform/services/ueba/internal/model"
@@ -16,22 +16,15 @@ import (
 	"github.com/rs/zerolog"
 )
 
-const (
-	// topicUEBA is the output topic for detected UEBA anomalies.
-	topicUEBA = "crp.events.ueba"
+// topicUEBA is the output topic for detected UEBA anomalies.
+const topicUEBA = "crp.events.ueba"
 
-	// Baseline thresholds
-	minHoursForBaseline    = 3  // distinct hours before baseline is considered ready
-	minCountriesForBaseline = 1
-
-	// Velocity: >N events per entity within 1 minute triggers VELOCITY_SPIKE
-	velocityThreshold = 80
-	velocityWindow    = 60 * time.Second
-
-	// Brute-force: >N auth failures per entity within 5 minutes
-	bruteForceThreshold = 5
-	bruteForceWindow    = 5 * time.Minute
-)
+// The thresholds that used to live here as constants — eighty events a minute,
+// five failures in five, three distinct hours before a baseline is trusted — are
+// now the tenant's, read through repository.PolicyCache. What they were is kept
+// as model.DefaultBehaviourPolicy(), which is both the standard profile the
+// platform ships and what this engine falls back to when no policy can be read:
+// detecting on slightly wrong thresholds beats not detecting at all.
 
 // BehaviorEngine consumes crp.events.enriched and performs UEBA.
 type BehaviorEngine struct {
@@ -41,12 +34,18 @@ type BehaviorEngine struct {
 	publisher    *pkgkafka.Producer
 	logger       zerolog.Logger
 
-	// In-memory sliding window counters keyed by "tenantID|entityID"
-	velocityMu       sync.Mutex
-	velocityCounters map[string][]time.Time
+	// velocity and failures count across every replica of this service. They
+	// used to be maps in this process, so an attacker spreading four failed
+	// logins over each of two replicas stayed under a five-failure threshold
+	// that a single counter would have tripped.
+	velocity *cache.Window
+	failures *cache.Window
 
-	failureMu       sync.Mutex
-	failureCounters map[string][]time.Time
+	// policies are the thresholds in force, per tenant. This engine consumes
+	// every tenant's events in one process, so they are served from a snapshot
+	// rather than read per event — a query on this path is not a slow design,
+	// it is an impossible one.
+	policies *repository.PolicyCache
 }
 
 // NewBehaviorEngine creates a BehaviorEngine.
@@ -55,16 +54,20 @@ func NewBehaviorEngine(
 	behaviorRepo *repository.BehaviorRepository,
 	consumer *pkgkafka.Consumer,
 	publisher *pkgkafka.Producer,
+	velocity *cache.Window,
+	failures *cache.Window,
+	policies *repository.PolicyCache,
 	logger zerolog.Logger,
 ) *BehaviorEngine {
 	return &BehaviorEngine{
-		profileRepo:      profileRepo,
-		behaviorRepo:     behaviorRepo,
-		consumer:         consumer,
-		publisher:        publisher,
-		logger:           logger,
-		velocityCounters: make(map[string][]time.Time),
-		failureCounters:  make(map[string][]time.Time),
+		profileRepo:  profileRepo,
+		behaviorRepo: behaviorRepo,
+		consumer:     consumer,
+		publisher:    publisher,
+		logger:       logger,
+		velocity:     velocity,
+		failures:     failures,
+		policies:     policies,
 	}
 }
 
@@ -81,7 +84,7 @@ func (e *BehaviorEngine) handle(ctx context.Context, msg pkgkafka.Message) error
 		return nil
 	}
 
-	entityIDStr, entityType := entityFrom(&ev)
+	entityIDStr, entityName, entityType := entityFrom(&ev)
 	if entityIDStr == "" {
 		return nil // skip events without an identifiable entity
 	}
@@ -92,11 +95,16 @@ func (e *BehaviorEngine) handle(ctx context.Context, msg pkgkafka.Message) error
 	}
 	eid, err := uuid.Parse(entityIDStr)
 	if err != nil {
-		return nil // entity IDs must be UUIDs in this platform
+		// entityFrom derives a UUID from anything that is not one, so reaching
+		// here means the source handed us a user_id that looks like a UUID and
+		// is not. Worth a line rather than a silent drop: a whole source going
+		// unprofiled used to look exactly like this.
+		e.logger.Warn().Str("entity", entityIDStr).Msg("ueba_entity_id_not_a_uuid")
+		return nil
 	}
 
 	// Load or create profile
-	profile, err := e.profileRepo.GetOrCreate(ctx, tid, eid, entityType)
+	profile, err := e.profileRepo.GetOrCreate(ctx, tid, eid, entityType, entityName)
 	if err != nil || profile == nil {
 		e.logger.Error().Err(err).Str("entity_id", entityIDStr).Msg("profile_load_error")
 		return nil
@@ -108,19 +116,25 @@ func (e *BehaviorEngine) handle(ctx context.Context, msg pkgkafka.Message) error
 		e.logger.Error().Err(err).Msg("behavior_event_insert_error")
 	}
 
+	// The thresholds this tenant is detected against. Resolved once per event
+	// and passed down, so every decision below — the counters, the anomalies and
+	// the baseline — is taken against the same version of the policy even if a
+	// refresh lands mid-event.
+	policy := e.policies.For(tid)
+
 	// Track velocity and failure counters (always — before baseline check)
 	counterKey := ev.TenantID + "|" + entityIDStr
-	vel := e.velocityCount(counterKey)
+	vel := e.velocityCount(ctx, counterKey, policy)
 	var failCnt int
 	if ev.Outcome == "failure" {
-		failCnt = e.failureCount(counterKey)
+		failCnt = e.failureCount(ctx, counterKey, policy)
 	}
 
 	// Detect anomalies
-	anomalies := e.detectAnomalies(profile, &ev, eid, tid, vel, failCnt)
+	anomalies := e.detectAnomalies(profile, &ev, eid, tid, vel, failCnt, policy)
 
 	// Update baseline before scoring
-	updateBaseline(profile, &ev)
+	updateBaseline(profile, &ev, policy)
 
 	// Recompute risk scores
 	recomputeScores(profile, anomalies)
@@ -156,49 +170,58 @@ func (e *BehaviorEngine) detectAnomalies(
 	entityID uuid.UUID,
 	tenantID uuid.UUID,
 	velocityCount, failureCount int,
+	policy *model.BehaviourPolicy,
 ) []*model.Anomaly {
 	now := time.Now().UTC()
 	hour := int32(now.Hour())
 	srcEventID := ev.EventID
 
-	newAnomaly := func(atype, severity string, score float64, baseline, observed string) *model.Anomaly {
-		return &model.Anomaly{
+	var anomalies []*model.Anomaly
+
+	// raise takes the severity and the score from the tenant's policy rather
+	// than from a literal, and drops the anomaly entirely when they have turned
+	// that signal off.
+	//
+	// Switching one off is a legitimate decision — an institution running three
+	// shifts has no use for an off-hours alert that fires every night — and
+	// honouring it here is what stops them doing it downstream in a mail rule,
+	// where nobody can see that they did.
+	raise := func(atype, baseline, observed string) {
+		sig := policy.Signal(atype)
+		if !sig.Enabled {
+			return
+		}
+		anomalies = append(anomalies, &model.Anomaly{
 			ID:            uuid.New(),
 			TenantID:      tenantID,
 			EntityID:      entityID,
 			EntityType:    p.EntityType,
 			AnomalyType:   atype,
-			Severity:      severity,
-			Score:         score,
+			Severity:      sig.Severity,
+			Score:         sig.Score,
 			BaselineVal:   baseline,
 			ObservedVal:   observed,
 			SourceEventID: &srcEventID,
 			Status:        model.AnomalyStatusOpen,
 			DetectedAt:    now,
-		}
+		})
 	}
-
-	var anomalies []*model.Anomaly
 
 	// ── Baseline-dependent detections ─────────────────────────────────────────
 	if p.BaselineReady {
 		// OFF_HOURS_ACCESS
 		if !containsInt32(p.NormalHours, hour) {
-			anomalies = append(anomalies, newAnomaly(
-				model.AnomalyOffHoursAccess, model.SeverityMedium, 3.5,
+			raise(model.AnomalyOffHoursAccess,
 				fmt.Sprintf("normal_hours=%v", p.NormalHours),
-				fmt.Sprintf("hour=%d", hour),
-			))
+				fmt.Sprintf("hour=%d", hour))
 		}
 
 		// NEW_COUNTRY
 		if ev.GeoCountry != nil && *ev.GeoCountry != "" && *ev.GeoCountry != "PRIVATE" {
 			if !containsStr(p.NormalCountries, *ev.GeoCountry) {
-				anomalies = append(anomalies, newAnomaly(
-					model.AnomalyNewCountry, model.SeverityHigh, 6.5,
+				raise(model.AnomalyNewCountry,
 					fmt.Sprintf("countries=%v", p.NormalCountries),
-					*ev.GeoCountry,
-				))
+					*ev.GeoCountry)
 			}
 		}
 
@@ -206,56 +229,43 @@ func (e *BehaviorEngine) detectAnomalies(
 		if ev.IPSource != nil && *ev.IPSource != "" {
 			prefix := ipCIDR24(*ev.IPSource)
 			if !containsStr(p.NormalIPPrefixes, prefix) {
-				anomalies = append(anomalies, newAnomaly(
-					model.AnomalyNewIPPrefix, model.SeverityLow, 2.0,
+				raise(model.AnomalyNewIPPrefix,
 					fmt.Sprintf("prefixes=%v", p.NormalIPPrefixes),
-					prefix,
-				))
+					prefix)
 			}
 		}
 	}
 
 	// ── Always-on detections ──────────────────────────────────────────────────
 
-	// VELOCITY_SPIKE
-	if velocityCount >= velocityThreshold {
-		anomalies = append(anomalies, newAnomaly(
-			model.AnomalyVelocitySpike, model.SeverityHigh, 5.0,
-			fmt.Sprintf("threshold=%d/min", velocityThreshold),
-			fmt.Sprintf("%d events/min", velocityCount),
-		))
+	// VELOCITY_SPIKE. The baseline and the observation both name the window the
+	// tenant set, because "80/min" on an alert raised under a five-minute window
+	// is a number an analyst cannot reconcile with anything.
+	if velocityCount >= policy.VelocityThreshold {
+		raise(model.AnomalyVelocitySpike,
+			fmt.Sprintf("threshold=%d/%ds", policy.VelocityThreshold, policy.VelocityWindowS),
+			fmt.Sprintf("%d events/%ds", velocityCount, policy.VelocityWindowS))
 	}
 
 	// BRUTE_FORCE
-	if failureCount >= bruteForceThreshold {
-		anomalies = append(anomalies, newAnomaly(
-			model.AnomalyBruteForce, model.SeverityHigh, 6.0,
-			fmt.Sprintf("threshold=%d failures/5min", bruteForceThreshold),
-			fmt.Sprintf("%d failures/5min", failureCount),
-		))
+	if failureCount >= policy.BruteForceThreshold {
+		raise(model.AnomalyBruteForce,
+			fmt.Sprintf("threshold=%d failures/%ds", policy.BruteForceThreshold, policy.BruteForceWindowS),
+			fmt.Sprintf("%d failures/%ds", failureCount, policy.BruteForceWindowS))
 	}
 
 	// MITRE ATT&CK tactic-based detections
 	if ev.MitreTactic != nil {
 		switch *ev.MitreTactic {
 		case "TA0004": // Privilege Escalation
-			anomalies = append(anomalies, newAnomaly(
-				model.AnomalyPrivEscalation, model.SeverityHigh, 7.0,
-				"no_priv_esc_expected",
-				fmt.Sprintf("tactic=%s technique=%v", *ev.MitreTactic, ev.MitreTechnique),
-			))
+			raise(model.AnomalyPrivEscalation, "no_priv_esc_expected",
+				fmt.Sprintf("tactic=%s technique=%v", *ev.MitreTactic, ev.MitreTechnique))
 		case "TA0008": // Lateral Movement
-			anomalies = append(anomalies, newAnomaly(
-				model.AnomalyLateralMovement, model.SeverityCritical, 8.5,
-				"no_lateral_movement_expected",
-				fmt.Sprintf("tactic=%s", *ev.MitreTactic),
-			))
+			raise(model.AnomalyLateralMovement, "no_lateral_movement_expected",
+				fmt.Sprintf("tactic=%s", *ev.MitreTactic))
 		case "TA0010": // Exfiltration
-			anomalies = append(anomalies, newAnomaly(
-				model.AnomalyDataExfiltration, model.SeverityCritical, 9.0,
-				"no_exfiltration_expected",
-				fmt.Sprintf("tactic=%s", *ev.MitreTactic),
-			))
+			raise(model.AnomalyDataExfiltration, "no_exfiltration_expected",
+				fmt.Sprintf("tactic=%s", *ev.MitreTactic))
 		}
 	}
 
@@ -265,7 +275,7 @@ func (e *BehaviorEngine) detectAnomalies(
 // ─── Baseline and scoring ─────────────────────────────────────────────────────
 
 // updateBaseline appends new observations to the entity's normal sets.
-func updateBaseline(p *model.EntityProfile, ev *event.NormalizedEvent) {
+func updateBaseline(p *model.EntityProfile, ev *event.NormalizedEvent, policy *model.BehaviourPolicy) {
 	now := time.Now().UTC()
 	hour := int32(now.Hour())
 
@@ -292,8 +302,8 @@ func updateBaseline(p *model.EntityProfile, ev *event.NormalizedEvent) {
 	p.LastSeenAt = &now
 
 	if !p.BaselineReady &&
-		len(p.NormalHours) >= minHoursForBaseline &&
-		len(p.NormalCountries) >= minCountriesForBaseline {
+		len(p.NormalHours) >= policy.MinHoursForBaseline &&
+		len(p.NormalCountries) >= policy.MinCountriesForBaseline {
 		p.BaselineReady = true
 	}
 }
@@ -334,43 +344,81 @@ func recomputeScores(p *model.EntityProfile, anomalies []*model.Anomaly) {
 
 // ─── Sliding window counters ──────────────────────────────────────────────────
 
-func (e *BehaviorEngine) velocityCount(key string) int {
-	e.velocityMu.Lock()
-	defer e.velocityMu.Unlock()
-	return slidingCount(&e.velocityCounters, key, velocityWindow)
+// A degraded count — one that covers this replica only — is reported by the
+// window itself, as a throttled log and crp_sliding_window_fallback_total, so
+// neither of these repeats it per event.
+
+func (e *BehaviorEngine) velocityCount(ctx context.Context, key string, p *model.BehaviourPolicy) int {
+	n, _ := e.velocity.Count(ctx, key, p.VelocityWindow)
+	return n
 }
 
-func (e *BehaviorEngine) failureCount(key string) int {
-	e.failureMu.Lock()
-	defer e.failureMu.Unlock()
-	return slidingCount(&e.failureCounters, key, bruteForceWindow)
-}
-
-func slidingCount(m *map[string][]time.Time, key string, window time.Duration) int {
-	now := time.Now().UTC()
-	cutoff := now.Add(-window)
-	times := (*m)[key]
-	fresh := times[:0]
-	for _, ts := range times {
-		if ts.After(cutoff) {
-			fresh = append(fresh, ts)
-		}
-	}
-	fresh = append(fresh, now)
-	(*m)[key] = fresh
-	return len(fresh)
+func (e *BehaviorEngine) failureCount(ctx context.Context, key string, p *model.BehaviourPolicy) int {
+	n, _ := e.failures.Count(ctx, key, p.BruteForceWindow)
+	return n
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func entityFrom(ev *event.NormalizedEvent) (id, entityType string) {
+// entityNamespace scopes every derived entity identifier. Fixed, because the
+// identifier has to be the same on every replica and across restarts — an
+// entity whose id changed would get a fresh baseline each time and never be
+// anomalous.
+var entityNamespace = uuid.MustParse("6f6a2c1e-9b4e-5d3a-8c17-0d2f4b9a7e31")
+
+// entityFrom is who this event is about.
+//
+// It used to read user_id and asset_id and nothing else. A log line carries a
+// username, not a UUID — the SIEM parsers fill user_name and leave user_id
+// empty — so every event was discarded one step after it arrived, and
+// ueba_profiles had zero rows on a platform that had ingested thousands of
+// events. The behavioural engine had never built a single baseline.
+//
+// Where the source gives a UUID it is used as is. Where it gives a name, the
+// identifier is derived from it: the same name in the same tenant always yields
+// the same UUID, on every replica and after every restart, without a lookup on
+// the hot path. It is scoped by tenant, so one customer's "admin" is never
+// another's, and lower-cased, because a source that writes "M.Durand" on Monday
+// and "m.durand" on Tuesday is describing one person.
+func entityFrom(ev *event.NormalizedEvent) (id, name, entityType string) {
+	derive := func(kind, raw string) string {
+		key := ev.TenantID + "|" + kind + "|" + strings.ToLower(strings.TrimSpace(raw))
+		return uuid.NewSHA1(entityNamespace, []byte(key)).String()
+	}
+
+	// A user first: behaviour is a property of people before it is of machines,
+	// and an event that names both is about what the person did.
 	if ev.UserID != nil && *ev.UserID != "" {
-		return *ev.UserID, model.EntityTypeUser
+		userName := *ev.UserID
+		if ev.UserName != nil && *ev.UserName != "" {
+			userName = *ev.UserName
+		}
+		if _, err := uuid.Parse(*ev.UserID); err == nil {
+			return *ev.UserID, userName, model.EntityTypeUser
+		}
+		// A user_id that is not a UUID is still an identity; it is just one
+		// this platform did not mint. Deriving beats discarding.
+		return derive(model.EntityTypeUser, *ev.UserID), userName, model.EntityTypeUser
 	}
+	if ev.UserName != nil && *ev.UserName != "" {
+		return derive(model.EntityTypeUser, *ev.UserName), *ev.UserName, model.EntityTypeUser
+	}
+
 	if ev.AssetID != nil && *ev.AssetID != "" {
-		return *ev.AssetID, model.EntityTypeAsset
+		assetName := *ev.AssetID
+		if ev.AssetHostname != nil && *ev.AssetHostname != "" {
+			assetName = *ev.AssetHostname
+		}
+		if _, err := uuid.Parse(*ev.AssetID); err == nil {
+			return *ev.AssetID, assetName, model.EntityTypeAsset
+		}
+		return derive(model.EntityTypeAsset, *ev.AssetID), assetName, model.EntityTypeAsset
 	}
-	return "", ""
+	if ev.AssetHostname != nil && *ev.AssetHostname != "" {
+		return derive(model.EntityTypeAsset, *ev.AssetHostname), *ev.AssetHostname, model.EntityTypeAsset
+	}
+
+	return "", "", ""
 }
 
 func behaviorEventFrom(ev *event.NormalizedEvent, entityID, entityType string) *model.BehaviorEvent {
@@ -388,10 +436,10 @@ func behaviorEventFrom(ev *event.NormalizedEvent, entityID, entityType string) *
 		DayOfWeek:  uint8(ev.Timestamp.UTC().Weekday()),
 		EventTime:  ev.Timestamp,
 		Attributes: map[string]any{
-			"threat_score":  ev.ThreatScore,
-			"cbs_impact":    ev.CBSImpact,
-			"swift_impact":  ev.SWIFTImpact,
-			"mitre_tactic":  ev.MitreTactic,
+			"threat_score": ev.ThreatScore,
+			"cbs_impact":   ev.CBSImpact,
+			"swift_impact": ev.SWIFTImpact,
+			"mitre_tactic": ev.MitreTactic,
 		},
 	}
 	if ev.IPSource != nil {

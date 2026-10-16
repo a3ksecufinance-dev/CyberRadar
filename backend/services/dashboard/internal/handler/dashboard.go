@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/dashboard/internal/model"
 	"github.com/cyberradar/platform/services/dashboard/internal/service"
@@ -76,7 +77,7 @@ func (h *DashboardHandler) ListDashboards(w http.ResponseWriter, r *http.Request
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"dashboards": dashboards, "total": len(dashboards)})
+	response.OKWithMeta(w, dashboards, &response.Meta{Total: int64(len(dashboards))})
 }
 
 func (h *DashboardHandler) CreateDashboard(w http.ResponseWriter, r *http.Request) {
@@ -243,13 +244,7 @@ func (h *DashboardHandler) TimeSeries(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{
-		"domain":     domain,
-		"metric_key": metricKey,
-		"interval":   req.Interval,
-		"points":     points,
-		"total":      len(points),
-	})
+	response.OKWithMeta(w, points, &response.Meta{Total: int64(len(points))})
 }
 
 func (h *DashboardHandler) DomainSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +285,7 @@ func (h *DashboardHandler) RiskTimeline(w http.ResponseWriter, r *http.Request) 
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"points": points, "total": len(points)})
+	response.OKWithMeta(w, points, &response.Meta{Total: int64(len(points))})
 }
 
 // ─── Reports ──────────────────────────────────────────────────────────────────
@@ -302,7 +297,7 @@ func (h *DashboardHandler) ListReports(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"reports": reports, "total": len(reports)})
+	response.OKWithMeta(w, reports, &response.Meta{Total: int64(len(reports))})
 }
 
 func (h *DashboardHandler) CreateReport(w http.ResponseWriter, r *http.Request) {
@@ -369,15 +364,11 @@ func (h *DashboardHandler) DeleteReport(w http.ResponseWriter, r *http.Request) 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -391,14 +382,5 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }

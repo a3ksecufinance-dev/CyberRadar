@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS crp_ti.ioc_hits
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(hit_at)
 ORDER BY (tenant_id, hit_at, ioc_type)
-TTL hit_at + INTERVAL 365 DAY
+-- TTL takes an expression yielding Date or DateTime. These columns are
+-- DateTime64, which it rejects outright, so the table was never created:
+-- toDateTime() narrows it for the expiry calculation only; the stored
+-- millisecond precision is untouched.
+TTL toDateTime(hit_at) + INTERVAL 365 DAY
 SETTINGS index_granularity = 8192;
 
 -- Daily threat intel summary (for dashboard time-series charts)

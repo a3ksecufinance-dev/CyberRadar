@@ -87,21 +87,35 @@ func (s *IRService) ListIncidents(ctx context.Context, tenantID uuid.UUID, f mod
 }
 
 func (s *IRService) UpdateIncident(ctx context.Context, tenantID, id uuid.UUID, req *model.UpdateIncidentRequest, updatedBy *uuid.UUID) (*model.IRIncident, error) {
+	// What the status was before, so that re-asserting it is not recorded as
+	// a transition. An update that carries the whole form — the ordinary case
+	// from a screen, and from any integration that PATCHes its own view of
+	// the incident — used to add a "Status changed to investigating" line
+	// every time it was saved, and to publish the containment event again
+	// with it. The timeline is forensic evidence; it cannot be padded by the
+	// number of times somebody pressed save.
+	var previous string
+	if req.Status != nil {
+		if before, err := s.repo.GetIncident(ctx, tenantID, id); err == nil && before != nil {
+			previous = before.Status
+		}
+	}
+
 	inc, err := s.repo.UpdateIncident(ctx, tenantID, id, req)
 	if err != nil {
 		return nil, err
 	}
 
 	// Timeline entry for status changes
-	if req.Status != nil {
+	if req.Status != nil && *req.Status != previous {
 		go func() {
 			bgCtx := context.Background()
 			_, _ = s.repo.AddTimelineEvent(bgCtx, tenantID, inc.ID, &model.CreateTimelineEventRequest{
-				EventTime:   time.Now().UTC(),
-				EventType:   "action",
-				Title:       "Status changed to " + *req.Status,
-				ActorType:   "analyst",
-				IsVerified:  true,
+				EventTime:  time.Now().UTC(),
+				EventType:  "action",
+				Title:      "Status changed to " + *req.Status,
+				ActorType:  "analyst",
+				IsVerified: true,
 			}, updatedBy)
 		}()
 

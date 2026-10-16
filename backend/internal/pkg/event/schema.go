@@ -51,13 +51,13 @@ const (
 type Format string
 
 const (
-	FormatJSON      Format = "json"
-	FormatCEF       Format = "cef"
-	FormatSyslog    Format = "syslog"
-	FormatLEEF      Format = "leef"
-	FormatWinEvent  Format = "winevent"
-	FormatNetflow   Format = "netflow"
-	FormatCLF       Format = "clf" // Common Log Format (Apache/Nginx)
+	FormatJSON     Format = "json"
+	FormatCEF      Format = "cef"
+	FormatSyslog   Format = "syslog"
+	FormatLEEF     Format = "leef"
+	FormatWinEvent Format = "winevent"
+	FormatNetflow  Format = "netflow"
+	FormatCLF      Format = "clf" // Common Log Format (Apache/Nginx)
 )
 
 // ─── Raw Event ───────────────────────────────────────────────────────────────
@@ -67,8 +67,8 @@ type RawEvent struct {
 	ID          uuid.UUID `json:"id"`
 	TenantID    string    `json:"tenant_id"`
 	ConnectorID string    `json:"connector_id"`
-	Source      string    `json:"source"`       // hostname, IP, or service name
-	SourceType  string    `json:"source_type"`  // firewall, edr, iam, cbs, atm, etc.
+	Source      string    `json:"source"`      // hostname, IP, or service name
+	SourceType  string    `json:"source_type"` // firewall, edr, iam, cbs, atm, etc.
 	Format      Format    `json:"format"`
 	ReceivedAt  time.Time `json:"received_at"`
 	Raw         string    `json:"raw"` // original payload (UTF-8)
@@ -80,11 +80,11 @@ type RawEvent struct {
 // All fields use snake_case JSON. Nullable fields use pointers.
 type NormalizedEvent struct {
 	// Core identity
-	EventID     uuid.UUID `json:"event_id"`
-	TenantID    string    `json:"tenant_id"`
-	Timestamp   time.Time `json:"timestamp"`
-	IngestedAt  time.Time `json:"ingested_at"`
-	SchemaVersion uint8   `json:"schema_version"`
+	EventID       uuid.UUID `json:"event_id"`
+	TenantID      string    `json:"tenant_id"`
+	Timestamp     time.Time `json:"timestamp"`
+	IngestedAt    time.Time `json:"ingested_at"`
+	SchemaVersion uint8     `json:"schema_version"`
 
 	// Lineage
 	ConnectorID string `json:"connector_id"`
@@ -118,12 +118,12 @@ type NormalizedEvent struct {
 	Outcome  Outcome  `json:"outcome"`
 
 	// Threat enrichment (populated by pipeline)
-	ThreatScore     float32  `json:"threat_score"`
-	MitreTactic     *string  `json:"mitre_tactic,omitempty"`
-	MitreTechnique  *string  `json:"mitre_technique,omitempty"`
-	IOCMatched      []string `json:"ioc_matched,omitempty"`
-	GeoCountry      *string  `json:"geo_country,omitempty"`
-	GeoASN          *string  `json:"geo_asn,omitempty"`
+	ThreatScore    float32  `json:"threat_score"`
+	MitreTactic    *string  `json:"mitre_tactic,omitempty"`
+	MitreTechnique *string  `json:"mitre_technique,omitempty"`
+	IOCMatched     []string `json:"ioc_matched,omitempty"`
+	GeoCountry     *string  `json:"geo_country,omitempty"`
+	GeoASN         *string  `json:"geo_asn,omitempty"`
 
 	// Risk
 	RiskScore float32 `json:"risk_score"`

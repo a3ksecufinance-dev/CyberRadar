@@ -1,0 +1,45 @@
+<!--
+  ClickHouse for a single developer machine, started by dev-local.sh.
+
+  It binds to the loopback interface only and keeps its data under the state
+  directory the script owns, so nothing here touches a system-wide ClickHouse a
+  developer may already have. The paths are relative to the working directory
+  the script starts it from, and a path given on the command line overrides
+  them. (An XML comment may not contain two consecutive hyphens, which is why
+  that option is spelled out rather than written.)
+
+  Not a production configuration: no replication, no access control, one
+  default user with no password. deployments/docker-compose.yml is the
+  reference for how the platform is actually deployed.
+-->
+<clickhouse>
+    <logger>
+        <level>warning</level>
+        <console>1</console>
+    </logger>
+
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <listen_host>127.0.0.1</listen_host>
+
+    <path>./clickhouse/</path>
+    <tmp_path>./clickhouse/tmp/</tmp_path>
+    <user_files_path>./clickhouse/user_files/</user_files_path>
+
+    <!-- Modest caches: this shares a machine with thirty Go services, a JVM
+         broker, Keycloak and a Next.js build. -->
+    <mark_cache_size>268435456</mark_cache_size>
+    <max_server_memory_usage_to_ram_ratio>0.4</max_server_memory_usage_to_ram_ratio>
+
+    <users>
+        <default>
+            <password></password>
+            <networks><ip>::1</ip><ip>127.0.0.1</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+        </default>
+    </users>
+    <profiles><default/></profiles>
+    <quotas><default/></quotas>
+</clickhouse>

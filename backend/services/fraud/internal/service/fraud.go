@@ -8,23 +8,68 @@ import (
 	"time"
 
 	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
-	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/event"
 	"github.com/cyberradar/platform/services/fraud/internal/model"
-	"github.com/cyberradar/platform/services/fraud/internal/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
+// Store is the persistence this service needs.
+//
+// Declared as an interface so the scoring path can be exercised without a
+// database. That path is where a flagged transaction either reaches the
+// detection engine or does not, and "does not" is silent — exactly the failure
+// this interface exists to make testable. *repository.FraudRepository
+// satisfies it.
+type Store interface {
+	AddWatchlistEntry(ctx context.Context, tenantID uuid.UUID, req *model.AddWatchlistRequest, addedBy uuid.UUID) (*model.FraudWatchlistEntry, error)
+	CheckWatchlist(ctx context.Context, tenantID uuid.UUID, values []string) ([]*model.FraudWatchlistEntry, error)
+	CreateCase(ctx context.Context, tenantID uuid.UUID, req *model.CreateCaseRequest) (*model.FraudCase, error)
+	CreateRule(ctx context.Context, tenantID uuid.UUID, req *model.CreateRuleRequest, createdBy uuid.UUID) (*model.FraudRule, error)
+	CreateSignal(ctx context.Context, tenantID uuid.UUID, txnID *uuid.UUID, ruleID *uuid.UUID, signalType, desc string, riskContrib int, evidence map[string]any) (*model.FraudSignal, error)
+	GetCase(ctx context.Context, tenantID, caseID uuid.UUID) (*model.FraudCase, error)
+	GetRule(ctx context.Context, tenantID, ruleID uuid.UUID) (*model.FraudRule, error)
+	GetTransaction(ctx context.Context, tenantID, txnID uuid.UUID) (*model.FraudTransaction, error)
+	IncrementRuleCounter(ctx context.Context, ruleID uuid.UUID)
+	IngestTransaction(ctx context.Context, tenantID uuid.UUID, req *model.IngestTransactionRequest) (*model.FraudTransaction, error)
+	ListActiveRules(ctx context.Context, tenantID uuid.UUID) ([]*model.FraudRule, error)
+	ListCases(ctx context.Context, tenantID uuid.UUID, f model.ListCasesFilter) ([]*model.FraudCase, int, error)
+	ListRules(ctx context.Context, tenantID uuid.UUID, category string, activeOnly bool, page, pageSize int) ([]*model.FraudRule, int, error)
+	ListTransactions(ctx context.Context, tenantID uuid.UUID, f model.ListTransactionsFilter) ([]*model.FraudTransaction, int, error)
+	ListWatchlist(ctx context.Context, tenantID uuid.UUID, entityType, listType string, activeOnly bool, page, pageSize int) ([]*model.FraudWatchlistEntry, int, error)
+	RemoveWatchlistEntry(ctx context.Context, tenantID, entryID uuid.UUID) error
+	Stats(ctx context.Context, tenantID uuid.UUID) (*model.FraudStats, error)
+	UpdateCase(ctx context.Context, tenantID, caseID uuid.UUID, req *model.UpdateCaseRequest) (*model.FraudCase, error)
+	UpdateRule(ctx context.Context, tenantID, ruleID uuid.UUID, req *model.UpdateRuleRequest) (*model.FraudRule, error)
+	UpdateTransactionScore(ctx context.Context, txnID uuid.UUID, score int, status string, flaggedBy []string) error
+	UpdateTransactionStatus(ctx context.Context, tenantID, txnID uuid.UUID, status string) (*model.FraudTransaction, error)
+}
+
+// Publisher is the one thing this service asks of a Kafka producer.
+//
+// An interface so a test can assert what gets published and where, which is
+// the only way to know a transaction actually reaches the detection engine.
+// *kafka.Producer satisfies it.
+type Publisher interface {
+	Publish(ctx context.Context, key string, value any) error
+}
+
 // FraudService orchestrates fraud detection and financial crime management.
 type FraudService struct {
-	repo     *repository.FraudRepository
-	producer *pkgkafka.Producer
-	logger   zerolog.Logger
+	repo Store
+	// producer publishes to crp.events.fraud — the integration topic, for
+	// whatever a client wires onto it.
+	producer Publisher
+	// detection publishes to crp.events.enriched — the topic the SIEM rule
+	// engine reads. This is the one that makes a flagged transaction a
+	// detectable event rather than a row in a table.
+	detection Publisher
+	logger    zerolog.Logger
 }
 
 // NewFraudService creates a FraudService.
-func NewFraudService(repo *repository.FraudRepository, producer *pkgkafka.Producer, logger zerolog.Logger) *FraudService {
-	return &FraudService{repo: repo, producer: producer, logger: logger}
+func NewFraudService(repo Store, producer, detection Publisher, logger zerolog.Logger) *FraudService {
+	return &FraudService{repo: repo, producer: producer, detection: detection, logger: logger}
 }
 
 // ─── Rules ────────────────────────────────────────────────────────────────────
@@ -182,7 +227,170 @@ func (s *FraudService) evaluateRules(tenantID uuid.UUID, txn *model.FraudTransac
 		}
 		data, _ := json.Marshal(payload)
 		_ = s.producer.Publish(ctx, txn.ID.String(), data)
+
+		s.publishForDetection(ctx, tenantID, txn, finalScore, status, flaggedBy)
 	}
+}
+
+// publishForDetection puts the flagged transaction on the topic the SIEM rule
+// engine consumes, as a canonical event.
+//
+// This is the wire that makes the product one product.
+//
+// Before it, a transaction scored 90 changed a status column and published to
+// `crp.events.fraud` — a topic **no service consumed**. It raised no alert,
+// opened no case, and could not be correlated with anything happening on the
+// IT estate at the same moment. The compromise of an account at 14:02 and the
+// transfer it authorised at 14:09 lived in two systems that never spoke.
+//
+// Publishing to crp.events.enriched puts the transaction through the same
+// engine as every other event, which buys three things the fraud module does
+// not have and would otherwise have to grow:
+//
+//   - windowed counting (`threshold: {count, group_by, window_seconds}`), the
+//     shape every wallet fraud pattern needs — structuring is "N operations
+//     under the threshold in 24 h" and nothing else;
+//   - correlation with IT events on the same actor;
+//   - the alert, case, notification and SOAR path that already exists.
+//
+// The ordering account is mapped to user_id deliberately: in a transaction the
+// actor *is* the account that ordered it, and user_id is the field a rule can
+// group by. Without that mapping the engine can count transactions but not
+// count them per account, which is the only count that means anything.
+func (s *FraudService) publishForDetection(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	txn *model.FraudTransaction,
+	score int,
+	status string,
+	flaggedBy []string,
+) {
+	if s.detection == nil {
+		return
+	}
+
+	ev := fraudEventToNormalized(tenantID, txn, score, status, flaggedBy)
+	if err := s.detection.Publish(ctx, ev.TenantID+"/"+ev.EventID.String(), ev); err != nil {
+		// Logged, not retried: the transaction is already scored and stored,
+		// and the integration topic above still carries it. What is lost is
+		// the detection, and saying so plainly beats a silent drop.
+		s.logger.Error().Err(err).
+			Str("txn_id", txn.TransactionID).
+			Msg("detection_publish_failed")
+	}
+}
+
+// SourceTypeFraudEngine marks an event this service synthesised.
+//
+// The fraud service also consumes crp.events.enriched. Anything that starts
+// scoring those events must skip its own output, or a flagged transaction
+// scores itself forever.
+const SourceTypeFraudEngine = "fraud-engine"
+
+// fraudEventToNormalized maps a scored transaction onto the canonical event.
+func fraudEventToNormalized(
+	tenantID uuid.UUID,
+	txn *model.FraudTransaction,
+	score int,
+	status string,
+	flaggedBy []string,
+) *event.NormalizedEvent {
+	now := time.Now().UTC()
+	ts := txn.TransactedAt
+	if ts.IsZero() {
+		ts = now
+	}
+
+	// 0–100 from the fraud scorer, 0–10 on the canonical event. CRP-FRD-0001
+	// fires at threat_score >= 7, so a transaction scored 70 trips the shipped
+	// detection; 50 to 69 flows in for the windowed rules to count.
+	scaled := float32(score) / 10
+
+	ev := &event.NormalizedEvent{
+		EventID:       uuid.New(),
+		TenantID:      tenantID.String(),
+		Timestamp:     ts,
+		IngestedAt:    now,
+		SchemaVersion: 1,
+		Source:        "fraud-service",
+		SourceType:    SourceTypeFraudEngine,
+		Action:        "transaction.flagged",
+		Category:      event.CategoryTransaction,
+		Severity:      severityForScore(score),
+		Outcome:       outcomeForStatus(status),
+		ThreatScore:   scaled,
+		RiskScore:     scaled,
+		IOCMatched:    []string{},
+		// A transaction is a core banking flow by definition.
+		CBSImpact: 1,
+	}
+
+	if txn.Channel == model.ChannelSWIFT {
+		ev.SWIFTImpact = 1
+	}
+	if txn.SenderAccount != "" {
+		ev.UserID = &txn.SenderAccount
+	}
+	if txn.SenderEntity != "" {
+		ev.UserName = &txn.SenderEntity
+	}
+	if txn.CountryOrigin != "" {
+		ev.GeoCountry = &txn.CountryOrigin
+	}
+	if txn.Channel != "" {
+		bs := txn.Channel
+		ev.BusinessService = &bs
+	}
+
+	// The whole transaction travels in raw_event: an analyst opening the alert
+	// needs the amount, the counterparty and the rules that fired, and the
+	// canonical event has no columns for them.
+	raw, err := json.Marshal(map[string]any{
+		"transaction_id":   txn.ID.String(),
+		"ext_txn_id":       txn.TransactionID,
+		"channel":          txn.Channel,
+		"amount":           txn.Amount,
+		"currency":         txn.Currency,
+		"sender_account":   txn.SenderAccount,
+		"receiver_account": txn.ReceiverAccount,
+		"receiver_entity":  txn.ReceiverEntity,
+		"country_origin":   txn.CountryOrigin,
+		"country_dest":     txn.CountryDest,
+		"fraud_score":      score,
+		"status":           status,
+		"flagged_by":       flaggedBy,
+	})
+	if err == nil {
+		ev.RawEvent = string(raw)
+	}
+
+	return ev
+}
+
+// severityForScore maps the 0–100 fraud score onto the event severity.
+//
+// The thresholds mirror the status ladder above: blocked at 80, flagged at 50.
+func severityForScore(score int) event.Severity {
+	switch {
+	case score >= 80:
+		return event.SeverityCritical
+	case score >= 65:
+		return event.SeverityHigh
+	default:
+		return event.SeverityMedium
+	}
+}
+
+// outcomeForStatus says whether the transaction went through.
+//
+// A blocked transaction is a failure from the payment's point of view and a
+// success from the control's — the event records the payment, because that is
+// what an analyst is reconstructing.
+func outcomeForStatus(status string) event.Outcome {
+	if status == model.TxnStatusBlocked {
+		return event.OutcomeFailure
+	}
+	return event.OutcomeSuccess
 }
 
 // evaluateRule applies a single rule to a transaction.

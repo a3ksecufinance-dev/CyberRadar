@@ -47,8 +47,15 @@ CREATE TABLE IF NOT EXISTS crp_siem.alerts (
 )
 ENGINE = MergeTree()
 PARTITION BY (tenant_id, toYYYYMM(detected_at))
-ORDER BY (tenant_id, severity DESC, detected_at, alert_id)
-TTL detected_at + INTERVAL 365 DAY
+-- A MergeTree sorting key is always ascending; DESC here was a syntax
+-- error, so crp_siem.alerts never existed. Ordering for display is the
+-- query's job, not the key's.
+ORDER BY (tenant_id, severity, detected_at, alert_id)
+-- TTL takes an expression yielding Date or DateTime. These columns are
+-- DateTime64, which it rejects outright, so the table was never created:
+-- toDateTime() narrows it for the expiry calculation only; the stored
+-- millisecond precision is untouched.
+TTL toDateTime(detected_at) + INTERVAL 365 DAY
 SETTINGS
     index_granularity = 8192;
 
@@ -64,7 +71,7 @@ CREATE TABLE IF NOT EXISTS crp_siem.alert_dedup (
 )
 ENGINE = ReplacingMergeTree(last_seen_at)
 ORDER BY (tenant_id, dedup_key)
-TTL last_seen_at + INTERVAL 1 DAY
+TTL toDateTime(last_seen_at) + INTERVAL 1 DAY
 SETTINGS index_granularity = 8192;
 
 -- ─── Correlation Metrics (per-minute aggregates) ───────────────────────────

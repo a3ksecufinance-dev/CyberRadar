@@ -20,15 +20,15 @@ const (
 // ─── Frameworks ───────────────────────────────────────────────────────────────
 
 const (
-	FrameworkCIS     = "cis"
-	FrameworkNIST    = "nist"
-	FrameworkPCIDSS  = "pci_dss"
-	FrameworkHIPAA   = "hipaa"
-	FrameworkSOX     = "sox"
+	FrameworkCIS      = "cis"
+	FrameworkNIST     = "nist"
+	FrameworkPCIDSS   = "pci_dss"
+	FrameworkHIPAA    = "hipaa"
+	FrameworkSOX      = "sox"
 	FrameworkISO27001 = "iso27001"
-	FrameworkGDPR    = "gdpr"
-	FrameworkDORA    = "dora"
-	FrameworkCustom  = "custom"
+	FrameworkGDPR     = "gdpr"
+	FrameworkDORA     = "dora"
+	FrameworkCustom   = "custom"
 )
 
 // ─── Severities ───────────────────────────────────────────────────────────────
@@ -146,16 +146,16 @@ type CSPMScan struct {
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 type CSPMStats struct {
-	TotalAccounts      int                   `json:"total_accounts"`
-	TotalResources     int                   `json:"total_resources"`
-	PublicResources    int                   `json:"public_resources"`
-	OpenFindings       int                   `json:"open_findings"`
-	AvgPostureScore    float64               `json:"avg_posture_score"`
-	FindingsBySeverity map[string]int        `json:"findings_by_severity"`
-	FindingsByProvider map[string]int        `json:"findings_by_provider"`
-	FindingsByFramework map[string]int       `json:"findings_by_framework"`
-	AccountPostures    []*AccountPosture     `json:"account_postures"`
-	TopViolatedRules   []*RuleViolationStats `json:"top_violated_rules"`
+	TotalAccounts       int                   `json:"total_accounts"`
+	TotalResources      int                   `json:"total_resources"`
+	PublicResources     int                   `json:"public_resources"`
+	OpenFindings        int                   `json:"open_findings"`
+	AvgPostureScore     float64               `json:"avg_posture_score"`
+	FindingsBySeverity  map[string]int        `json:"findings_by_severity"`
+	FindingsByProvider  map[string]int        `json:"findings_by_provider"`
+	FindingsByFramework map[string]int        `json:"findings_by_framework"`
+	AccountPostures     []*AccountPosture     `json:"account_postures"`
+	TopViolatedRules    []*RuleViolationStats `json:"top_violated_rules"`
 }
 
 type AccountPosture struct {
@@ -167,11 +167,11 @@ type AccountPosture struct {
 }
 
 type RuleViolationStats struct {
-	RuleID       uuid.UUID `json:"rule_id"`
-	RuleRef      string    `json:"rule_ref"`
-	Title        string    `json:"title"`
-	Severity     string    `json:"severity"`
-	ViolationCount int     `json:"violation_count"`
+	RuleID         uuid.UUID `json:"rule_id"`
+	RuleRef        string    `json:"rule_ref"`
+	Title          string    `json:"title"`
+	Severity       string    `json:"severity"`
+	ViolationCount int       `json:"violation_count"`
 }
 
 // ─── Request models ───────────────────────────────────────────────────────────
@@ -241,14 +241,14 @@ type TriggerScanRequest struct {
 }
 
 type ListFindingsFilter struct {
-	AccountID    *uuid.UUID
-	ResourceID   *uuid.UUID
-	Severity     string
-	Status       string
-	Framework    string
-	Provider     string
-	Page         int
-	PageSize     int
+	AccountID  *uuid.UUID
+	ResourceID *uuid.UUID
+	Severity   string
+	Status     string
+	Framework  string
+	Provider   string
+	Page       int
+	PageSize   int
 }
 
 type ListResourcesFilter struct {

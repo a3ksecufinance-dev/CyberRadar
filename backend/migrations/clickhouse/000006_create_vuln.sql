@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS crp_vuln.exposure_snapshots
 ENGINE = ReplacingMergeTree()
 PARTITION BY toYYYYMM(snapshot_date)
 ORDER BY (tenant_id, snapshot_date)
+-- TTL takes an expression yielding Date or DateTime. These columns are
+-- DateTime64, which it rejects outright, so the table was never created:
+-- toDateTime() narrows it for the expiry calculation only; the stored
+-- millisecond precision is untouched.
 TTL snapshot_date + INTERVAL 2 YEAR;
 
 -- Scan job metrics (one row per completed scan)
@@ -44,4 +48,4 @@ CREATE TABLE IF NOT EXISTS crp_vuln.scan_metrics
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(started_at)
 ORDER BY (tenant_id, started_at)
-TTL started_at + INTERVAL 1 YEAR;
+TTL toDateTime(started_at) + INTERVAL 1 YEAR;

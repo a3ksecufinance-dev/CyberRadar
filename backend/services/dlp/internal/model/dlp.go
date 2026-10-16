@@ -9,11 +9,11 @@ import (
 // ─── Sensitivity levels ───────────────────────────────────────────────────────
 
 const (
-	SensitivityPublic     = "PUBLIC"
-	SensitivityInternal   = "INTERNAL"
+	SensitivityPublic       = "PUBLIC"
+	SensitivityInternal     = "INTERNAL"
 	SensitivityConfidential = "CONFIDENTIAL"
-	SensitivityRestricted = "RESTRICTED"
-	SensitivityTopSecret  = "TOP_SECRET"
+	SensitivityRestricted   = "RESTRICTED"
+	SensitivityTopSecret    = "TOP_SECRET"
 )
 
 // ─── Asset types ──────────────────────────────────────────────────────────────
@@ -32,12 +32,12 @@ const (
 // ─── Policy types ─────────────────────────────────────────────────────────────
 
 const (
-	PolicyTypeExfiltration    = "exfiltration"
-	PolicyTypeSharing         = "sharing"
-	PolicyTypeRetention       = "retention"
-	PolicyTypeAccess          = "access"
-	PolicyTypeEncryption      = "encryption"
-	PolicyTypeClassification  = "classification"
+	PolicyTypeExfiltration   = "exfiltration"
+	PolicyTypeSharing        = "sharing"
+	PolicyTypeRetention      = "retention"
+	PolicyTypeAccess         = "access"
+	PolicyTypeEncryption     = "encryption"
+	PolicyTypeClassification = "classification"
 )
 
 // ─── Policy actions ───────────────────────────────────────────────────────────
@@ -63,10 +63,10 @@ const (
 // ─── Violation statuses ───────────────────────────────────────────────────────
 
 const (
-	ViolationStatusOpen           = "open"
-	ViolationStatusInvestigating  = "investigating"
-	ViolationStatusFalsePositive  = "false_positive"
-	ViolationStatusResolved       = "resolved"
+	ViolationStatusOpen          = "open"
+	ViolationStatusInvestigating = "investigating"
+	ViolationStatusFalsePositive = "false_positive"
+	ViolationStatusResolved      = "resolved"
 )
 
 // ─── Data categories ──────────────────────────────────────────────────────────
@@ -78,24 +78,24 @@ const (
 	DataCategoryBanking     = "banking"
 	DataCategorySWIFT       = "swift"
 	DataCategoryCredentials = "credentials"
-	DataCategoryIP          = "ip"          // intellectual property
+	DataCategoryIP          = "ip" // intellectual property
 )
 
 // ─── Core structs ─────────────────────────────────────────────────────────────
 
 type DLPLabel struct {
-	ID             uuid.UUID `json:"id"`
-	TenantID       uuid.UUID `json:"tenant_id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	Sensitivity    string    `json:"sensitivity"`
-	Color          string    `json:"color"`
-	RegexPatterns  []string  `json:"regex_patterns"`
-	Keywords       []string  `json:"keywords"`
-	IsActive       bool      `json:"is_active"`
-	CreatedBy      *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID            uuid.UUID  `json:"id"`
+	TenantID      uuid.UUID  `json:"tenant_id"`
+	Name          string     `json:"name"`
+	Description   string     `json:"description,omitempty"`
+	Sensitivity   string     `json:"sensitivity"`
+	Color         string     `json:"color"`
+	RegexPatterns []string   `json:"regex_patterns"`
+	Keywords      []string   `json:"keywords"`
+	IsActive      bool       `json:"is_active"`
+	CreatedBy     *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 type DLPDataAsset struct {

@@ -217,29 +217,29 @@ type UpdateTaskRequest struct {
 // ─── Evidence ─────────────────────────────────────────────────────────────────
 
 type IREvidence struct {
-	ID               uuid.UUID  `json:"id"`
-	TenantID         uuid.UUID  `json:"tenant_id"`
-	IncidentID       uuid.UUID  `json:"incident_id"`
-	Name             string     `json:"name"`
-	Description      string     `json:"description,omitempty"`
-	EvidenceType     string     `json:"evidence_type"`
-	FileName         string     `json:"file_name,omitempty"`
-	FileSize         *int64     `json:"file_size,omitempty"`
-	FileHashMD5      string     `json:"file_hash_md5,omitempty"`
-	FileHashSHA256   string     `json:"file_hash_sha256,omitempty"`
-	StoragePath      string     `json:"storage_path,omitempty"`
-	CollectedBy      string     `json:"collected_by,omitempty"`
-	CollectedAt      time.Time  `json:"collected_at"`
-	CollectionMethod string     `json:"collection_method,omitempty"`
-	Status           string     `json:"status"`
-	AnalysisNotes    string     `json:"analysis_notes,omitempty"`
-	AnalyzedBy       string     `json:"analyzed_by,omitempty"`
-	AnalyzedAt       *time.Time `json:"analyzed_at,omitempty"`
-	IsSensitive      bool       `json:"is_sensitive"`
-	Tags             []string   `json:"tags"`
+	ID               uuid.UUID      `json:"id"`
+	TenantID         uuid.UUID      `json:"tenant_id"`
+	IncidentID       uuid.UUID      `json:"incident_id"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	EvidenceType     string         `json:"evidence_type"`
+	FileName         string         `json:"file_name,omitempty"`
+	FileSize         *int64         `json:"file_size,omitempty"`
+	FileHashMD5      string         `json:"file_hash_md5,omitempty"`
+	FileHashSHA256   string         `json:"file_hash_sha256,omitempty"`
+	StoragePath      string         `json:"storage_path,omitempty"`
+	CollectedBy      string         `json:"collected_by,omitempty"`
+	CollectedAt      time.Time      `json:"collected_at"`
+	CollectionMethod string         `json:"collection_method,omitempty"`
+	Status           string         `json:"status"`
+	AnalysisNotes    string         `json:"analysis_notes,omitempty"`
+	AnalyzedBy       string         `json:"analyzed_by,omitempty"`
+	AnalyzedAt       *time.Time     `json:"analyzed_at,omitempty"`
+	IsSensitive      bool           `json:"is_sensitive"`
+	Tags             []string       `json:"tags"`
 	Metadata         map[string]any `json:"metadata"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type CreateEvidenceRequest struct {

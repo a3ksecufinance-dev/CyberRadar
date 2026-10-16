@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/vuln/internal/model"
 	"github.com/cyberradar/platform/services/vuln/internal/service"
@@ -75,7 +76,7 @@ func (h *VulnHandler) ListVulns(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"vulnerabilities": vulns, "total": total})
+	response.OKWithMeta(w, vulns, &response.Meta{Total: int64(total)})
 }
 
 func (h *VulnHandler) CreateVuln(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +144,7 @@ func (h *VulnHandler) ListFindings(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"findings": findings, "total": total})
+	response.OKWithMeta(w, findings, &response.Meta{Total: int64(total)})
 }
 
 func (h *VulnHandler) CreateFinding(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +233,7 @@ func (h *VulnHandler) ListScans(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"scans": jobs, "total": len(jobs)})
+	response.OKWithMeta(w, jobs, &response.Meta{Total: int64(len(jobs))})
 }
 
 func (h *VulnHandler) CreateScan(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +269,7 @@ func (h *VulnHandler) ListTickets(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"tickets": tickets, "total": total})
+	response.OKWithMeta(w, tickets, &response.Meta{Total: int64(total)})
 }
 
 func (h *VulnHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
@@ -329,15 +330,11 @@ func (h *VulnHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -351,16 +348,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

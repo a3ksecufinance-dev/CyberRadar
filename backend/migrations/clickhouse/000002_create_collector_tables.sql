@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS crp_fabric.raw_events (
 ENGINE = MergeTree()
 PARTITION BY (tenant_id, toYYYYMM(received_at))
 ORDER BY (tenant_id, received_at, id)
-TTL received_at + INTERVAL 7 DAY
+-- TTL takes an expression yielding Date or DateTime. These columns are
+-- DateTime64, which it rejects outright, so the table was never created:
+-- toDateTime() narrows it for the expiry calculation only; the stored
+-- millisecond precision is untouched.
+TTL toDateTime(received_at) + INTERVAL 7 DAY
 SETTINGS index_granularity = 8192;
 
 -- ─── Pipeline Metrics ─────────────────────────────────────────────────────────

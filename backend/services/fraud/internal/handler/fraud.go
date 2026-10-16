@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/fraud/internal/model"
 	"github.com/cyberradar/platform/services/fraud/internal/service"
@@ -345,15 +346,11 @@ func (h *FraudHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(s string) (uuid.UUID, error) {
@@ -374,26 +371,5 @@ func queryInt(r *http.Request, key string, def int) int {
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	if err == nil {
-		return
-	}
-	de, ok := err.(*apierrors.DomainError)
-	if !ok {
-		response.InternalError(w)
-		return
-	}
-	switch de.Kind {
-	case apierrors.KindNotFound:
-		response.NotFound(w, de.Message)
-	case apierrors.KindConflict:
-		response.Conflict(w, de.Message)
-	case apierrors.KindBadInput:
-		response.BadRequest(w, "VALIDATION_ERROR", de.Message)
-	case apierrors.KindUnauth:
-		response.Unauthorized(w, de.Message)
-	case apierrors.KindForbidden:
-		response.Forbidden(w, de.Message)
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }

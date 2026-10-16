@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/apifw/internal/model"
 	"github.com/cyberradar/platform/services/apifw/internal/service"
@@ -72,7 +73,7 @@ func (h *APIFWHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"keys": keys, "total": total})
+	response.OKWithMeta(w, keys, &response.Meta{Total: int64(total)})
 }
 
 func (h *APIFWHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +176,7 @@ func (h *APIFWHandler) KeyUsageStats(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"key_id": id, "endpoints": stats})
+	response.OKWithMeta(w, stats, &response.Meta{Total: int64(len(stats))})
 }
 
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
@@ -199,7 +200,7 @@ func (h *APIFWHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"webhooks": whs, "total": total})
+	response.OKWithMeta(w, whs, &response.Meta{Total: int64(total)})
 }
 
 func (h *APIFWHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -282,7 +283,7 @@ func (h *APIFWHandler) EnableWebhook(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "enabled"})
+	response.OKWithMeta(w, "enabled", &response.Meta{Total: int64(len("enabled"))})
 }
 
 func (h *APIFWHandler) DisableWebhook(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +296,7 @@ func (h *APIFWHandler) DisableWebhook(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"status": "disabled"})
+	response.OKWithMeta(w, "disabled", &response.Meta{Total: int64(len("disabled"))})
 }
 
 func (h *APIFWHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +327,7 @@ func (h *APIFWHandler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"deliveries": deliveries, "total": total})
+	response.OKWithMeta(w, deliveries, &response.Meta{Total: int64(total)})
 }
 
 // ─── Stats ────────────────────────────────────────────────────────────────────
@@ -344,15 +345,11 @@ func (h *APIFWHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustCallerID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("user_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.UserID(r.Context())
 }
 
 func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
@@ -366,16 +363,7 @@ func parseUUID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID,
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

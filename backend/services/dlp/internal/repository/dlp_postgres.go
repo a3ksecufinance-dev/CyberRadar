@@ -23,6 +23,46 @@ func NewDLPRepository(db *pgxpool.Pool) *DLPRepository {
 	return &DLPRepository{db: db}
 }
 
+// ─── Ownership ────────────────────────────────────────────────────────────────
+
+// These three refuse an identifier the caller's tenant does not own.
+//
+// A label, a policy and an asset all arrive from the request body, and every
+// row written below carries the caller's own tenant_id — so the tenant filter
+// on the write proves nothing about what the write points at. Without these
+// checks a caller who learns an identifier in another customer's estate could
+// label their own asset with the neighbour's label (and read its name back
+// through the join that fills label_name), charge a violation to the
+// neighbour's policy (which raises its violation_count, the number the
+// dashboard ranks policies by), or queue a scan on the neighbour's asset — and
+// a scan's outcome lands on the asset, driving its risk score up.
+func (r *DLPRepository) labelBelongsTo(ctx context.Context, tenantID, labelID uuid.UUID) error {
+	return r.ownsRow(ctx, "dlp_labels", "label", tenantID, labelID)
+}
+
+func (r *DLPRepository) policyBelongsTo(ctx context.Context, tenantID, policyID uuid.UUID) error {
+	return r.ownsRow(ctx, "dlp_policies", "policy", tenantID, policyID)
+}
+
+func (r *DLPRepository) assetBelongsTo(ctx context.Context, tenantID, assetID uuid.UUID) error {
+	return r.ownsRow(ctx, "dlp_data_assets", "asset", tenantID, assetID)
+}
+
+// ownsRow asks the question for one table. The table name is a constant from
+// the three callers above, never anything that came from a request.
+func (r *DLPRepository) ownsRow(ctx context.Context, table, what string, tenantID, id uuid.UUID) error {
+	var exists bool
+	if err := r.db.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM "+table+" WHERE tenant_id=$1 AND id=$2)",
+		tenantID, id).Scan(&exists); err != nil {
+		return fmt.Errorf("check %s: %w", what, err)
+	}
+	if !exists {
+		return fmt.Errorf("%s not found", what)
+	}
+	return nil
+}
+
 // ─── Labels ───────────────────────────────────────────────────────────────────
 
 func (r *DLPRepository) CreateLabel(ctx context.Context, tenantID uuid.UUID, req *model.CreateLabelRequest, createdBy uuid.UUID) (*model.DLPLabel, error) {
@@ -70,8 +110,12 @@ func (r *DLPRepository) GetLabel(ctx context.Context, tenantID, labelID uuid.UUI
 }
 
 func (r *DLPRepository) ListLabels(ctx context.Context, tenantID uuid.UUID, activeOnly bool, page, pageSize int) ([]*model.DLPLabel, int, error) {
-	if pageSize <= 0 { pageSize = 50 }
-	if page <= 0 { page = 1 }
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
 	where := "tenant_id=$1"
 	args := []any{tenantID}
 	if activeOnly {
@@ -106,13 +150,41 @@ func (r *DLPRepository) UpdateLabel(ctx context.Context, tenantID, labelID uuid.
 	sets := []string{"updated_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.Name != "" { sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, req.Name); n++ }
-	if req.Description != "" { sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++ }
-	if req.Sensitivity != "" { sets = append(sets, fmt.Sprintf("sensitivity=$%d", n)); args = append(args, req.Sensitivity); n++ }
-	if req.Color != "" { sets = append(sets, fmt.Sprintf("color=$%d", n)); args = append(args, req.Color); n++ }
-	if req.RegexPatterns != nil { sets = append(sets, fmt.Sprintf("regex_patterns=$%d", n)); args = append(args, req.RegexPatterns); n++ }
-	if req.Keywords != nil { sets = append(sets, fmt.Sprintf("keywords=$%d", n)); args = append(args, req.Keywords); n++ }
-	if req.IsActive != nil { sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++ }
+	if req.Name != "" {
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, req.Name)
+		n++
+	}
+	if req.Description != "" {
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
+	}
+	if req.Sensitivity != "" {
+		sets = append(sets, fmt.Sprintf("sensitivity=$%d", n))
+		args = append(args, req.Sensitivity)
+		n++
+	}
+	if req.Color != "" {
+		sets = append(sets, fmt.Sprintf("color=$%d", n))
+		args = append(args, req.Color)
+		n++
+	}
+	if req.RegexPatterns != nil {
+		sets = append(sets, fmt.Sprintf("regex_patterns=$%d", n))
+		args = append(args, req.RegexPatterns)
+		n++
+	}
+	if req.Keywords != nil {
+		sets = append(sets, fmt.Sprintf("keywords=$%d", n))
+		args = append(args, req.Keywords)
+		n++
+	}
+	if req.IsActive != nil {
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
+	}
 	args = append(args, labelID, tenantID)
 	var l model.DLPLabel
 	err := r.db.QueryRow(ctx, fmt.Sprintf(`
@@ -124,7 +196,9 @@ func (r *DLPRepository) UpdateLabel(ctx context.Context, tenantID, labelID uuid.
 		&l.ID, &l.TenantID, &l.Name, &l.Description, &l.Sensitivity, &l.Color,
 		&l.RegexPatterns, &l.Keywords, &l.IsActive, &l.CreatedBy, &l.CreatedAt, &l.UpdatedAt,
 	)
-	if err == pgx.ErrNoRows { return nil, nil }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 	return &l, err
 }
 
@@ -138,7 +212,9 @@ func scanAsset(row pgx.Row) (*model.DLPDataAsset, error) {
 		&a.LabelID, &a.LabelName, &a.DataCategories, &a.RecordCount, &a.SizeBytes,
 		&a.LastScannedAt, &a.ScanStatus, &a.RiskScore, &a.Owner, &metaRaw, &a.CreatedAt, &a.UpdatedAt,
 	)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(metaRaw, &a.Metadata)
 	return &a, nil
 }
@@ -150,52 +226,74 @@ const assetSelect = `
 	       a.last_scanned_at, a.scan_status, a.risk_score, COALESCE(a.owner,''), a.metadata,
 	       a.created_at, a.updated_at
 	FROM dlp_data_assets a
-	LEFT JOIN dlp_labels l ON l.id=a.label_id`
+	LEFT JOIN dlp_labels l ON l.id=a.label_id AND l.tenant_id=a.tenant_id`
 
 func (r *DLPRepository) CreateAsset(ctx context.Context, tenantID uuid.UUID, req *model.CreateAssetRequest) (*model.DLPDataAsset, error) {
+	if req.LabelID != nil {
+		if err := r.labelBelongsTo(ctx, tenantID, *req.LabelID); err != nil {
+			return nil, err
+		}
+	}
 	meta, _ := json.Marshal(req.Metadata)
-	if req.DataCategories == nil { req.DataCategories = []string{} }
-	_, err := r.db.Exec(ctx, `
+	if req.DataCategories == nil {
+		req.DataCategories = []string{}
+	}
+	// RETURNING id, rather than reading the row back by name: nothing stops two
+	// assets sharing a name and a type, and the re-read took the newest of
+	// them, which under two concurrent creations is not necessarily this one.
+	var id uuid.UUID
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO dlp_data_assets (tenant_id, name, asset_type, location, label_id, data_categories, record_count, size_bytes, owner, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
 		tenantID, req.Name, req.AssetType, req.Location, req.LabelID, req.DataCategories, req.RecordCount, req.SizeBytes, req.Owner, meta,
-	)
-	if err != nil { return nil, err }
-	var a model.DLPDataAsset
-	var metaRaw []byte
-	err = r.db.QueryRow(ctx, assetSelect+" WHERE a.tenant_id=$1 AND a.name=$2 AND a.asset_type=$3 ORDER BY a.created_at DESC LIMIT 1",
-		tenantID, req.Name, req.AssetType,
-	).Scan(
-		&a.ID, &a.TenantID, &a.Name, &a.AssetType, &a.Location,
-		&a.LabelID, &a.LabelName, &a.DataCategories, &a.RecordCount, &a.SizeBytes,
-		&a.LastScannedAt, &a.ScanStatus, &a.RiskScore, &a.Owner, &metaRaw, &a.CreatedAt, &a.UpdatedAt,
-	)
-	if err != nil { return nil, err }
-	_ = json.Unmarshal(metaRaw, &a.Metadata)
-	return &a, nil
+	).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return r.GetAsset(ctx, tenantID, id)
 }
 
 func (r *DLPRepository) GetAsset(ctx context.Context, tenantID, assetID uuid.UUID) (*model.DLPDataAsset, error) {
 	a, err := scanAsset(r.db.QueryRow(ctx, assetSelect+" WHERE a.id=$1 AND a.tenant_id=$2", assetID, tenantID))
-	if err == pgx.ErrNoRows { return nil, nil }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 	return a, err
 }
 
 func (r *DLPRepository) ListAssets(ctx context.Context, tenantID uuid.UUID, f model.ListAssetsFilter) ([]*model.DLPDataAsset, int, error) {
-	if f.PageSize <= 0 { f.PageSize = 20 }
-	if f.Page <= 0 { f.Page = 1 }
+	if f.PageSize <= 0 {
+		f.PageSize = 20
+	}
+	if f.Page <= 0 {
+		f.Page = 1
+	}
 	conds := []string{"a.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if f.AssetType != "" { conds = append(conds, fmt.Sprintf("a.asset_type=$%d", n)); args = append(args, f.AssetType); n++ }
-	if f.ScanStatus != "" { conds = append(conds, fmt.Sprintf("a.scan_status=$%d", n)); args = append(args, f.ScanStatus); n++ }
-	if f.MinRisk != nil { conds = append(conds, fmt.Sprintf("a.risk_score>=$%d", n)); args = append(args, *f.MinRisk); n++ }
+	if f.AssetType != "" {
+		conds = append(conds, fmt.Sprintf("a.asset_type=$%d", n))
+		args = append(args, f.AssetType)
+		n++
+	}
+	if f.ScanStatus != "" {
+		conds = append(conds, fmt.Sprintf("a.scan_status=$%d", n))
+		args = append(args, f.ScanStatus)
+		n++
+	}
+	if f.MinRisk != nil {
+		conds = append(conds, fmt.Sprintf("a.risk_score>=$%d", n))
+		args = append(args, *f.MinRisk)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM dlp_data_assets a WHERE "+where, args...).Scan(&total)
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(assetSelect+" WHERE %s ORDER BY a.risk_score DESC LIMIT $%d OFFSET $%d", where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var assets []*model.DLPDataAsset
 	for rows.Next() {
@@ -205,7 +303,9 @@ func (r *DLPRepository) ListAssets(ctx context.Context, tenantID uuid.UUID, f mo
 			&a.ID, &a.TenantID, &a.Name, &a.AssetType, &a.Location,
 			&a.LabelID, &a.LabelName, &a.DataCategories, &a.RecordCount, &a.SizeBytes,
 			&a.LastScannedAt, &a.ScanStatus, &a.RiskScore, &a.Owner, &metaRaw, &a.CreatedAt, &a.UpdatedAt,
-		); err != nil { return nil, 0, err }
+		); err != nil {
+			return nil, 0, err
+		}
 		_ = json.Unmarshal(metaRaw, &a.Metadata)
 		assets = append(assets, &a)
 	}
@@ -213,39 +313,94 @@ func (r *DLPRepository) ListAssets(ctx context.Context, tenantID uuid.UUID, f mo
 }
 
 func (r *DLPRepository) UpdateAsset(ctx context.Context, tenantID, assetID uuid.UUID, req *model.UpdateAssetRequest) (*model.DLPDataAsset, error) {
+	if req.LabelID != nil {
+		if err := r.labelBelongsTo(ctx, tenantID, *req.LabelID); err != nil {
+			return nil, err
+		}
+	}
 	sets := []string{"updated_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.LabelID != nil { sets = append(sets, fmt.Sprintf("label_id=$%d", n)); args = append(args, *req.LabelID); n++ }
-	if req.DataCategories != nil { sets = append(sets, fmt.Sprintf("data_categories=$%d", n)); args = append(args, req.DataCategories); n++ }
-	if req.RecordCount > 0 { sets = append(sets, fmt.Sprintf("record_count=$%d", n)); args = append(args, req.RecordCount); n++ }
-	if req.SizeBytes > 0 { sets = append(sets, fmt.Sprintf("size_bytes=$%d", n)); args = append(args, req.SizeBytes); n++ }
-	if req.Owner != "" { sets = append(sets, fmt.Sprintf("owner=$%d", n)); args = append(args, req.Owner); n++ }
-	if req.RiskScore != nil { sets = append(sets, fmt.Sprintf("risk_score=$%d", n)); args = append(args, *req.RiskScore); n++ }
-	if req.Metadata != nil { meta, _ := json.Marshal(req.Metadata); sets = append(sets, fmt.Sprintf("metadata=$%d", n)); args = append(args, meta); n++ }
+	if req.LabelID != nil {
+		sets = append(sets, fmt.Sprintf("label_id=$%d", n))
+		args = append(args, *req.LabelID)
+		n++
+	}
+	if req.DataCategories != nil {
+		sets = append(sets, fmt.Sprintf("data_categories=$%d", n))
+		args = append(args, req.DataCategories)
+		n++
+	}
+	if req.RecordCount > 0 {
+		sets = append(sets, fmt.Sprintf("record_count=$%d", n))
+		args = append(args, req.RecordCount)
+		n++
+	}
+	if req.SizeBytes > 0 {
+		sets = append(sets, fmt.Sprintf("size_bytes=$%d", n))
+		args = append(args, req.SizeBytes)
+		n++
+	}
+	if req.Owner != "" {
+		sets = append(sets, fmt.Sprintf("owner=$%d", n))
+		args = append(args, req.Owner)
+		n++
+	}
+	if req.RiskScore != nil {
+		sets = append(sets, fmt.Sprintf("risk_score=$%d", n))
+		args = append(args, *req.RiskScore)
+		n++
+	}
+	if req.Metadata != nil {
+		meta, _ := json.Marshal(req.Metadata)
+		sets = append(sets, fmt.Sprintf("metadata=$%d", n))
+		args = append(args, meta)
+		n++
+	}
 	args = append(args, assetID, tenantID)
 	_, err := r.db.Exec(ctx, fmt.Sprintf("UPDATE dlp_data_assets SET %s WHERE id=$%d AND tenant_id=$%d",
 		strings.Join(sets, ","), n, n+1), args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return r.GetAsset(ctx, tenantID, assetID)
 }
 
-func (r *DLPRepository) UpdateAssetScanStatus(ctx context.Context, assetID uuid.UUID, status string, violationsFound int, labelsDetected []string) error {
+// UpdateAssetScanStatus records the outcome of a scan on the asset it scanned.
+//
+// The tenant is not decoration: this is the write that moves a customer's
+// asset to "violations_found" and raises its risk score, and it used to match
+// on the identifier alone. The labels a scan detected are kept on the scan
+// (dlp_scans.labels_detected) — the asset has no column for them, and the
+// parameter that used to be here was accepted and dropped.
+func (r *DLPRepository) UpdateAssetScanStatus(ctx context.Context, tenantID, assetID uuid.UUID, status string, violationsFound int) error {
 	now := time.Now()
-	_, err := r.db.Exec(ctx, `
-		UPDATE dlp_data_assets SET scan_status=$2, last_scanned_at=$3,
-		  risk_score=CASE WHEN $4>0 THEN LEAST(100, risk_score+$4*10) ELSE risk_score END
-		WHERE id=$1`, assetID, status, now, violationsFound)
-	return err
+	tag, err := r.db.Exec(ctx, `
+		UPDATE dlp_data_assets SET scan_status=$3, last_scanned_at=$4,
+		  risk_score=CASE WHEN $5>0 THEN LEAST(100, risk_score+$5*10) ELSE risk_score END
+		WHERE id=$1 AND tenant_id=$2`, assetID, tenantID, status, now, violationsFound)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("asset not found")
+	}
+	return nil
 }
 
 // ─── Policies ─────────────────────────────────────────────────────────────────
 
 func (r *DLPRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, req *model.CreatePolicyRequest, createdBy uuid.UUID) (*model.DLPPolicy, error) {
 	cond, _ := json.Marshal(req.Conditions)
-	if req.SensitivityLevels == nil { req.SensitivityLevels = []string{} }
-	if req.DataCategories == nil { req.DataCategories = []string{} }
-	if req.Channels == nil { req.Channels = []string{} }
+	if req.SensitivityLevels == nil {
+		req.SensitivityLevels = []string{}
+	}
+	if req.DataCategories == nil {
+		req.DataCategories = []string{}
+	}
+	if req.Channels == nil {
+		req.Channels = []string{}
+	}
 	var p model.DLPPolicy
 	var condRaw []byte
 	err := r.db.QueryRow(ctx, `
@@ -261,7 +416,9 @@ func (r *DLPRepository) CreatePolicy(ctx context.Context, tenantID uuid.UUID, re
 		&p.SensitivityLevels, &p.DataCategories, &p.Action, &p.Channels,
 		&condRaw, &p.IsActive, &p.ViolationCount, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
 	)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(condRaw, &p.Conditions)
 	return &p, nil
 }
@@ -279,20 +436,34 @@ func (r *DLPRepository) GetPolicy(ctx context.Context, tenantID, policyID uuid.U
 		&p.SensitivityLevels, &p.DataCategories, &p.Action, &p.Channels,
 		&condRaw, &p.IsActive, &p.ViolationCount, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
 	)
-	if err == pgx.ErrNoRows { return nil, nil }
-	if err != nil { return nil, err }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	_ = json.Unmarshal(condRaw, &p.Conditions)
 	return &p, nil
 }
 
 func (r *DLPRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, policyType string, activeOnly bool, page, pageSize int) ([]*model.DLPPolicy, int, error) {
-	if pageSize <= 0 { pageSize = 20 }
-	if page <= 0 { page = 1 }
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if page <= 0 {
+		page = 1
+	}
 	conds := []string{"tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if policyType != "" { conds = append(conds, fmt.Sprintf("policy_type=$%d", n)); args = append(args, policyType); n++ }
-	if activeOnly { conds = append(conds, "is_active=TRUE") }
+	if policyType != "" {
+		conds = append(conds, fmt.Sprintf("policy_type=$%d", n))
+		args = append(args, policyType)
+		n++
+	}
+	if activeOnly {
+		conds = append(conds, "is_active=TRUE")
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM dlp_policies WHERE "+where, args...).Scan(&total)
@@ -302,7 +473,9 @@ func (r *DLPRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, po
 		       COALESCE(sensitivity_levels,'{}'), COALESCE(data_categories,'{}'),
 		       action, COALESCE(channels,'{}'), conditions, is_active, violation_count, created_by, created_at, updated_at
 		FROM dlp_policies WHERE %s ORDER BY violation_count DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var policies []*model.DLPPolicy
 	for rows.Next() {
@@ -312,7 +485,9 @@ func (r *DLPRepository) ListPolicies(ctx context.Context, tenantID uuid.UUID, po
 			&p.ID, &p.TenantID, &p.Name, &p.Description, &p.PolicyType,
 			&p.SensitivityLevels, &p.DataCategories, &p.Action, &p.Channels,
 			&condRaw, &p.IsActive, &p.ViolationCount, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
-		); err != nil { return nil, 0, err }
+		); err != nil {
+			return nil, 0, err
+		}
 		_ = json.Unmarshal(condRaw, &p.Conditions)
 		policies = append(policies, &p)
 	}
@@ -323,37 +498,91 @@ func (r *DLPRepository) UpdatePolicy(ctx context.Context, tenantID, policyID uui
 	sets := []string{"updated_at=NOW()"}
 	args := []any{}
 	n := 1
-	if req.Name != "" { sets = append(sets, fmt.Sprintf("name=$%d", n)); args = append(args, req.Name); n++ }
-	if req.Description != "" { sets = append(sets, fmt.Sprintf("description=$%d", n)); args = append(args, req.Description); n++ }
-	if req.SensitivityLevels != nil { sets = append(sets, fmt.Sprintf("sensitivity_levels=$%d", n)); args = append(args, req.SensitivityLevels); n++ }
-	if req.DataCategories != nil { sets = append(sets, fmt.Sprintf("data_categories=$%d", n)); args = append(args, req.DataCategories); n++ }
-	if req.Action != "" { sets = append(sets, fmt.Sprintf("action=$%d", n)); args = append(args, req.Action); n++ }
-	if req.Channels != nil { sets = append(sets, fmt.Sprintf("channels=$%d", n)); args = append(args, req.Channels); n++ }
-	if req.Conditions != nil { cond, _ := json.Marshal(req.Conditions); sets = append(sets, fmt.Sprintf("conditions=$%d", n)); args = append(args, cond); n++ }
-	if req.IsActive != nil { sets = append(sets, fmt.Sprintf("is_active=$%d", n)); args = append(args, *req.IsActive); n++ }
+	if req.Name != "" {
+		sets = append(sets, fmt.Sprintf("name=$%d", n))
+		args = append(args, req.Name)
+		n++
+	}
+	if req.Description != "" {
+		sets = append(sets, fmt.Sprintf("description=$%d", n))
+		args = append(args, req.Description)
+		n++
+	}
+	if req.SensitivityLevels != nil {
+		sets = append(sets, fmt.Sprintf("sensitivity_levels=$%d", n))
+		args = append(args, req.SensitivityLevels)
+		n++
+	}
+	if req.DataCategories != nil {
+		sets = append(sets, fmt.Sprintf("data_categories=$%d", n))
+		args = append(args, req.DataCategories)
+		n++
+	}
+	if req.Action != "" {
+		sets = append(sets, fmt.Sprintf("action=$%d", n))
+		args = append(args, req.Action)
+		n++
+	}
+	if req.Channels != nil {
+		sets = append(sets, fmt.Sprintf("channels=$%d", n))
+		args = append(args, req.Channels)
+		n++
+	}
+	if req.Conditions != nil {
+		cond, _ := json.Marshal(req.Conditions)
+		sets = append(sets, fmt.Sprintf("conditions=$%d", n))
+		args = append(args, cond)
+		n++
+	}
+	if req.IsActive != nil {
+		sets = append(sets, fmt.Sprintf("is_active=$%d", n))
+		args = append(args, *req.IsActive)
+		n++
+	}
 	args = append(args, policyID, tenantID)
 	_, err := r.db.Exec(ctx, fmt.Sprintf("UPDATE dlp_policies SET %s WHERE id=$%d AND tenant_id=$%d",
 		strings.Join(sets, ","), n, n+1), args...)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return r.GetPolicy(ctx, tenantID, policyID)
 }
 
-func (r *DLPRepository) IncrementPolicyCounter(ctx context.Context, policyID uuid.UUID) {
-	_, _ = r.db.Exec(ctx, "UPDATE dlp_policies SET violation_count=violation_count+1 WHERE id=$1", policyID)
+func (r *DLPRepository) IncrementPolicyCounter(ctx context.Context, tenantID, policyID uuid.UUID) {
+	_, _ = r.db.Exec(ctx,
+		"UPDATE dlp_policies SET violation_count=violation_count+1 WHERE id=$1 AND tenant_id=$2",
+		policyID, tenantID)
 }
 
 // ─── Violations ───────────────────────────────────────────────────────────────
 
 func (r *DLPRepository) CreateViolation(ctx context.Context, tenantID uuid.UUID, req *model.ReportViolationRequest) (*model.DLPViolation, error) {
+	if req.PolicyID != nil {
+		if err := r.policyBelongsTo(ctx, tenantID, *req.PolicyID); err != nil {
+			return nil, err
+		}
+	}
+	if req.AssetID != nil {
+		if err := r.assetBelongsTo(ctx, tenantID, *req.AssetID); err != nil {
+			return nil, err
+		}
+	}
+	if req.LabelID != nil {
+		if err := r.labelBelongsTo(ctx, tenantID, *req.LabelID); err != nil {
+			return nil, err
+		}
+	}
 	mc := req.MatchCount
-	if mc == 0 { mc = 1 }
+	if mc == 0 {
+		mc = 1
+	}
 	var v model.DLPViolation
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO dlp_violations
 		  (tenant_id, policy_id, asset_id, label_id, violation_type, channel, severity,
 		   user_id_src, endpoint, destination, data_snippet, match_count, action_taken)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-		RETURNING id, tenant_id, policy_id, NULL::TEXT, asset_id, label_id,
+		RETURNING id, tenant_id, policy_id, '', asset_id, label_id,
 		          violation_type, COALESCE(channel,''), severity,
 		          COALESCE(user_id_src,''), COALESCE(endpoint,''), COALESCE(destination,''),
 		          COALESCE(data_snippet,''), match_count, action_taken,
@@ -367,24 +596,50 @@ func (r *DLPRepository) CreateViolation(ctx context.Context, tenantID uuid.UUID,
 		&v.DataSnippet, &v.MatchCount, &v.ActionTaken,
 		&v.Status, &v.InvestigatedBy, &v.ResolvedAt, &v.DetectedAt, &v.CreatedAt,
 	)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	if req.PolicyID != nil {
-		r.IncrementPolicyCounter(ctx, *req.PolicyID)
+		r.IncrementPolicyCounter(ctx, tenantID, *req.PolicyID)
 	}
 	return &v, nil
 }
 
 func (r *DLPRepository) ListViolations(ctx context.Context, tenantID uuid.UUID, f model.ListViolationsFilter) ([]*model.DLPViolation, int, error) {
-	if f.PageSize <= 0 { f.PageSize = 20 }
-	if f.Page <= 0 { f.Page = 1 }
+	if f.PageSize <= 0 {
+		f.PageSize = 20
+	}
+	if f.Page <= 0 {
+		f.Page = 1
+	}
 	conds := []string{"v.tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if f.PolicyID != nil { conds = append(conds, fmt.Sprintf("v.policy_id=$%d", n)); args = append(args, *f.PolicyID); n++ }
-	if f.AssetID != nil { conds = append(conds, fmt.Sprintf("v.asset_id=$%d", n)); args = append(args, *f.AssetID); n++ }
-	if f.Severity != "" { conds = append(conds, fmt.Sprintf("v.severity=$%d", n)); args = append(args, f.Severity); n++ }
-	if f.Status != "" { conds = append(conds, fmt.Sprintf("v.status=$%d", n)); args = append(args, f.Status); n++ }
-	if f.Channel != "" { conds = append(conds, fmt.Sprintf("v.channel=$%d", n)); args = append(args, f.Channel); n++ }
+	if f.PolicyID != nil {
+		conds = append(conds, fmt.Sprintf("v.policy_id=$%d", n))
+		args = append(args, *f.PolicyID)
+		n++
+	}
+	if f.AssetID != nil {
+		conds = append(conds, fmt.Sprintf("v.asset_id=$%d", n))
+		args = append(args, *f.AssetID)
+		n++
+	}
+	if f.Severity != "" {
+		conds = append(conds, fmt.Sprintf("v.severity=$%d", n))
+		args = append(args, f.Severity)
+		n++
+	}
+	if f.Status != "" {
+		conds = append(conds, fmt.Sprintf("v.status=$%d", n))
+		args = append(args, f.Status)
+		n++
+	}
+	if f.Channel != "" {
+		conds = append(conds, fmt.Sprintf("v.channel=$%d", n))
+		args = append(args, f.Channel)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM dlp_violations v WHERE "+where, args...).Scan(&total)
@@ -396,9 +651,11 @@ func (r *DLPRepository) ListViolations(ctx context.Context, tenantID uuid.UUID, 
 		       COALESCE(v.data_snippet,''), v.match_count, v.action_taken,
 		       v.status, v.investigated_by, v.resolved_at, v.detected_at, v.created_at
 		FROM dlp_violations v
-		LEFT JOIN dlp_policies p ON p.id=v.policy_id
+		LEFT JOIN dlp_policies p ON p.id=v.policy_id AND p.tenant_id=v.tenant_id
 		WHERE %s ORDER BY v.detected_at DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var viols []*model.DLPViolation
 	for rows.Next() {
@@ -409,7 +666,9 @@ func (r *DLPRepository) ListViolations(ctx context.Context, tenantID uuid.UUID, 
 			&v.UserIDSrc, &v.Endpoint, &v.Destination,
 			&v.DataSnippet, &v.MatchCount, &v.ActionTaken,
 			&v.Status, &v.InvestigatedBy, &v.ResolvedAt, &v.DetectedAt, &v.CreatedAt,
-		); err != nil { return nil, 0, err }
+		); err != nil {
+			return nil, 0, err
+		}
 		viols = append(viols, &v)
 	}
 	return viols, total, nil
@@ -420,20 +679,28 @@ func (r *DLPRepository) UpdateViolation(ctx context.Context, tenantID, violID uu
 	args := []any{}
 	n := 1
 	if req.Status != "" {
-		sets = append(sets, fmt.Sprintf("status=$%d", n)); args = append(args, req.Status); n++
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, req.Status)
+		n++
 		if req.Status == model.ViolationStatusResolved {
-			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n)); args = append(args, time.Now()); n++
+			sets = append(sets, fmt.Sprintf("resolved_at=$%d", n))
+			args = append(args, time.Now())
+			n++
 		}
 	}
 	if req.InvestigatedBy != nil {
-		sets = append(sets, fmt.Sprintf("investigated_by=$%d", n)); args = append(args, *req.InvestigatedBy); n++
+		sets = append(sets, fmt.Sprintf("investigated_by=$%d", n))
+		args = append(args, *req.InvestigatedBy)
+		n++
 	}
-	if len(sets) == 0 { return nil, fmt.Errorf("no fields to update") }
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
 	args = append(args, violID, tenantID)
 	var v model.DLPViolation
 	err := r.db.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE dlp_violations SET %s WHERE id=$%d AND tenant_id=$%d
-		RETURNING id, tenant_id, policy_id, NULL::TEXT, asset_id, label_id,
+		RETURNING id, tenant_id, policy_id, '', asset_id, label_id,
 		          violation_type, COALESCE(channel,''), severity,
 		          COALESCE(user_id_src,''), COALESCE(endpoint,''), COALESCE(destination,''),
 		          COALESCE(data_snippet,''), match_count, action_taken,
@@ -446,13 +713,20 @@ func (r *DLPRepository) UpdateViolation(ctx context.Context, tenantID, violID uu
 		&v.DataSnippet, &v.MatchCount, &v.ActionTaken,
 		&v.Status, &v.InvestigatedBy, &v.ResolvedAt, &v.DetectedAt, &v.CreatedAt,
 	)
-	if err == pgx.ErrNoRows { return nil, nil }
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
 	return &v, err
 }
 
 // ─── Scans ────────────────────────────────────────────────────────────────────
 
 func (r *DLPRepository) CreateScan(ctx context.Context, tenantID uuid.UUID, assetID *uuid.UUID, createdBy uuid.UUID) (*model.DLPScan, error) {
+	if assetID != nil {
+		if err := r.assetBelongsTo(ctx, tenantID, *assetID); err != nil {
+			return nil, err
+		}
+	}
 	var s model.DLPScan
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO dlp_scans (tenant_id, asset_id, created_by)
@@ -467,27 +741,47 @@ func (r *DLPRepository) CreateScan(ctx context.Context, tenantID uuid.UUID, asse
 	return &s, err
 }
 
-func (r *DLPRepository) UpdateScanStatus(ctx context.Context, scanID uuid.UUID, status string, items int64, violations int, labels []string, errText string) error {
+func (r *DLPRepository) UpdateScanStatus(ctx context.Context, tenantID, scanID uuid.UUID, status string, items int64, violations int, labels []string, errText string) error {
 	now := time.Now()
 	var startedAt, completedAt *time.Time
-	if status == "running" { startedAt = &now }
-	if status == "completed" || status == "failed" { completedAt = &now }
-	if labels == nil { labels = []string{} }
-	_, err := r.db.Exec(ctx, `
-		UPDATE dlp_scans SET status=$2, items_scanned=$3, violations_found=$4, labels_detected=$5, error_text=$6,
-		  started_at=COALESCE($7, started_at), completed_at=$8 WHERE id=$1`,
-		scanID, status, items, violations, labels, errText, startedAt, completedAt,
+	if status == "running" {
+		startedAt = &now
+	}
+	if status == "completed" || status == "failed" {
+		completedAt = &now
+	}
+	if labels == nil {
+		labels = []string{}
+	}
+	tag, err := r.db.Exec(ctx, `
+		UPDATE dlp_scans SET status=$3, items_scanned=$4, violations_found=$5, labels_detected=$6, error_text=$7,
+		  started_at=COALESCE($8, started_at), completed_at=$9 WHERE id=$1 AND tenant_id=$2`,
+		scanID, tenantID, status, items, violations, labels, errText, startedAt, completedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("scan not found")
+	}
+	return nil
 }
 
 func (r *DLPRepository) ListScans(ctx context.Context, tenantID uuid.UUID, assetID *uuid.UUID, page, pageSize int) ([]*model.DLPScan, int, error) {
-	if pageSize <= 0 { pageSize = 20 }
-	if page <= 0 { page = 1 }
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if page <= 0 {
+		page = 1
+	}
 	conds := []string{"tenant_id=$1"}
 	args := []any{tenantID}
 	n := 2
-	if assetID != nil { conds = append(conds, fmt.Sprintf("asset_id=$%d", n)); args = append(args, *assetID); n++ }
+	if assetID != nil {
+		conds = append(conds, fmt.Sprintf("asset_id=$%d", n))
+		args = append(args, *assetID)
+		n++
+	}
 	where := strings.Join(conds, " AND ")
 	var total int
 	_ = r.db.QueryRow(ctx, "SELECT COUNT(*) FROM dlp_scans WHERE "+where, args...).Scan(&total)
@@ -496,7 +790,9 @@ func (r *DLPRepository) ListScans(ctx context.Context, tenantID uuid.UUID, asset
 		SELECT id, tenant_id, asset_id, status, items_scanned, violations_found,
 		       COALESCE(labels_detected,'{}'), started_at, completed_at, COALESCE(error_text,''), created_by, created_at
 		FROM dlp_scans WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, where, n, n+1), args...)
-	if err != nil { return nil, 0, err }
+	if err != nil {
+		return nil, 0, err
+	}
 	defer rows.Close()
 	var scans []*model.DLPScan
 	for rows.Next() {
@@ -504,7 +800,9 @@ func (r *DLPRepository) ListScans(ctx context.Context, tenantID uuid.UUID, asset
 		if err := rows.Scan(
 			&s.ID, &s.TenantID, &s.AssetID, &s.Status, &s.ItemsScanned, &s.ViolationsFound,
 			&s.LabelsDetected, &s.StartedAt, &s.CompletedAt, &s.ErrorText, &s.CreatedBy, &s.CreatedAt,
-		); err != nil { return nil, 0, err }
+		); err != nil {
+			return nil, 0, err
+		}
 		scans = append(scans, &s)
 	}
 	return scans, total, nil
@@ -532,10 +830,26 @@ func (r *DLPRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.D
 	).Scan(&stats.TotalViolations, &stats.OpenViolations)
 
 	rows, _ := r.db.Query(ctx, "SELECT severity, COUNT(*) FROM dlp_violations WHERE tenant_id=$1 GROUP BY severity", tenantID)
-	if rows != nil { defer rows.Close(); for rows.Next() { var s string; var c int; _ = rows.Scan(&s, &c); stats.ViolationsBySeverity[s] = c } }
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			var c int
+			_ = rows.Scan(&s, &c)
+			stats.ViolationsBySeverity[s] = c
+		}
+	}
 
 	rows2, _ := r.db.Query(ctx, "SELECT violation_type, COUNT(*) FROM dlp_violations WHERE tenant_id=$1 GROUP BY violation_type", tenantID)
-	if rows2 != nil { defer rows2.Close(); for rows2.Next() { var s string; var c int; _ = rows2.Scan(&s, &c); stats.ViolationsByType[s] = c } }
+	if rows2 != nil {
+		defer rows2.Close()
+		for rows2.Next() {
+			var s string
+			var c int
+			_ = rows2.Scan(&s, &c)
+			stats.ViolationsByType[s] = c
+		}
+	}
 
 	rows3, _ := r.db.Query(ctx, `
 		SELECT id, name, violation_count FROM dlp_policies WHERE tenant_id=$1 ORDER BY violation_count DESC LIMIT 5`, tenantID)

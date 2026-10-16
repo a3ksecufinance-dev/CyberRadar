@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/cyberradar/platform/internal/pkg/db"
 	"github.com/cyberradar/platform/services/siem/internal/model"
 	"github.com/google/uuid"
 )
@@ -54,7 +55,7 @@ func (r *AlertRepository) IsDuplicate(ctx context.Context, tenantID, dedupKey st
 		  AND detected_at >= {cutoff:DateTime64(3,'UTC')}`,
 		clickhouse.Named("tenant", tenantID),
 		clickhouse.Named("key", dedupKey),
-		clickhouse.Named("cutoff", cutoff),
+		clickhouse.Named("cutoff", db.CHTime64(cutoff)),
 	).Scan(&count)
 	return count > 0, err
 }
@@ -78,11 +79,11 @@ func (r *AlertRepository) List(ctx context.Context, f model.AlertFilter) ([]*mod
 	}
 	if f.From != nil {
 		where = append(where, "detected_at >= {from:DateTime64(3,'UTC')}")
-		params = append(params, clickhouse.Named("from", *f.From))
+		params = append(params, clickhouse.Named("from", db.CHTime64(*f.From)))
 	}
 	if f.To != nil {
 		where = append(where, "detected_at <= {to:DateTime64(3,'UTC')}")
-		params = append(params, clickhouse.Named("to", *f.To))
+		params = append(params, clickhouse.Named("to", db.CHTime64(*f.To)))
 	}
 
 	wc := ""
@@ -161,9 +162,16 @@ func (r *AlertRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model
 		FROM crp_siem.alerts
 		WHERE tenant_id = {t:String}`,
 		clickhouse.Named("t", tenantID.String()))
-	if err := row.Scan(&stats.Total, &stats.FiredLast24h, &stats.FiredLast7d); err != nil {
+	// COUNT() comes back as UInt64 and the driver will not narrow it for us:
+	// scanning it straight into an int fails with "converting UInt64 to *int
+	// is unsupported", which is why this whole endpoint returned an error.
+	var total, last24h, last7d uint64
+	if err := row.Scan(&total, &last24h, &last7d); err != nil {
 		return nil, err
 	}
+	stats.Total = int(total)
+	stats.FiredLast24h = int(last24h)
+	stats.FiredLast7d = int(last7d)
 
 	// By severity
 	rows, err := r.conn.Query(ctx, `

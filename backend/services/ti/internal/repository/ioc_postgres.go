@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/iocindex"
 	"github.com/cyberradar/platform/services/ti/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -464,13 +465,13 @@ func (r *IOCRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.T
 		BySeverity: make(map[string]int),
 	}
 
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1`, tenantID).Scan(&s.TotalIOCs)             //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.ActiveIOCs) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFeeds)           //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1 AND enabled=true`, tenantID).Scan(&s.EnabledFeeds) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '24 hours'`, tenantID).Scan(&s.HitsLast24h) //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '7 days'`, tenantID).Scan(&s.HitsLast7d)   //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1`, tenantID).Scan(&s.ThreatActors) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1`, tenantID).Scan(&s.TotalIOCs)                                                                                //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.ActiveIOCs)                                                            //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1`, tenantID).Scan(&s.TotalFeeds)                                                                              //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_feeds WHERE tenant_id=$1 AND enabled=true`, tenantID).Scan(&s.EnabledFeeds)                                                           //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '24 hours'`, tenantID).Scan(&s.HitsLast24h)                                  //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_ioc_hits WHERE tenant_id=$1 AND hit_at >= NOW()-INTERVAL '7 days'`, tenantID).Scan(&s.HitsLast7d)                                     //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1`, tenantID).Scan(&s.ThreatActors)                                                                    //nolint
 	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM ti_threat_actors WHERE tenant_id=$1 AND (targets_cbs=true OR targets_swift=true OR targets_atm=true)`, tenantID).Scan(&s.BankingThreats) //nolint
 
 	rows, _ := r.db.Query(ctx, `SELECT ioc_type, COUNT(*) FROM ti_iocs WHERE tenant_id=$1 AND is_active=true GROUP BY ioc_type`, tenantID)
@@ -607,15 +608,13 @@ func scanIOC(row scannable) (*model.IOC, error) {
 }
 
 // normalizeValue canonicalizes an IOC value for dedup matching.
+// normalizeValue delegates to iocindex, which the ingest path also uses.
+//
+// Two definitions would be worse than one in the wrong place: a lookup
+// normalised differently from the stored value misses every time, and misses
+// silently — "not a known indicator" is indistinguishable from a bug.
 func normalizeValue(iocType, value string) string {
-	v := strings.ToLower(strings.TrimSpace(value))
-	// Strip http(s):// scheme for URLs when storing normalized form
-	if iocType == model.IOCTypeDomain || iocType == model.IOCTypeURL {
-		v = strings.TrimPrefix(v, "http://")
-		v = strings.TrimPrefix(v, "https://")
-		v = strings.TrimRight(v, "/")
-	}
-	return v
+	return iocindex.Normalize(iocType, value)
 }
 
 func nvlS(s string) *string {

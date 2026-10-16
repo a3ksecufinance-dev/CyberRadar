@@ -1,0 +1,50 @@
+# CRP-EXF-0001 — Transfert sortant de volume anormal
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-EXF-0001
+title: Transfert sortant de volume anormal
+description: Un transfert de fichiers sur un événement de sévérité élevée ou critique.
+category: Security
+severity: HIGH
+mitre:
+  tactic: TA0010
+  technique: T1567
+conditions:
+  field_matches:
+  - op: contains
+    field: action
+    value: file_transfer
+  - op: gte
+    field: threat_score
+    value: '6'
+actions:
+- type: notify
+dedup_window_s: 900
+rationale: >-
+  L'exfiltration est le moment où un incident devient une notification réglementaire. La détecter
+  au transfert, et non à la publication des données, est toute la différence.
+false_positives: >-
+  Les sauvegardes, les réplications, les exports de fin de mois. Les exclure par compte de
+  service et par fenêtre horaire.
+response: >-
+  Déterminer la destination et le volume. Si la destination est externe et hors fenêtre, traiter
+  comme une exfiltration jusqu'à preuve du contraire.
+frameworks:
+- DORA
+- PCIDSS
+- ISO27001
+controls:
+- DORA-10.3
+- DORA-17.1
+- PCI-10.4.1
+- A.8.12
+requires: []
+enabled_by_default: true
+tags:
+- exfiltration
+- standard

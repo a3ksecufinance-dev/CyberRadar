@@ -43,12 +43,12 @@ type CreateTenantRequest struct {
 
 // UpdateTenantRequest is the validated payload for tenant update.
 type UpdateTenantRequest struct {
-	Name    *string `json:"name"    validate:"omitempty,min=2,max=255"`
-	Plan    *string `json:"plan"    validate:"omitempty,oneof=standard professional enterprise"`
-	Status  *string `json:"status"  validate:"omitempty,oneof=active suspended"`
-	Config  JSONB   `json:"config"`
-	Features JSONB  `json:"features"`
-	Limits  JSONB   `json:"limits"`
+	Name     *string `json:"name"    validate:"omitempty,min=2,max=255"`
+	Plan     *string `json:"plan"    validate:"omitempty,oneof=standard professional enterprise"`
+	Status   *string `json:"status"  validate:"omitempty,oneof=active suspended"`
+	Config   JSONB   `json:"config"`
+	Features JSONB   `json:"features"`
+	Limits   JSONB   `json:"limits"`
 }
 
 // ListTenantsFilter holds query parameters for listing tenants.

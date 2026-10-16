@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/asset/internal/model"
 	"github.com/cyberradar/platform/services/asset/internal/service"
@@ -30,6 +31,9 @@ func (h *AssetHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/assets", h.List)
 	r.Post("/assets", h.Create)
 	r.Get("/assets/stats", h.Stats)
+	// The weights every score on this page was produced with. An interface that
+	// shows a number should be able to show what produced it.
+	r.Get("/assets/risk-profile", h.RiskProfile)
 	r.Get("/assets/discovery", h.ListDiscovery)
 
 	r.Route("/assets/{assetID}", func(r chi.Router) {
@@ -159,6 +163,17 @@ func (h *AssetHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	response.NoContent(w)
 }
 
+// RiskProfile handles GET /assets/risk-profile
+func (h *AssetHandler) RiskProfile(w http.ResponseWriter, r *http.Request) {
+	tenantID := mustTenantID(r)
+	profile, err := h.svc.RiskProfile(r.Context(), tenantID)
+	if err != nil {
+		mapError(w, err)
+		return
+	}
+	response.OK(w, profile)
+}
+
 // RiskBreakdown handles GET /assets/{assetID}/risk
 func (h *AssetHandler) RiskBreakdown(w http.ResponseWriter, r *http.Request) {
 	tenantID, assetID, ok := mustIDs(w, r)
@@ -192,7 +207,7 @@ func (h *AssetHandler) ListDiscovery(w http.ResponseWriter, r *http.Request) {
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"candidates": candidates, "total": len(candidates)})
+	response.OKWithMeta(w, candidates, &response.Meta{Total: int64(len(candidates))})
 }
 
 // GetRelationships handles GET /assets/{assetID}/relationships
@@ -206,7 +221,7 @@ func (h *AssetHandler) GetRelationships(w http.ResponseWriter, r *http.Request) 
 		mapError(w, err)
 		return
 	}
-	response.OK(w, map[string]any{"relationships": rels, "total": len(rels)})
+	response.OKWithMeta(w, rels, &response.Meta{Total: int64(len(rels))})
 }
 
 // AddRelationship handles POST /assets/{assetID}/relationships
@@ -237,9 +252,7 @@ func (h *AssetHandler) AddRelationship(w http.ResponseWriter, r *http.Request) {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value("tenant_id").(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
@@ -254,16 +267,7 @@ func mustIDs(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool
 }
 
 func mapError(w http.ResponseWriter, err error) {
-	switch {
-	case apierrors.IsKind(err, apierrors.KindNotFound):
-		response.NotFound(w, "resource")
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, "access denied")
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 }
 
 func queryInt(s string, def int) int {

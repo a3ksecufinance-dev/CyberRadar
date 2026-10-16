@@ -6,20 +6,32 @@ import (
 	"time"
 
 	"github.com/cyberradar/platform/services/soar/internal/model"
-	"github.com/cyberradar/platform/services/soar/internal/repository"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
+// ExecutionStore is the part of the repository the executor needs: the record
+// of what a run did. Narrowing it to these four methods is what lets the
+// abort-on-failure path be tested without a database.
+type ExecutionStore interface {
+	CreateExecution(ctx context.Context, tenantID, playbookID uuid.UUID, incidentID *uuid.UUID, triggerEvent map[string]any, triggeredBy *uuid.UUID, stepsTotal int) (*model.Execution, error)
+	CreateExecutionStep(ctx context.Context, execID, stepID uuid.UUID, stepOrder int, actionType string) (*model.ExecutionStep, error)
+	UpdateExecutionStep(ctx context.Context, stepID uuid.UUID, status string, output map[string]any, errMsg string) error
+	CompleteExecution(ctx context.Context, execID uuid.UUID, status string, completed, failed int, summary map[string]any, errMsg string) error
+}
+
 // Executor runs playbooks step-by-step.
 type Executor struct {
-	repo   *repository.SOARRepository
-	logger zerolog.Logger
+	repo ExecutionStore
+	// dispatcher carries out each step. Sequencing, abort-on-failure and
+	// persistence stay here; what an action *does* lives behind this.
+	dispatcher Dispatcher
+	logger     zerolog.Logger
 }
 
 // NewExecutor creates an Executor.
-func NewExecutor(repo *repository.SOARRepository, logger zerolog.Logger) *Executor {
-	return &Executor{repo: repo, logger: logger}
+func NewExecutor(repo ExecutionStore, dispatcher Dispatcher, logger zerolog.Logger) *Executor {
+	return &Executor{repo: repo, dispatcher: dispatcher, logger: logger}
 }
 
 // Run executes a playbook asynchronously.
@@ -102,97 +114,15 @@ func (e *Executor) run(ctx context.Context, tenantID uuid.UUID, pb *model.Playbo
 	return e.repo.CompleteExecution(ctx, exec.ID, finalStatus, completed, failed, summary, execErr)
 }
 
-// executeAction dispatches the action and returns output + any error.
-// In production each action calls the relevant microservice via HTTP.
-// Here we implement the logic gate and return structured results.
+// executeAction carries out one step through the dispatcher.
 func (e *Executor) executeAction(ctx context.Context, tenantID uuid.UUID, step model.PlaybookStep, ev map[string]any) (map[string]any, error) {
 	e.logger.Info().
 		Str("action", step.ActionType).
 		Str("step", step.Name).
+		Str("tenant_id", tenantID.String()).
 		Msg("executing_action")
 
-	switch step.ActionType {
-	case model.ActionBlockIP:
-		ip := resolveParam(step.ActionParams, "ip", ev, "ip_source")
-		if ip == "" {
-			return nil, fmt.Errorf("block_ip: no IP address provided")
-		}
-		return map[string]any{"action": "block_ip", "ip": ip, "status": "blocked"}, nil
-
-	case model.ActionUnblockIP:
-		ip := resolveParam(step.ActionParams, "ip", ev, "ip_source")
-		return map[string]any{"action": "unblock_ip", "ip": ip, "status": "unblocked"}, nil
-
-	case model.ActionDisableUser:
-		userID := resolveParam(step.ActionParams, "user_id", ev, "user_id")
-		if userID == "" {
-			return nil, fmt.Errorf("disable_user: no user_id provided")
-		}
-		return map[string]any{"action": "disable_user", "user_id": userID, "status": "disabled"}, nil
-
-	case model.ActionEnableUser:
-		userID := resolveParam(step.ActionParams, "user_id", ev, "user_id")
-		return map[string]any{"action": "enable_user", "user_id": userID, "status": "enabled"}, nil
-
-	case model.ActionIsolateHost:
-		assetID := resolveParam(step.ActionParams, "asset_id", ev, "asset_id")
-		if assetID == "" {
-			return nil, fmt.Errorf("isolate_host: no asset_id provided")
-		}
-		return map[string]any{"action": "isolate_host", "asset_id": assetID, "status": "isolated"}, nil
-
-	case model.ActionUnisolateHost:
-		assetID := resolveParam(step.ActionParams, "asset_id", ev, "asset_id")
-		return map[string]any{"action": "unisolate_host", "asset_id": assetID, "status": "unisolated"}, nil
-
-	case model.ActionEnrichIOC:
-		ioc := resolveParam(step.ActionParams, "ioc_value", ev, "ioc_value")
-		return map[string]any{"action": "enrich_ioc", "ioc": ioc, "status": "enriched", "threat_score": 8.5}, nil
-
-	case model.ActionAddToBlocklist:
-		ioc := resolveParam(step.ActionParams, "ioc_value", ev, "ioc_value")
-		return map[string]any{"action": "add_to_blocklist", "ioc": ioc, "status": "added"}, nil
-
-	case model.ActionCreateTicket:
-		title := resolveParam(step.ActionParams, "title", ev, "title")
-		return map[string]any{"action": "create_ticket", "title": title, "ticket_id": "TKT-" + uuid.New().String()[:8], "status": "created"}, nil
-
-	case model.ActionCloseTicket:
-		ticketID := resolveParam(step.ActionParams, "ticket_id", ev, "ticket_id")
-		return map[string]any{"action": "close_ticket", "ticket_id": ticketID, "status": "closed"}, nil
-
-	case model.ActionSendNotification:
-		channel := resolveParam(step.ActionParams, "channel", ev, "channel")
-		message := resolveParam(step.ActionParams, "message", ev, "message")
-		return map[string]any{"action": "send_notification", "channel": channel, "message": message, "status": "sent"}, nil
-
-	case model.ActionRunSIEMQuery:
-		query := resolveParam(step.ActionParams, "query", ev, "query")
-		return map[string]any{"action": "run_siem_query", "query": query, "result_count": 0, "status": "executed"}, nil
-
-	case model.ActionTagEntity:
-		entityID := resolveParam(step.ActionParams, "entity_id", ev, "entity_id")
-		tag := resolveParam(step.ActionParams, "tag", ev, "tag")
-		return map[string]any{"action": "tag_entity", "entity_id": entityID, "tag": tag, "status": "tagged"}, nil
-
-	case model.ActionMarkCompromised:
-		nodeID := resolveParam(step.ActionParams, "node_id", ev, "node_id")
-		return map[string]any{"action": "mark_compromised", "node_id": nodeID, "status": "marked"}, nil
-
-	case model.ActionCreateIncident:
-		title := resolveParam(step.ActionParams, "title", ev, "title")
-		severity := resolveParam(step.ActionParams, "severity", ev, "severity")
-		if severity == "" {
-			severity = "HIGH"
-		}
-		return map[string]any{"action": "create_incident", "title": title, "severity": severity, "status": "created"}, nil
-
-	case model.ActionWait:
-		return map[string]any{"action": "wait", "status": "completed"}, nil
-
-	default:
-		return nil, fmt.Errorf("unknown action type: %s", step.ActionType)
-	}
+	return e.dispatcher.Do(ctx, tenantID, step, ev)
 }
 
 // resolveParam returns the param value, falling back to the event field.

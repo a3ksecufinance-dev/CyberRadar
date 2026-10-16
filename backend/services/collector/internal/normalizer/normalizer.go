@@ -29,7 +29,13 @@ func Normalize(raw event.RawEvent) (*event.NormalizedEvent, error) {
 }
 
 // base returns a NormalizedEvent pre-populated with lineage fields.
+//
+// Every parser goes through here, which is why the banking impact flags are
+// set at this one point rather than in each of the six: a flag set in five
+// formats out of six is a detection that works for some of a client's sources
+// and not the others, with nothing to show which.
 func base(raw event.RawEvent) *event.NormalizedEvent {
+	cbs, swift := businessImpactFromSourceType(raw.SourceType)
 	return &event.NormalizedEvent{
 		EventID:       uuid.New(),
 		TenantID:      raw.TenantID,
@@ -45,6 +51,8 @@ func base(raw event.RawEvent) *event.NormalizedEvent {
 		Severity:      event.SeverityLow,
 		Outcome:       event.OutcomeUnknown,
 		IOCMatched:    []string{},
+		CBSImpact:     cbs,
+		SWIFTImpact:   swift,
 	}
 }
 

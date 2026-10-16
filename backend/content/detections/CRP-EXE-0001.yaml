@@ -1,0 +1,51 @@
+# CRP-EXE-0001 — Interpréteur lancé sur un actif critique
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-EXE-0001
+title: Interpréteur lancé sur un actif critique
+description: Le lancement d'un interpréteur de commandes sur un actif dont la sévérité d'événement
+  est critique.
+category: Security
+severity: CRITICAL
+mitre:
+  tactic: TA0002
+  technique: T1059
+conditions:
+  field_matches:
+  - op: contains
+    field: action
+    value: process_exec
+  - op: gte
+    field: threat_score
+    value: '8'
+actions:
+- type: notify
+- type: create_case
+dedup_window_s: 300
+rationale: >-
+  Sur un serveur de paiement ou de cœur bancaire, un interpréteur interactif n'a presque jamais
+  de raison d'être. C'est l'un des signaux les plus spécifiques qui existent.
+false_positives: >-
+  Les scripts d'exploitation et de sauvegarde. Les inscrire nommément plutôt que d'élargir
+  la condition.
+response: >-
+  Isoler l'hôte. Récupérer la ligne de commande complète et l'arbre de processus parent avant
+  tout redémarrage.
+frameworks:
+- DORA
+- SWIFTCSP
+- ISO27001
+controls:
+- DORA-10.3
+- CSCF-6.4
+- A.8.16
+requires: []
+enabled_by_default: true
+tags:
+- exécution
+- standard

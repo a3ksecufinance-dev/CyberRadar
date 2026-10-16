@@ -1,0 +1,49 @@
+# CRP-IAM-0005 — Activité en dehors des heures ouvrées
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-IAM-0005
+title: Activité en dehors des heures ouvrées
+description: Une action dont l'enrichissement estime le risque assez élevé pour marquer une
+  activité hors plage.
+category: IAM
+severity: MEDIUM
+mitre:
+  tactic: TA0001
+  technique: T1078
+conditions:
+  field_matches:
+  - op: eq
+    field: anomalous_hours
+    value: 'true'
+  - op: eq
+    field: category
+    value: IAM
+actions:
+- type: notify
+dedup_window_s: 1800
+rationale: >-
+  Une session à trois heures du matin sur un système de paiement n'est pas anormale en soi
+  ; elle l'est pour un compte qui n'en ouvre jamais.
+false_positives: >-
+  Les astreintes, les clôtures, les équipes en décalage horaire. Cette règle a besoin de la
+  notion de plage attendue par compte pour valoir quelque chose.
+response: >-
+  Rapprocher du planning d'astreinte avant d'appeler.
+frameworks:
+- DORA
+- ISO27001
+controls:
+- DORA-10.3
+- A.8.16
+requires:
+- 'Plages horaires attendues par compte : le champ anomalous_hours dérive aujourd''hui du
+  seul score de risque, ce qui en fait un signal grossier.'
+enabled_by_default: false
+tags:
+- comportement
+- standard

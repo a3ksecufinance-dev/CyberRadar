@@ -215,10 +215,10 @@ func (r *IRRepository) CreateIncident(ctx context.Context, tenantID uuid.UUID, r
 		  attack_vector,iocs,mitre_tactics,mitre_techniques,team_members,
 		  playbook_id,detected_at,tags,created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-		 RETURNING id,tenant_id,incident_number,title,description,incident_type,severity,status,priority,
-		           source,source_ref,affected_systems,affected_users,affected_data,
-		           is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		           mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		 RETURNING id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,severity,status,priority,
+		           COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,affected_systems,affected_users,affected_data,
+		           is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		           mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		           playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		           recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		           requires_notification,notification_sent_at,tags,created_by,created_at,updated_at`,
@@ -248,11 +248,11 @@ func (r *IRRepository) GetIncident(ctx context.Context, tenantID, id uuid.UUID) 
 	var inc model.IRIncident
 	var iocsRaw []byte
 	err := r.db.QueryRow(ctx,
-		`SELECT i.id,i.tenant_id,i.incident_number,i.title,i.description,i.incident_type,
-		        i.severity,i.status,i.priority,i.source,i.source_ref,
+		`SELECT i.id,i.tenant_id,i.incident_number,i.title,COALESCE(i.description,'') AS description,i.incident_type,
+		        i.severity,i.status,i.priority,COALESCE(i.source,'') AS source,COALESCE(i.source_ref,'') AS source_ref,
 		        i.affected_systems,i.affected_users,i.affected_data,
-		        i.is_contained,i.data_exfiltrated,i.estimated_impact,i.attack_vector,i.iocs,
-		        i.mitre_tactics,i.mitre_techniques,i.lead_id,i.lead_name,i.team_members,
+		        i.is_contained,i.data_exfiltrated,COALESCE(i.estimated_impact,'') AS estimated_impact,COALESCE(i.attack_vector,'') AS attack_vector,i.iocs,
+		        i.mitre_tactics,i.mitre_techniques,i.lead_id,COALESCE(i.lead_name,'') AS lead_name,i.team_members,
 		        i.playbook_id,i.detected_at,i.reported_at,i.contained_at,i.eradicated_at,
 		        i.recovered_at,i.closed_at,i.mttd_minutes,i.mttr_minutes,
 		        i.requires_notification,i.notification_sent_at,i.tags,i.created_by,i.created_at,i.updated_at,
@@ -318,11 +318,11 @@ func (r *IRRepository) ListIncidents(ctx context.Context, tenantID uuid.UUID, f 
 	}
 	args = append(args, limit, f.Offset)
 	rows, err := r.db.Query(ctx,
-		`SELECT i.id,i.tenant_id,i.incident_number,i.title,i.description,i.incident_type,
-		        i.severity,i.status,i.priority,i.source,i.source_ref,
+		`SELECT i.id,i.tenant_id,i.incident_number,i.title,COALESCE(i.description,'') AS description,i.incident_type,
+		        i.severity,i.status,i.priority,COALESCE(i.source,'') AS source,COALESCE(i.source_ref,'') AS source_ref,
 		        i.affected_systems,i.affected_users,i.affected_data,
-		        i.is_contained,i.data_exfiltrated,i.estimated_impact,i.attack_vector,i.iocs,
-		        i.mitre_tactics,i.mitre_techniques,i.lead_id,i.lead_name,i.team_members,
+		        i.is_contained,i.data_exfiltrated,COALESCE(i.estimated_impact,'') AS estimated_impact,COALESCE(i.attack_vector,'') AS attack_vector,i.iocs,
+		        i.mitre_tactics,i.mitre_techniques,i.lead_id,COALESCE(i.lead_name,'') AS lead_name,i.team_members,
 		        i.playbook_id,i.detected_at,i.reported_at,i.contained_at,i.eradicated_at,
 		        i.recovered_at,i.closed_at,i.mttd_minutes,i.mttr_minutes,
 		        i.requires_notification,i.notification_sent_at,i.tags,i.created_by,i.created_at,i.updated_at
@@ -463,11 +463,31 @@ func (r *IRRepository) UpdateIncident(ctx context.Context, tenantID, id uuid.UUI
 			}
 		case "recovered":
 			if curr.RecoveredAt == nil {
+				// When recovery happened, not when somebody got round to
+				// recording it. Responders close the file afterwards — the
+				// morning after a night of work, or days later for an
+				// incident imported from another tool — and timing the
+				// recovery from that click turned a three-hour restore into
+				// a four-day one on the only figure anybody reads.
+				//
+				// The timeline is the record of what happened; a recovery
+				// event in it is what the responders themselves entered. With
+				// none, the moment of the transition is the best available
+				// answer, which is what this did before.
+				at := now
+				var fromTimeline *time.Time
+				_ = r.db.QueryRow(ctx,
+					`SELECT MAX(event_time) FROM ir_timeline
+					 WHERE tenant_id=$1 AND incident_id=$2 AND event_type = 'recovery'`,
+					tenantID, id).Scan(&fromTimeline)
+				if fromTimeline != nil &&
+					!fromTimeline.Before(curr.DetectedAt) && !fromTimeline.After(now) {
+					at = *fromTimeline
+				}
 				sets = append(sets, fmt.Sprintf("recovered_at=$%d", n))
-				args = append(args, now)
+				args = append(args, at)
 				n++
-				// Compute MTTR: from detected_at to now
-				mttr := int(now.Sub(curr.DetectedAt).Minutes())
+				mttr := int(at.Sub(curr.DetectedAt).Minutes())
 				sets = append(sets, fmt.Sprintf("mttr_minutes=$%d", n))
 				args = append(args, mttr)
 				n++
@@ -486,11 +506,11 @@ func (r *IRRepository) UpdateIncident(ctx context.Context, tenantID, id uuid.UUI
 	err = r.db.QueryRow(ctx,
 		`UPDATE ir_incidents SET `+strings.Join(sets, ",")+
 			` WHERE tenant_id=$1 AND id=$2
-		 RETURNING id,tenant_id,incident_number,title,description,incident_type,
-		           severity,status,priority,source,source_ref,
+		 RETURNING id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,
+		           severity,status,priority,COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,
 		           affected_systems,affected_users,affected_data,
-		           is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		           mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		           is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		           mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		           playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		           recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		           requires_notification,notification_sent_at,tags,created_by,created_at,updated_at`,
@@ -540,7 +560,46 @@ func (r *IRRepository) AddTimelineEvent(ctx context.Context, tenantID, incidentI
 	if err != nil {
 		return nil, err
 	}
+	r.refreshMTTD(ctx, tenantID, incidentID)
 	return &ev, nil
+}
+
+// refreshMTTD derives the detection delay from the forensic timeline.
+//
+// mttd_minutes had no writer: the column was declared, read by the statistics
+// query and shown on the incident screen, and never set by anything, so the
+// average time to detect was permanently null — next to a time to recover the
+// same table computes on the first "recovered" transition.
+//
+// The detection delay is the one number the timeline can honestly supply:
+// `detected_at` is when the institution saw the incident, and the earliest
+// event recorded as attacker activity is when the attacker started. Both are
+// facts the responders entered. Nothing else here knows when an attack began,
+// so an incident with no attacker-activity event keeps a null MTTD rather than
+// an invented one — and so does one whose first recorded attacker step comes
+// after the detection, which means the timeline is still being written.
+func (r *IRRepository) refreshMTTD(ctx context.Context, tenantID, incidentID uuid.UUID) {
+	var firstActivity *time.Time
+	if err := r.db.QueryRow(ctx,
+		`SELECT MIN(event_time) FROM ir_timeline
+		 WHERE tenant_id=$1 AND incident_id=$2 AND event_type = 'attacker_activity'`,
+		tenantID, incidentID).Scan(&firstActivity); err != nil || firstActivity == nil {
+		return
+	}
+	var detectedAt time.Time
+	if err := r.db.QueryRow(ctx,
+		`SELECT detected_at FROM ir_incidents WHERE tenant_id=$1 AND id=$2`,
+		tenantID, incidentID).Scan(&detectedAt); err != nil {
+		return
+	}
+	minutes := int(detectedAt.Sub(*firstActivity).Minutes())
+	if minutes < 0 {
+		return
+	}
+	_, _ = r.db.Exec(ctx,
+		`UPDATE ir_incidents SET mttd_minutes=$3, updated_at=NOW()
+		 WHERE tenant_id=$1 AND id=$2`,
+		tenantID, incidentID, minutes)
 }
 
 func (r *IRRepository) GetTimeline(ctx context.Context, tenantID, incidentID uuid.UUID) ([]model.IRTimeline, error) {
@@ -917,11 +976,11 @@ func (r *IRRepository) GetStats(ctx context.Context, tenantID uuid.UUID) (*model
 
 	// Recent incidents (last 5 open)
 	recentRows, _ := r.db.Query(ctx,
-		`SELECT id,tenant_id,incident_number,title,description,incident_type,
-		        severity,status,priority,source,source_ref,
+		`SELECT id,tenant_id,incident_number,title,COALESCE(description,'') AS description,incident_type,
+		        severity,status,priority,COALESCE(source,'') AS source,COALESCE(source_ref,'') AS source_ref,
 		        affected_systems,affected_users,affected_data,
-		        is_contained,data_exfiltrated,estimated_impact,attack_vector,iocs,
-		        mitre_tactics,mitre_techniques,lead_id,lead_name,team_members,
+		        is_contained,data_exfiltrated,COALESCE(estimated_impact,'') AS estimated_impact,COALESCE(attack_vector,'') AS attack_vector,iocs,
+		        mitre_tactics,mitre_techniques,lead_id,COALESCE(lead_name,'') AS lead_name,team_members,
 		        playbook_id,detected_at,reported_at,contained_at,eradicated_at,
 		        recovered_at,closed_at,mttd_minutes,mttr_minutes,
 		        requires_notification,notification_sent_at,tags,created_by,created_at,updated_at

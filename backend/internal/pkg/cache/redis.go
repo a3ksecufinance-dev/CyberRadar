@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 // Client wraps redis.Client with typed helpers.
@@ -32,6 +33,48 @@ func New(ctx context.Context, addr, password string, db int) (*Client, error) {
 	}
 
 	return &Client{rdb: rdb}, nil
+}
+
+// NewFromURL creates a client from a redis:// or rediss:// URL, the form the
+// deployment already passes as REDIS_URL. It returns (nil, nil) for an empty
+// URL, so a caller can treat Redis as optional without inspecting the
+// environment itself.
+//
+// It fails only on a URL it cannot parse — a configuration bug worth refusing
+// to start over. A Redis that is merely unreachable is warned about and the
+// client returned anyway: go-redis reconnects on its own, and a service that
+// will not start is worse than one running on its fallbacks until Redis is
+// back.
+func NewFromURL(ctx context.Context, url string, logger zerolog.Logger) (*Client, error) {
+	if url == "" {
+		return nil, nil
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis url: %w", err)
+	}
+	applyDefaults(opts)
+
+	c := &Client{rdb: redis.NewClient(opts)}
+	if err := c.Ping(ctx); err != nil {
+		logger.Warn().Err(err).Str("addr", opts.Addr).
+			Msg("redis_unreachable_at_startup_running_on_fallbacks_until_it_returns")
+	}
+	return c, nil
+}
+
+// Ping reports whether Redis is currently answering.
+func (c *Client) Ping(ctx context.Context) error {
+	return c.rdb.Ping(ctx).Err()
+}
+
+// applyDefaults sets the pool and timeout settings shared by every entry point.
+func applyDefaults(opts *redis.Options) {
+	opts.PoolSize = 20
+	opts.MinIdleConns = 5
+	opts.DialTimeout = 5 * time.Second
+	opts.ReadTimeout = 3 * time.Second
+	opts.WriteTimeout = 3 * time.Second
 }
 
 // Close closes the Redis connection pool.

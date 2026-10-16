@@ -9,43 +9,43 @@ import (
 // ─── Devices ──────────────────────────────────────────────────────────────────
 
 type MobDevice struct {
-	ID                   uuid.UUID  `json:"id"`
-	TenantID             uuid.UUID  `json:"tenant_id"`
-	DeviceName           string     `json:"device_name"`
-	DeviceType           string     `json:"device_type"`
-	Platform             string     `json:"platform"`
-	OSVersion            string     `json:"os_version,omitempty"`
-	Model                string     `json:"model,omitempty"`
-	Manufacturer         string     `json:"manufacturer,omitempty"`
-	SerialNumber         string     `json:"serial_number,omitempty"`
-	IMEI                 string     `json:"imei,omitempty"`
-	UDID                 string     `json:"udid,omitempty"`
-	EnrollmentStatus     string     `json:"enrollment_status"`
-	EnrollmentDate       time.Time  `json:"enrollment_date"`
-	MDMProfileInstalled  bool       `json:"mdm_profile_installed"`
-	Ownership            string     `json:"ownership"`
-	OwnerName            string     `json:"owner_name,omitempty"`
-	OwnerID              *uuid.UUID `json:"owner_id,omitempty"`
-	OwnerEmail           string     `json:"owner_email,omitempty"`
-	Department           string     `json:"department,omitempty"`
-	IsJailbroken         bool       `json:"is_jailbroken"`
-	IsRooted             bool       `json:"is_rooted"`
-	IsEncrypted          bool       `json:"is_encrypted"`
-	IsScreenLock         bool       `json:"is_screen_lock"`
-	IsCompliant          bool       `json:"is_compliant"`
-	ComplianceIssues     []string   `json:"compliance_issues"`
-	RiskScore            int        `json:"risk_score"`
-	RiskLevel            string     `json:"risk_level"`
-	LastLocation         string     `json:"last_location,omitempty"`
-	LastSeenAt           time.Time  `json:"last_seen_at"`
-	LastCheckinAt        time.Time  `json:"last_checkin_at"`
-	LastIP               string     `json:"last_ip,omitempty"`
-	Carrier              string     `json:"carrier,omitempty"`
-	Tags                 []string   `json:"tags"`
-	Notes                string     `json:"notes,omitempty"`
-	CreatedBy            *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                  uuid.UUID  `json:"id"`
+	TenantID            uuid.UUID  `json:"tenant_id"`
+	DeviceName          string     `json:"device_name"`
+	DeviceType          string     `json:"device_type"`
+	Platform            string     `json:"platform"`
+	OSVersion           string     `json:"os_version,omitempty"`
+	Model               string     `json:"model,omitempty"`
+	Manufacturer        string     `json:"manufacturer,omitempty"`
+	SerialNumber        string     `json:"serial_number,omitempty"`
+	IMEI                string     `json:"imei,omitempty"`
+	UDID                string     `json:"udid,omitempty"`
+	EnrollmentStatus    string     `json:"enrollment_status"`
+	EnrollmentDate      time.Time  `json:"enrollment_date"`
+	MDMProfileInstalled bool       `json:"mdm_profile_installed"`
+	Ownership           string     `json:"ownership"`
+	OwnerName           string     `json:"owner_name,omitempty"`
+	OwnerID             *uuid.UUID `json:"owner_id,omitempty"`
+	OwnerEmail          string     `json:"owner_email,omitempty"`
+	Department          string     `json:"department,omitempty"`
+	IsJailbroken        bool       `json:"is_jailbroken"`
+	IsRooted            bool       `json:"is_rooted"`
+	IsEncrypted         bool       `json:"is_encrypted"`
+	IsScreenLock        bool       `json:"is_screen_lock"`
+	IsCompliant         bool       `json:"is_compliant"`
+	ComplianceIssues    []string   `json:"compliance_issues"`
+	RiskScore           int        `json:"risk_score"`
+	RiskLevel           string     `json:"risk_level"`
+	LastLocation        string     `json:"last_location,omitempty"`
+	LastSeenAt          time.Time  `json:"last_seen_at"`
+	LastCheckinAt       time.Time  `json:"last_checkin_at"`
+	LastIP              string     `json:"last_ip,omitempty"`
+	Carrier             string     `json:"carrier,omitempty"`
+	Tags                []string   `json:"tags"`
+	Notes               string     `json:"notes,omitempty"`
+	CreatedBy           *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 	// Computed
 	AppCount    int `json:"app_count,omitempty"`
 	ThreatCount int `json:"threat_count,omitempty"`
@@ -254,16 +254,16 @@ type ListThreatsFilter struct {
 // ─── Compliance ───────────────────────────────────────────────────────────────
 
 type MobComplianceCheck struct {
-	ID              uuid.UUID      `json:"id"`
-	TenantID        uuid.UUID      `json:"tenant_id"`
-	DeviceID        uuid.UUID      `json:"device_id"`
-	PolicyID        *uuid.UUID     `json:"policy_id,omitempty"`
-	IsCompliant     bool           `json:"is_compliant"`
-	Violations      []any          `json:"violations"`
-	ComplianceScore int            `json:"compliance_score"`
-	ActionTaken     string         `json:"action_taken,omitempty"`
-	CheckedAt       time.Time      `json:"checked_at"`
-	NextCheckAt     *time.Time     `json:"next_check_at,omitempty"`
+	ID              uuid.UUID  `json:"id"`
+	TenantID        uuid.UUID  `json:"tenant_id"`
+	DeviceID        uuid.UUID  `json:"device_id"`
+	PolicyID        *uuid.UUID `json:"policy_id,omitempty"`
+	IsCompliant     bool       `json:"is_compliant"`
+	Violations      []any      `json:"violations"`
+	ComplianceScore int        `json:"compliance_score"`
+	ActionTaken     string     `json:"action_taken,omitempty"`
+	CheckedAt       time.Time  `json:"checked_at"`
+	NextCheckAt     *time.Time `json:"next_check_at,omitempty"`
 }
 
 type RunComplianceRequest struct {
@@ -274,20 +274,20 @@ type RunComplianceRequest struct {
 // ─── Remote Actions ───────────────────────────────────────────────────────────
 
 type MobRemoteAction struct {
-	ID             uuid.UUID      `json:"id"`
-	TenantID       uuid.UUID      `json:"tenant_id"`
-	DeviceID       uuid.UUID      `json:"device_id"`
-	ActionType     string         `json:"action_type"`
-	Status         string         `json:"status"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	Message        string         `json:"message,omitempty"`
-	RequestedBy    string         `json:"requested_by,omitempty"`
-	RequestedByID  *uuid.UUID     `json:"requested_by_id,omitempty"`
-	SentAt         *time.Time     `json:"sent_at,omitempty"`
-	CompletedAt    *time.Time     `json:"completed_at,omitempty"`
-	FailureReason  string         `json:"failure_reason,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID            uuid.UUID      `json:"id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	DeviceID      uuid.UUID      `json:"device_id"`
+	ActionType    string         `json:"action_type"`
+	Status        string         `json:"status"`
+	Payload       map[string]any `json:"payload,omitempty"`
+	Message       string         `json:"message,omitempty"`
+	RequestedBy   string         `json:"requested_by,omitempty"`
+	RequestedByID *uuid.UUID     `json:"requested_by_id,omitempty"`
+	SentAt        *time.Time     `json:"sent_at,omitempty"`
+	CompletedAt   *time.Time     `json:"completed_at,omitempty"`
+	FailureReason string         `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 type CreateRemoteActionRequest struct {

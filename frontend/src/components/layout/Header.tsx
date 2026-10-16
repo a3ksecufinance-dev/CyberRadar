@@ -2,14 +2,16 @@
 import { Search, Bell } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { LanguageSwitcher } from './LanguageSwitcher'
+import { useTranslations } from 'next-intl'
 
 export function Header({ locale }: { locale: string }) {
+  const t = useTranslations('common')
   return (
     <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-700/60 bg-slate-900 px-6">
       {/* Search */}
       <div className="relative w-72">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-        <Input className="pl-8 text-xs" placeholder="Search across all domains..." />
+        <Input className="pl-8 text-xs" placeholder={t('searchAll')} />
       </div>
 
       {/* Right controls */}

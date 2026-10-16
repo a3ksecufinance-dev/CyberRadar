@@ -5,8 +5,9 @@ import { Send, Bot, User, Sparkles, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { useApiToken } from '@/hooks'
+import type { CopilotMessage } from '@/types'
 
 type Message = {
   id: string
@@ -14,8 +15,6 @@ type Message = {
   content: string
   timestamp: Date
 }
-
-const SESSION_ID = crypto.randomUUID()
 
 const suggestions = ['suggestion1', 'suggestion2', 'suggestion3', 'suggestion4'] as const
 
@@ -61,6 +60,18 @@ export default function CopilotPage() {
   const [isThinking, setIsThinking] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // The service owns session ids: chat is POST /copilot/sessions/{id}/chat,
+  // and a uuid minted in the browser addresses nothing. The first message
+  // opens a session; the rest of the conversation reuses it.
+  const sessionRef = useRef<string | null>(null)
+
+  const ensureSession = async (): Promise<string> => {
+    if (sessionRef.current) return sessionRef.current
+    const session = await api.copilot.createSession(token)
+    sessionRef.current = session.id
+    return session.id
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
@@ -79,23 +90,33 @@ export default function CopilotPage() {
     setIsThinking(true)
 
     try {
-      const response = await api.copilot.chat(text, SESSION_ID, token)
-      const assistantMsg: Message = {
+      const sessionID = await ensureSession()
+      const reply = (await api.copilot.chat(sessionID, text, token)) as CopilotMessage
+      setMessages((prev) => [...prev, {
+        id: reply.id,
+        role: 'assistant',
+        content: reply.content,
+        timestamp: new Date(reply.created_at),
+      }])
+    } catch (err) {
+      // Say which failure this is. The previous version reported every error
+      // as "service unavailable", which is how a 404 on a wrong path went
+      // unnoticed: an endpoint that does not exist looked like a service that
+      // was merely down.
+      const detail = err instanceof ApiError
+        ? `**${err.status} ${err.code}** — ${err.message}`
+        : `**Unreachable** — ${(err as Error)?.message ?? 'the copilot service did not answer'}`
+      setMessages((prev) => [...prev, {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: (response as any)?.content ?? (response as any)?.message ?? JSON.stringify(response),
+        content: detail,
         timestamp: new Date(),
+      }])
+      // A failed turn must not strand the conversation on a session the
+      // service rejected.
+      if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        sessionRef.current = null
       }
-      setMessages((prev) => [...prev, assistantMsg])
-    } catch (err: any) {
-      // Fallback for when copilot service isn't running
-      const fallback: Message = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: `**Service unavailable** — The AI Copilot service is not reachable.\n\n${err?.message ?? 'Check that copilot-service is running on port 8016.'}`,
-        timestamp: new Date(),
-      }
-      setMessages((prev) => [...prev, fallback])
     } finally {
       setIsThinking(false)
     }

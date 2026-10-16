@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 		IsInternetFacing: req.IsInternetFacing, IsPrivileged: req.IsPrivileged,
 		IsCriticalSystem: req.IsCriticalSystem, HasCriticalVuln: req.HasCriticalVuln,
 		HasKnownExploit: req.HasKnownExploit, OpenVulnCount: req.OpenVulnCount,
-		NetworkZone: req.NetworkZone, Hostname: req.Hostname,
+		NetworkZone: req.NetworkZone, IPAddress: req.IPAddress, Hostname: req.Hostname,
 	}
 
 	if err := r.db.QueryRow(ctx, `
@@ -45,8 +46,8 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 			(id, tenant_id, ref_id, node_type, label, risk_score, criticality,
 			 is_internet_facing, is_privileged, is_critical_system,
 			 has_critical_vuln, has_known_exploit, open_vuln_count,
-			 network_zone, hostname, properties)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+			 network_zone, ip_address, hostname, properties)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT (tenant_id, ref_id, node_type) DO UPDATE SET
 			label             = EXCLUDED.label,
 			risk_score        = EXCLUDED.risk_score,
@@ -58,6 +59,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 			has_known_exploit = EXCLUDED.has_known_exploit,
 			open_vuln_count   = EXCLUDED.open_vuln_count,
 			network_zone      = EXCLUDED.network_zone,
+			ip_address        = EXCLUDED.ip_address,
 			hostname          = EXCLUDED.hostname,
 			properties        = EXCLUDED.properties,
 			last_updated_at   = NOW()
@@ -66,7 +68,7 @@ func (r *GraphRepository) UpsertNode(ctx context.Context, tenantID uuid.UUID, re
 		req.RiskScore, req.Criticality,
 		req.IsInternetFacing, req.IsPrivileged, req.IsCriticalSystem,
 		req.HasCriticalVuln, req.HasKnownExploit, req.OpenVulnCount,
-		nvlS(req.NetworkZone), nvlS(req.Hostname), props,
+		nvlS(req.NetworkZone), nvlS(req.IPAddress), nvlS(req.Hostname), props,
 	).Scan(&n.ID, &n.IsCompromised, &n.LastUpdatedAt, &n.CreatedAt); err != nil {
 		return nil, fmt.Errorf("upsert node: %w", err)
 	}
@@ -243,6 +245,39 @@ func (r *GraphRepository) ListEdges(ctx context.Context, tenantID uuid.UUID, sou
 	return out, nil
 }
 
+// LoadGraph returns every node and active edge for a tenant.
+//
+// It exists apart from ListNodes because ListNodes is a paged API listing and
+// clamps its limit to 500: a traversal that used it would silently walk part
+// of the graph and report the paths it happened to find. This is the whole
+// graph or an error.
+func (r *GraphRepository) LoadGraph(ctx context.Context, tenantID uuid.UUID) (*model.Graph, error) {
+	rows, err := r.db.Query(ctx, nodeSelect+` WHERE tenant_id = $1`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load graph nodes: %w", err)
+	}
+	defer rows.Close()
+
+	var nodes []*model.AttackNode
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan graph node: %w", err)
+		}
+		nodes = append(nodes, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load graph nodes: %w", err)
+	}
+
+	edges, err := r.ListEdges(ctx, tenantID, nil, true)
+	if err != nil {
+		return nil, fmt.Errorf("load graph edges: %w", err)
+	}
+
+	return model.NewGraph(nodes, edges), nil
+}
+
 // GetNodesByIDs fetches multiple nodes by their IDs.
 func (r *GraphRepository) GetNodesByIDs(ctx context.Context, tenantID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]*model.AttackNode, error) {
 	if len(ids) == 0 {
@@ -320,14 +355,18 @@ func (r *GraphRepository) ListScenarios(ctx context.Context, tenantID uuid.UUID)
 	return out, nil
 }
 
-func (r *GraphRepository) UpdateScenarioResult(ctx context.Context, scenarioID uuid.UUID, pathCount int, shortestPath, criticalPath *int, riskScore float64, durationMS int) error {
+func (r *GraphRepository) UpdateScenarioResult(ctx context.Context, scenarioID uuid.UUID, outcome model.ScenarioOutcome) error {
 	now := time.Now().UTC()
 	_, err := r.db.Exec(ctx, `
 		UPDATE attack_scenarios SET
 			status='completed', path_count=$1, shortest_path=$2, critical_path=$3,
-			risk_score=$4, last_run_at=$5, last_run_ms=$6, updated_at=NOW()
-		WHERE id=$7`,
-		pathCount, shortestPath, criticalPath, riskScore, now, durationMS, scenarioID)
+			cheapest_path_cost=$4, risk_score=$5, last_run_at=$6, last_run_ms=$7,
+			policy_code=NULLIF($8, ''), policy_version=NULLIF($9, 0),
+			updated_at=NOW()
+		WHERE id=$10`,
+		outcome.PathCount, outcome.ShortestPath, outcome.CriticalPath,
+		outcome.CheapestPathCost, outcome.RiskScore, now, outcome.DurationMS,
+		outcome.PolicyCode, outcome.PolicyVersion, scenarioID)
 	return err
 }
 
@@ -339,27 +378,44 @@ func (r *GraphRepository) SetScenarioStatus(ctx context.Context, scenarioID uuid
 
 // ─── Attack Paths ─────────────────────────────────────────────────────────────
 
-func (r *GraphRepository) SavePaths(ctx context.Context, paths []*model.AttackPath) error {
-	if len(paths) == 0 {
-		return nil
-	}
+// SavePaths replaces a scenario's paths with the ones this run found.
+//
+// It used to insert and never delete, so every run a scenario had ever had was
+// still in the table: one reporting two paths held thirty-eight rows from
+// nineteen runs, each scored under whatever weightings were in force that day,
+// with nothing to tell them apart. The ON CONFLICT DO NOTHING could not
+// deduplicate them — every row carried a fresh uuid, so nothing ever conflicted.
+//
+// The scenario id is a parameter rather than taken from the first path because
+// a run that now finds nothing still has to clear what the last one found.
+// Returning early on an empty slice was the same bug in another guise: a
+// scenario whose route was closed kept showing the route.
+func (r *GraphRepository) SavePaths(ctx context.Context, scenarioID uuid.UUID, paths []*model.AttackPath) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+
+	// In the same transaction as the insert: a reader never sees a scenario
+	// with no paths at all, and a failed run leaves the previous answer intact
+	// rather than an empty one.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM attack_paths WHERE scenario_id = $1`, scenarioID); err != nil {
+		return fmt.Errorf("clear the previous run: %w", err)
+	}
 
 	for _, p := range paths {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO attack_paths
 				(id, tenant_id, scenario_id, entry_node_id, target_node_id,
-				 node_sequence, edge_sequence, hop_count, path_score, likelihood, impact,
-				 path_type, has_internet_entry, has_exploit_step, has_priv_esc,
-				 mitre_tactics, choke_point_node_id, choke_point_edge_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+				 node_sequence, edge_sequence, hop_count, total_cost, path_score,
+				 likelihood, impact, path_type, has_internet_entry, has_exploit_step,
+				 has_priv_esc, mitre_tactics, choke_point_node_id, choke_point_edge_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 			ON CONFLICT DO NOTHING`,
 			p.ID, p.TenantID, p.ScenarioID, p.EntryNodeID, p.TargetNodeID,
-			p.NodeSequence, p.EdgeSequence, p.HopCount,
+			p.NodeSequence, p.EdgeSequence, p.HopCount, p.TotalCost,
 			p.PathScore, p.Likelihood, p.Impact,
 			p.PathType, p.HasInternetEntry, p.HasExploitStep, p.HasPrivEsc,
 			p.MitreTactics, p.ChokePointNodeID, p.ChokePointEdgeID,
@@ -403,7 +459,7 @@ func (r *GraphRepository) ListPaths(ctx context.Context, f model.PathFilter) ([]
 
 	q := fmt.Sprintf(`
 		SELECT id, tenant_id, scenario_id, entry_node_id, target_node_id,
-		       node_sequence, edge_sequence, hop_count, path_score, likelihood, impact,
+		       node_sequence, edge_sequence, hop_count, total_cost, path_score, likelihood, impact,
 		       path_type, has_internet_entry, has_exploit_step, has_priv_esc,
 		       mitre_tactics, choke_point_node_id, choke_point_edge_id, discovered_at
 		FROM attack_paths WHERE %s
@@ -467,18 +523,18 @@ func (r *GraphRepository) ChokePoints(ctx context.Context, tenantID uuid.UUID, s
 
 func (r *GraphRepository) Stats(ctx context.Context, tenantID uuid.UUID) (*model.AttackGraphStats, error) {
 	s := &model.AttackGraphStats{}
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1`, tenantID).Scan(&s.TotalNodes)                                                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_edges WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.TotalEdges)                                                                    //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_internet_facing=true`, tenantID).Scan(&s.InternetFacingNodes)                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_critical_system=true`, tenantID).Scan(&s.CriticalSystemNodes)                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_compromised=true`, tenantID).Scan(&s.CompromisedNodes)                                                         //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_scenarios WHERE tenant_id=$1`, tenantID).Scan(&s.TotalScenarios)                                                                               //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.TotalPaths)                                                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND path_score >= 7.0`, tenantID).Scan(&s.HighRiskPaths)                                                              //nolint
-	r.db.QueryRow(ctx, `SELECT COALESCE(MIN(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.ShortestPath)                                                                   //nolint
-	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.AvgPathLength)                                                                  //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_exploit_step=true`, tenantID).Scan(&s.PathsWithExploit)                                                       //nolint
-	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_priv_esc=true`, tenantID).Scan(&s.PathsWithPrivEsc)                                                           //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1`, tenantID).Scan(&s.TotalNodes)                                      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_edges WHERE tenant_id=$1 AND is_active=true`, tenantID).Scan(&s.TotalEdges)                   //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_internet_facing=true`, tenantID).Scan(&s.InternetFacingNodes) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_critical_system=true`, tenantID).Scan(&s.CriticalSystemNodes) //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_nodes WHERE tenant_id=$1 AND is_compromised=true`, tenantID).Scan(&s.CompromisedNodes)        //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_scenarios WHERE tenant_id=$1`, tenantID).Scan(&s.TotalScenarios)                              //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.TotalPaths)                                      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND path_score >= 7.0`, tenantID).Scan(&s.HighRiskPaths)             //nolint
+	r.db.QueryRow(ctx, `SELECT COALESCE(MIN(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.ShortestPath)                  //nolint
+	r.db.QueryRow(ctx, `SELECT COALESCE(AVG(hop_count),0) FROM attack_paths WHERE tenant_id=$1`, tenantID).Scan(&s.AvgPathLength)                 //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_exploit_step=true`, tenantID).Scan(&s.PathsWithExploit)      //nolint
+	r.db.QueryRow(ctx, `SELECT COUNT(*) FROM attack_paths WHERE tenant_id=$1 AND has_priv_esc=true`, tenantID).Scan(&s.PathsWithPrivEsc)          //nolint
 	return s, nil
 }
 
@@ -492,13 +548,22 @@ const nodeSelect = `
 	SELECT id, tenant_id, ref_id, node_type, label, risk_score, criticality,
 	       is_internet_facing, is_privileged, is_critical_system, is_compromised,
 	       has_critical_vuln, has_known_exploit, open_vuln_count,
-	       network_zone, hostname, properties, last_updated_at, created_at
+	       -- host() renders inet as plain text: the model carries an address as
+	       -- a string, and an analyst reading a node wants 10.0.0.5, not a CIDR.
+	       network_zone, COALESCE(host(ip_address), '') AS ip_address, hostname,
+	       properties, last_updated_at, created_at
 	FROM attack_nodes`
 
 const scenarioSelect = `
 	SELECT id, tenant_id, name, description, entry_node_ids, target_node_ids,
 	       max_hops, include_types, status, path_count, shortest_path, critical_path,
-	       last_run_at, last_run_ms, risk_score, created_by, created_at, updated_at
+	       cheapest_path_cost,
+	       -- last_run_ms is NULL until the scenario has run, and the model holds
+	       -- it as a plain int: without this every scenario read failed between
+	       -- creation and the first run, which is every scenario an analyst has
+	       -- just defined.
+	       last_run_at, COALESCE(last_run_ms, 0) AS last_run_ms,
+	       risk_score, created_by, created_at, updated_at
 	FROM attack_scenarios`
 
 func scanNode(row scannable) (*model.AttackNode, error) {
@@ -510,7 +575,7 @@ func scanNode(row scannable) (*model.AttackNode, error) {
 		&n.RiskScore, &n.Criticality,
 		&n.IsInternetFacing, &n.IsPrivileged, &n.IsCriticalSystem, &n.IsCompromised,
 		&n.HasCriticalVuln, &n.HasKnownExploit, &n.OpenVulnCount,
-		&zone, &hostname, &propsRaw, &n.LastUpdatedAt, &n.CreatedAt,
+		&zone, &n.IPAddress, &hostname, &propsRaw, &n.LastUpdatedAt, &n.CreatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -557,7 +622,7 @@ func scanScenario(row scannable) (*model.AttackScenario, error) {
 	err := row.Scan(
 		&s.ID, &s.TenantID, &s.Name, &desc, &s.EntryNodeIDs, &s.TargetNodeIDs,
 		&s.MaxHops, &s.IncludeTypes, &s.Status, &s.PathCount,
-		&s.ShortestPath, &s.CriticalPath, &s.LastRunAt, &s.LastRunMS,
+		&s.ShortestPath, &s.CriticalPath, &s.CheapestPathCost, &s.LastRunAt, &s.LastRunMS,
 		&s.RiskScore, &s.CreatedBy, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -585,7 +650,7 @@ func scanPath(row scannable) (*model.AttackPath, error) {
 	p := &model.AttackPath{}
 	err := row.Scan(
 		&p.ID, &p.TenantID, &p.ScenarioID, &p.EntryNodeID, &p.TargetNodeID,
-		&p.NodeSequence, &p.EdgeSequence, &p.HopCount,
+		&p.NodeSequence, &p.EdgeSequence, &p.HopCount, &p.TotalCost,
 		&p.PathScore, &p.Likelihood, &p.Impact,
 		&p.PathType, &p.HasInternetEntry, &p.HasExploitStep, &p.HasPrivEsc,
 		&p.MitreTactics, &p.ChokePointNodeID, &p.ChokePointEdgeID, &p.DiscoveredAt,
@@ -639,4 +704,35 @@ func nvlS(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ─── The weightings in force ─────────────────────────────────────────────────
+
+// AttackPolicy is the stance this tenant's paths are scored under.
+//
+// Read through tenant_attack_policy, a published shape rather than the table:
+// this service applies the weightings, it never decides them. A tenant with no
+// policy of their own comes back on the standard one with Chosen false, so a
+// screen can say "these are ours, not yours".
+func (r *GraphRepository) AttackPolicy(ctx context.Context, tenantID uuid.UUID) (*model.AttackPolicy, error) {
+	var p model.AttackPolicy
+	err := r.db.QueryRow(ctx, `
+		SELECT code, version, chosen,
+		       base_cost, complexity_medium, complexity_high, privilege_low, privilege_high,
+		       hop_decay, impact_ceiling, unknown_target_impact, critical_system_bonus,
+		       many_paths_boost
+		FROM tenant_attack_policy WHERE tenant_id = $1`, tenantID).
+		Scan(&p.Code, &p.Version, &p.Chosen,
+			&p.BaseCost, &p.ComplexityMedium, &p.ComplexityHigh, &p.PrivilegeLow, &p.PrivilegeHigh,
+			&p.HopDecay, &p.ImpactCeiling, &p.UnknownTargetImpact, &p.CriticalSystemBonus,
+			&p.ManyPathsBoost)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No row means no such tenant, which a caller holding a tenant token
+		// cannot reach. Falling back keeps a scenario scorable either way.
+		return model.DefaultAttackPolicy(), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("attack policy: %w", err)
+	}
+	return &p, nil
 }

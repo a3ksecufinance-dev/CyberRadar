@@ -151,37 +151,37 @@ type NetSecAnomaly struct {
 }
 
 type NetSecDevice struct {
-	ID          uuid.UUID      `json:"id"`
-	TenantID    uuid.UUID      `json:"tenant_id"`
-	Name        string         `json:"name"`
-	DeviceType  string         `json:"device_type"`
-	IPAddress   string         `json:"ip_address"`
-	ZoneID      *uuid.UUID     `json:"zone_id,omitempty"`
-	ZoneName    string         `json:"zone_name,omitempty"`
-	Vendor      string         `json:"vendor,omitempty"`
-	Model       string         `json:"model,omitempty"`
-	Firmware    string         `json:"firmware,omitempty"`
-	IsManaged   bool           `json:"is_managed"`
-	LastSeenAt  time.Time      `json:"last_seen_at"`
-	Status      string         `json:"status"`
-	Metadata    map[string]any `json:"metadata"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ID         uuid.UUID      `json:"id"`
+	TenantID   uuid.UUID      `json:"tenant_id"`
+	Name       string         `json:"name"`
+	DeviceType string         `json:"device_type"`
+	IPAddress  string         `json:"ip_address"`
+	ZoneID     *uuid.UUID     `json:"zone_id,omitempty"`
+	ZoneName   string         `json:"zone_name,omitempty"`
+	Vendor     string         `json:"vendor,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	Firmware   string         `json:"firmware,omitempty"`
+	IsManaged  bool           `json:"is_managed"`
+	LastSeenAt time.Time      `json:"last_seen_at"`
+	Status     string         `json:"status"`
+	Metadata   map[string]any `json:"metadata"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
 }
 
 type NetSecStats struct {
-	TotalZones         int                `json:"total_zones"`
-	TotalPolicies      int                `json:"total_policies"`
-	ActivePolicies     int                `json:"active_policies"`
-	TotalDevices       int                `json:"total_devices"`
-	OfflineDevices     int                `json:"offline_devices"`
-	OpenAnomalies      int                `json:"open_anomalies"`
-	FlowsLast24h       int                `json:"flows_last_24h"`
-	BlockedFlows24h    int                `json:"blocked_flows_24h"`
-	AnomaliesBySev     map[string]int     `json:"anomalies_by_severity"`
-	AnomaliesByType    map[string]int     `json:"anomalies_by_type"`
-	TopSrcIPs          []*IPStats         `json:"top_src_ips"`
-	PolicyHits         []*PolicyHitStats  `json:"top_policy_hits"`
+	TotalZones      int               `json:"total_zones"`
+	TotalPolicies   int               `json:"total_policies"`
+	ActivePolicies  int               `json:"active_policies"`
+	TotalDevices    int               `json:"total_devices"`
+	OfflineDevices  int               `json:"offline_devices"`
+	OpenAnomalies   int               `json:"open_anomalies"`
+	FlowsLast24h    int               `json:"flows_last_24h"`
+	BlockedFlows24h int               `json:"blocked_flows_24h"`
+	AnomaliesBySev  map[string]int    `json:"anomalies_by_severity"`
+	AnomaliesByType map[string]int    `json:"anomalies_by_type"`
+	TopSrcIPs       []*IPStats        `json:"top_src_ips"`
+	PolicyHits      []*PolicyHitStats `json:"top_policy_hits"`
 }
 
 type IPStats struct {
@@ -199,9 +199,9 @@ type PolicyHitStats struct {
 // ─── Topology view ────────────────────────────────────────────────────────────
 
 type ZoneTopology struct {
-	Zones    []*NetSecZone    `json:"zones"`
-	Devices  []*NetSecDevice  `json:"devices"`
-	Policies []*NetSecPolicy  `json:"policies"`
+	Zones    []*NetSecZone   `json:"zones"`
+	Devices  []*NetSecDevice `json:"devices"`
+	Policies []*NetSecPolicy `json:"policies"`
 }
 
 // ─── Request models ───────────────────────────────────────────────────────────
@@ -239,13 +239,13 @@ type CreatePolicyRequest struct {
 }
 
 type UpdatePolicyRequest struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Protocol    string     `json:"protocol"`
-	Ports       []string   `json:"ports"`
-	Action      string     `json:"action"`
-	Priority    *int       `json:"priority"`
-	IsActive    *bool      `json:"is_active"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Protocol    string   `json:"protocol"`
+	Ports       []string `json:"ports"`
+	Action      string   `json:"action"`
+	Priority    *int     `json:"priority"`
+	IsActive    *bool    `json:"is_active"`
 }
 
 type IngestFlowRequest struct {
@@ -292,12 +292,12 @@ type RegisterDeviceRequest struct {
 }
 
 type UpdateDeviceRequest struct {
-	ZoneID    *uuid.UUID     `json:"zone_id"`
-	Vendor    string         `json:"vendor"`
-	Model     string         `json:"model"`
-	Firmware  string         `json:"firmware"`
-	Status    string         `json:"status"`
-	Metadata  map[string]any `json:"metadata"`
+	ZoneID   *uuid.UUID     `json:"zone_id"`
+	Vendor   string         `json:"vendor"`
+	Model    string         `json:"model"`
+	Firmware string         `json:"firmware"`
+	Status   string         `json:"status"`
+	Metadata map[string]any `json:"metadata"`
 }
 
 type ListFlowsFilter struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/cyberradar/platform/internal/pkg/event"
@@ -27,10 +28,43 @@ func NewRiskEngine(repo *repository.PAMRepository, consumer *pkgkafka.Consumer, 
 	return &RiskEngine{repo: repo, consumer: consumer, logger: logger}
 }
 
+// activityRetention is the widest window any risk figure uses. Rows older than
+// this are never read again, so they are purged.
+const activityRetention = 30 * 24 * time.Hour
+
 // Run starts the Kafka consumer. Blocks until ctx is cancelled.
 func (e *RiskEngine) Run(ctx context.Context) error {
 	e.logger.Info().Msg("risk_engine_started")
+	go e.purgeLoop(ctx)
 	return e.consumer.Run(ctx, e.handle)
+}
+
+// purgeLoop drops daily activity rows past the retention window. Without it
+// the table grows by one row per identity per day for ever.
+func (e *RiskEngine) purgeLoop(ctx context.Context) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+
+	purge := func() {
+		removed, err := e.repo.PurgeActivityBefore(ctx, time.Now().UTC().Add(-activityRetention))
+		if err != nil {
+			e.logger.Error().Err(err).Msg("identity_activity_purge_error")
+			return
+		}
+		if removed > 0 {
+			e.logger.Info().Int64("rows", removed).Msg("identity_activity_purged")
+		}
+	}
+
+	purge() // once at startup, so a long outage does not leave the table unbounded
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			purge()
+		}
+	}
 }
 
 // handle processes one enriched event and updates the relevant identity risk profile.
@@ -68,10 +102,6 @@ func (e *RiskEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 		}
 	}
 
-	// Update activity counters
-	profile.Events7d++
-	profile.EventsToday++
-
 	// Update last login context for IAM events
 	if ev.Category == event.CategoryIAM {
 		now := ev.Timestamp
@@ -89,9 +119,16 @@ func (e *RiskEngine) handle(ctx context.Context, msg pkgkafka.Message) error {
 	if len(anomalies) > 0 {
 		now := time.Now().UTC()
 		profile.LastAnomalyAt = &now
-		profile.AnomalyCount7d++
-		profile.AnomalyCount30d++
 	}
+
+	// Record this event against today, then read the windows back.
+	//
+	// The counters used to be incremented on the profile in memory and never
+	// decremented, so "anomalies in the last 7 days" was a lifetime total. They
+	// are now summed from identity_activity_daily, which makes each figure true
+	// to its name — and the increment happens in the database, so two replicas
+	// handling the same identity no longer lose one another's counts.
+	e.updateActivityWindows(ctx, tenantID, identityID, profile, len(anomalies), privSessionsIn(&ev))
 
 	// Recompute dimensional scores
 	e.recomputeScores(profile, &ev)
@@ -339,4 +376,54 @@ func max(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// updateActivityWindows records this event and refreshes the profile's windowed
+// figures from the daily table.
+//
+// A failure here is logged and the previous figures are left in place rather
+// than zeroed: a risk profile that silently reads "0 anomalies in the last 7
+// days" because a write failed is worse than one that is briefly stale.
+func (e *RiskEngine) updateActivityWindows(ctx context.Context, tenantID, identityID uuid.UUID, p *model.IdentityRiskProfile, anomalies, privSessions int) {
+	now := time.Now().UTC()
+
+	if err := e.repo.RecordActivity(ctx, tenantID, identityID, now, 1, anomalies, privSessions); err != nil {
+		e.logger.Error().Err(err).
+			Str("identity_id", identityID.String()).
+			Msg("identity_activity_record_error")
+		return
+	}
+
+	w, err := e.repo.ReadActivityWindows(ctx, tenantID, identityID, now)
+	if err != nil {
+		e.logger.Error().Err(err).
+			Str("identity_id", identityID.String()).
+			Msg("identity_activity_read_error")
+		return
+	}
+
+	p.EventsToday = w.EventsToday
+	p.Events7d = w.Events7d
+	p.AnomalyCount7d = w.Anomalies7d
+	p.AnomalyCount30d = w.Anomalies30d
+	p.PrivSessions30d = w.PrivSessions30d
+}
+
+// privSessionsIn reports whether an event represents a privileged session, so
+// priv_sessions_30d counts sessions rather than every event of one.
+func privSessionsIn(ev *event.NormalizedEvent) int {
+	if ev.Category == event.CategoryIAM && ev.Outcome == event.OutcomeSuccess && isPrivilegedAction(ev.Action) {
+		return 1
+	}
+	return 0
+}
+
+// isPrivilegedAction names the actions that start a privileged session.
+func isPrivilegedAction(action string) bool {
+	switch strings.ToLower(action) {
+	case "sudo", "su", "runas", "privilege_escalation", "admin_login", "checkout_credential", "session_start":
+		return true
+	default:
+		return false
+	}
 }

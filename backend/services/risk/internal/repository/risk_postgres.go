@@ -241,7 +241,7 @@ func (r *RiskRepository) UpdateAsset(ctx context.Context, tenantID, assetID uuid
 // ─── Scenarios ────────────────────────────────────────────────────────────────
 
 const scenarioSelect = `
-SELECT id, tenant_id, name, description, scenario_type, threat_actor,
+SELECT id, tenant_id, name, description, scenario_type, COALESCE(threat_actor,''),
        annual_probability, primary_loss, secondary_loss, total_loss,
        risk_level, risk_score, mitigating_controls,
        residual_probability, residual_loss, frameworks, asset_ids,
@@ -266,6 +266,20 @@ func scanScenario(row pgx.Row) (*model.RiskScenario, error) {
 	return s, nil
 }
 
+// nullIfEmpty turns an absent optional string into a NULL.
+//
+// threat_actor carries a CHECK that enumerates its values, and a CHECK rejects
+// the empty string where it accepts NULL. Naming the actor is optional, so a
+// scenario created without one was refused outright by the database — every
+// scenario where the attacker is not yet known, which is most of them when a
+// risk register is first filled in.
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func (r *RiskRepository) CreateScenario(ctx context.Context, tenantID uuid.UUID, req *model.CreateScenarioRequest, createdBy uuid.UUID) (*model.RiskScenario, error) {
 	riskScore, riskLevel := computeScenarioRisk(req.AnnualProbability, req.PrimaryLoss+req.SecondaryLoss)
 	if req.MitigatingControls == nil {
@@ -286,7 +300,7 @@ func (r *RiskRepository) CreateScenario(ctx context.Context, tenantID uuid.UUID,
 		 frameworks, asset_ids, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		RETURNING id`,
-		tenantID, req.Name, req.Description, req.ScenarioType, req.ThreatActor,
+		tenantID, req.Name, req.Description, req.ScenarioType, nullIfEmpty(req.ThreatActor),
 		req.AnnualProbability, req.PrimaryLoss, req.SecondaryLoss, riskLevel, riskScore,
 		req.MitigatingControls, req.ResidualProbability, req.ResidualLoss,
 		req.Frameworks, req.AssetIDs, createdBy,

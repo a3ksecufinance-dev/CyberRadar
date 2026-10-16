@@ -106,7 +106,7 @@ M365 | AWS | Azure | VMware | CBS | SWIFT
 | US-CDF-STR-001 | En tant que pipeline, les events sont traités en temps réel avec garantie de livraison | HAUTE |
 | US-CDF-STR-002 | En tant qu'admin, je rejoue un stream depuis un point donné | HAUTE |
 | US-CDF-STR-003 | En tant que pipeline, les events ratés vont en dead-letter queue | HAUTE |
-| US-CDF-STR-004 | En tant que pipeline, le partitionnement est horizontal | HAUTE |
+| US-CDF-STR-004 | En tant que pipeline, le partitionnement est horizontal — **faite** ✓ : six partitions par défaut, `KAFKA_PARTITIONS` les règle, `EnsureTopic` élève un sujet existant ; mise à l'échelle mesurée à ×1,85 pour deux instances ([docs/22-mesures.md](../docs/22-mesures.md)) | HAUTE |
 
 ---
 

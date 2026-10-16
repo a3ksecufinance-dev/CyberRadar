@@ -8,6 +8,7 @@ import { RiskScore } from '@/components/shared/RiskScore'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
+import { useEnumLabel } from '@/components/shared/useEnumLabel'
 import { useDataStores, useDSPMFindings, useDSPMStats } from '@/hooks'
 
 const sensitivityColors: Record<string, string> = {
@@ -20,6 +21,7 @@ const sensitivityColors: Record<string, string> = {
 
 export default function DSPMPage() {
   const t = useTranslations('dspm')
+  const e = useEnumLabel()
   const { data: storesData, isLoading: storesLoading, error: storesError, mutate: mutateStores } = useDataStores()
   const { data: findingsData, isLoading: findingsLoading, error: findingsError, mutate: mutateFindings } = useDSPMFindings()
   const { data: stats } = useDSPMStats()
@@ -37,10 +39,12 @@ export default function DSPMPage() {
       {/* Stats row */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: 'Data Stores', value: stats?.total_stores ?? stores.length, color: 'text-slate-200' },
-          { label: 'Open Findings', value: stats?.open_findings ?? findings.length, color: 'text-red-400' },
-          { label: 'Unencrypted Stores', value: stats?.unencrypted_stores ?? stores.filter(s => !s.is_encrypted).length, color: 'text-amber-400' },
-          { label: 'Records at Risk', value: stats?.records_at_risk ? (stats.records_at_risk / 1_000_000).toFixed(1) + 'M' : '—', color: 'text-red-400' },
+          { label: t('dataStores'), value: stats?.total_data_stores ?? stores.length, color: 'text-slate-200' },
+          { label: t('openFindings'), value: stats?.open_findings ?? findings.length, color: 'text-red-400' },
+          { label: t('unencryptedStores'), value: stats?.unencrypted_stores ?? stores.filter(s => !s.is_encrypted).length, color: 'text-amber-400' },
+          // PII and PCI exposure counts are what the service computes; a
+          // "records at risk" total is not among them.
+          { label: t('piiPciExposures'), value: `${stats?.pii_exposures ?? 0} / ${stats?.pci_exposures ?? 0}`, color: 'text-red-400' },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -71,7 +75,7 @@ export default function DSPMPage() {
                     <th className="px-4 py-3 text-left">{t('sensitivityLevel')}</th>
                     <th className="px-4 py-3 text-left">{t('dataCategories')}</th>
                     <th className="px-4 py-3 text-center">{t('encrypted')}</th>
-                    <th className="px-4 py-3 text-left">Findings</th>
+                    <th className="px-4 py-3 text-left">{t('findings')}</th>
                     <th className="px-4 py-3 text-left">{t('riskScore')}</th>
                   </tr>
                 </thead>
@@ -87,16 +91,16 @@ export default function DSPMPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{s.store_type}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">{e(s.store_type)}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${sensitivityColors[s.sensitivity_level] ?? ''}`}>
-                          {s.sensitivity_level.toUpperCase()}
+                          {e(s.sensitivity_level).toUpperCase()}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
-                          {s.data_categories.map((c) => (
-                            <Badge key={c} variant="outline" className="text-[10px]">{c.toUpperCase()}</Badge>
+                          {(s.data_categories ?? []).map((c) => (
+                            <Badge key={c} variant="outline" className="text-[10px]">{e(c)}</Badge>
                           ))}
                         </div>
                       </td>
@@ -104,9 +108,9 @@ export default function DSPMPage() {
                         {s.is_encrypted ? <Check className="mx-auto h-4 w-4 text-emerald-400" /> : <X className="mx-auto h-4 w-4 text-red-400" />}
                       </td>
                       <td className="px-4 py-3">
-                        {s.open_finding_count > 0
-                          ? <Badge variant="critical">{s.open_finding_count} open</Badge>
-                          : <Badge variant="success">None</Badge>}
+                        {(s.open_finding_count ?? 0) > 0
+                          ? <Badge variant="critical">{t('openCount', { count: s.open_finding_count ?? 0 })}</Badge>
+                          : <Badge variant="success">{t('none')}</Badge>}
                       </td>
                       <td className="px-4 py-3"><RiskScore score={s.risk_score} /></td>
                     </tr>
@@ -133,10 +137,10 @@ export default function DSPMPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-700 text-xs text-slate-500">
-                    <th className="px-4 py-3 text-left">Title</th>
+                    <th className="px-4 py-3 text-left">{t('title_')}</th>
                     <th className="px-4 py-3 text-left">{t('findingType')}</th>
                     <th className="px-4 py-3 text-left">{t('severity')}</th>
-                    <th className="px-4 py-3 text-left">Location</th>
+                    <th className="px-4 py-3 text-left">{t('location')}</th>
                     <th className="px-4 py-3 text-right">{t('recordCount')}</th>
                     <th className="px-4 py-3 text-center">{t('publiclyAccessible')}</th>
                   </tr>
@@ -145,14 +149,14 @@ export default function DSPMPage() {
                   {findings.map((f) => (
                     <tr key={f.id} className="hover:bg-slate-800/40 cursor-pointer transition-colors">
                       <td className="px-4 py-3 font-medium text-slate-200">{f.title}</td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{f.finding_type}</td>
+                      <td className="px-4 py-3 text-xs text-slate-400">{e(f.finding_type)}</td>
                       <td className="px-4 py-3"><SeverityBadge severity={f.severity} /></td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{f.location_path}</td>
                       <td className="px-4 py-3 text-right text-xs font-medium text-slate-300">
                         {f.record_count.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {f.is_public_accessible ? <Badge variant="critical">PUBLIC</Badge> : <Badge variant="low">PRIVATE</Badge>}
+                        {f.is_public_accessible ? <Badge variant="critical">{t('public')}</Badge> : <Badge variant="low">{t('private')}</Badge>}
                       </td>
                     </tr>
                   ))}

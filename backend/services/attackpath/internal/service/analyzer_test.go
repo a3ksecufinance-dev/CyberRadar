@@ -1,0 +1,546 @@
+package service
+
+import (
+	"context"
+	"testing"
+
+	"github.com/cyberradar/platform/services/attackpath/internal/model"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog"
+)
+
+// ─── A graph built in the test, not in a database ─────────────────────────────
+
+type builder struct {
+	nodes  []*model.AttackNode
+	edges  []*model.AttackEdge
+	byName map[string]uuid.UUID
+}
+
+func newBuilder() *builder { return &builder{byName: map[string]uuid.UUID{}} }
+
+func (b *builder) node(name string, opts ...func(*model.AttackNode)) uuid.UUID {
+	n := &model.AttackNode{ID: uuid.New(), Label: name, NodeType: model.NodeTypeAsset}
+	for _, o := range opts {
+		o(n)
+	}
+	b.nodes = append(b.nodes, n)
+	b.byName[name] = n.ID
+	return n.ID
+}
+
+func (b *builder) edge(from, to string, opts ...func(*model.AttackEdge)) uuid.UUID {
+	e := &model.AttackEdge{
+		ID: uuid.New(), SourceID: b.byName[from], TargetID: b.byName[to],
+		EdgeType: model.EdgeTypeNetworkAccess, Weight: 1, IsActive: true,
+	}
+	for _, o := range opts {
+		o(e)
+	}
+	b.edges = append(b.edges, e)
+	return e.ID
+}
+
+func (b *builder) graph() *model.Graph { return model.NewGraph(b.nodes, b.edges) }
+
+func scenario(b *builder, maxHops int, entry string, targets ...string) *model.AttackScenario {
+	s := &model.AttackScenario{
+		ID: uuid.New(), TenantID: uuid.New(), MaxHops: maxHops,
+		EntryNodeIDs: []uuid.UUID{b.byName[entry]},
+	}
+	for _, t := range targets {
+		s.TargetNodeIDs = append(s.TargetNodeIDs, b.byName[t])
+	}
+	return s
+}
+
+func analyzer() *Analyzer { return NewAnalyzer(nil, nil, zerolog.Nop()) }
+
+// standard is the stance the analyzer applied before any of it was
+// configurable. These tests were written against those numbers, so they are
+// what proves the default reproduces them: if making the weightings
+// configurable had moved one, the suite below would say so.
+func standard() *model.AttackPolicy { return model.DefaultAttackPolicy() }
+
+// run enumerates and scores, which is what the analyzer does with what a store
+// hands it. GraphPathFinder is the reference implementation the two stores are
+// checked against, so these tests also fix what those two have to agree with.
+func run(t *testing.T, b *builder, s *model.AttackScenario) ([]*model.AttackPath, bool) {
+	t.Helper()
+	found, truncated, err := NewGraphPathFinder(b.graph()).
+		FindPaths(context.Background(), s, s.EntryNodeIDs[0], maxPathsPerScenario)
+	if err != nil {
+		t.Fatalf("FindPaths: %v", err)
+	}
+	a := analyzer()
+	paths := make([]*model.AttackPath, 0, len(found))
+	for _, dp := range found {
+		paths = append(paths, a.buildPath(s, dp, standard()))
+	}
+	return paths, truncated
+}
+
+// ─── Traversal ────────────────────────────────────────────────────────────────
+
+func TestFindsAPathToTheTarget(t *testing.T) {
+	b := newBuilder()
+	b.node("web")
+	b.node("app")
+	b.node("db")
+	b.edge("web", "app")
+	b.edge("app", "db")
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	if len(paths) != 1 {
+		t.Fatalf("%d paths, want 1", len(paths))
+	}
+	if paths[0].HopCount != 2 {
+		t.Errorf("hop count = %d, want 2", paths[0].HopCount)
+	}
+}
+
+func TestFindsEveryDistinctPath(t *testing.T) {
+	b := newBuilder()
+	b.node("web")
+	b.node("a")
+	b.node("b")
+	b.node("db")
+	b.edge("web", "a")
+	b.edge("web", "b")
+	b.edge("a", "db")
+	b.edge("b", "db")
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	if len(paths) != 2 {
+		t.Errorf("%d paths, want 2 — both routes to the target", len(paths))
+	}
+}
+
+func TestACycleDoesNotTrapTheWalk(t *testing.T) {
+	b := newBuilder()
+	b.node("a")
+	b.node("b")
+	b.node("target")
+	b.edge("a", "b")
+	b.edge("b", "a") // back edge
+	b.edge("b", "target")
+
+	paths, _ := run(t, b, scenario(b, 10, "a", "target"))
+	if len(paths) != 1 {
+		t.Errorf("%d paths, want 1", len(paths))
+	}
+}
+
+func TestMaxHopsIsTheNumberOfHops(t *testing.T) {
+	// A three-hop path must not come back from a two-hop budget. The previous
+	// search skipped a state only past max_hops+1, so it returned paths one
+	// hop longer than the scenario allowed.
+	b := newBuilder()
+	b.node("a")
+	b.node("b")
+	b.node("c")
+	b.node("d")
+	b.edge("a", "b")
+	b.edge("b", "c")
+	b.edge("c", "d")
+
+	if paths, _ := run(t, b, scenario(b, 2, "a", "d")); len(paths) != 0 {
+		t.Errorf("%d paths within 2 hops, want 0 — the target is 3 hops away", len(paths))
+	}
+	if paths, _ := run(t, b, scenario(b, 3, "a", "d")); len(paths) != 1 {
+		t.Errorf("%d paths within 3 hops, want 1", len(paths))
+	}
+}
+
+func TestInactiveEdgesAreNotWalked(t *testing.T) {
+	b := newBuilder()
+	b.node("a")
+	b.node("target")
+	b.edge("a", "target", func(e *model.AttackEdge) { e.IsActive = false })
+
+	if paths, _ := run(t, b, scenario(b, 5, "a", "target")); len(paths) != 0 {
+		t.Errorf("%d paths, want 0 — the only edge is inactive", len(paths))
+	}
+}
+
+func TestIncludeTypesNarrowsTheWalk(t *testing.T) {
+	// include_types was stored, returned by the API and never read: narrowing
+	// a scenario to one node type silently changed nothing.
+	b := newBuilder()
+	b.node("a")
+	b.node("jump", func(n *model.AttackNode) { n.NodeType = model.NodeTypeIdentity })
+	b.node("target")
+	b.edge("a", "jump")
+	b.edge("jump", "target")
+
+	s := scenario(b, 5, "a", "target")
+	s.IncludeTypes = []string{model.NodeTypeAsset}
+
+	if paths, _ := run(t, b, s); len(paths) != 0 {
+		t.Errorf("%d paths, want 0 — the only route passes through an identity node", len(paths))
+	}
+
+	s.IncludeTypes = []string{model.NodeTypeAsset, model.NodeTypeIdentity}
+	if paths, _ := run(t, b, s); len(paths) != 1 {
+		t.Errorf("%d paths, want 1 once identity nodes are included", len(paths))
+	}
+}
+
+func TestTruncationIsReported(t *testing.T) {
+	// The cap used to return silently, so a scenario recorded "200 paths" with
+	// no way to tell it from a graph that really had 200.
+	b := newBuilder()
+	b.node("entry")
+	b.node("target")
+	for i := 0; i < maxPathsPerScenario+50; i++ {
+		name := "hop" + uuid.NewString()[:8]
+		b.node(name)
+		b.edge("entry", name)
+		b.edge(name, "target")
+	}
+
+	paths, truncated := run(t, b, scenario(b, 5, "entry", "target"))
+	if !truncated {
+		t.Error("the cap was reached and not reported")
+	}
+	if len(paths) != maxPathsPerScenario {
+		t.Errorf("%d paths, want the cap of %d", len(paths), maxPathsPerScenario)
+	}
+}
+
+func TestAnEntryNodeOutsideTheGraphFindsNothing(t *testing.T) {
+	b := newBuilder()
+	b.node("target")
+	s := &model.AttackScenario{
+		ID: uuid.New(), TenantID: uuid.New(), MaxHops: 5,
+		EntryNodeIDs:  []uuid.UUID{uuid.New()}, // not in the graph
+		TargetNodeIDs: []uuid.UUID{b.byName["target"]},
+	}
+	if paths, _ := run(t, b, s); len(paths) != 0 {
+		t.Errorf("%d paths from a node that is not in the graph, want 0", len(paths))
+	}
+}
+
+// ─── What a path says ─────────────────────────────────────────────────────────
+
+func TestAShorterPathIsMoreThreatening(t *testing.T) {
+	// The previous formula multiplied by hop count, so a five-hop path scored
+	// above a one-hop path of the same cost — it ranked the hardest attacks as
+	// the most dangerous.
+	short := standard().PathScore(1.0, 1)
+	long := standard().PathScore(5.0, 5) // same cost per hop, five times as many hops
+
+	if !(short > long) {
+		t.Errorf("one hop scores %.2f, five hops %.2f — a longer path must not score higher", short, long)
+	}
+}
+
+func TestACheaperPathIsMoreThreatening(t *testing.T) {
+	if cheap, dear := standard().PathScore(1.0, 2), standard().PathScore(9.0, 2); !(cheap > dear) {
+		t.Errorf("cost 1 scores %.2f, cost 9 scores %.2f — a costlier path must not score higher", cheap, dear)
+	}
+}
+
+func TestPathScoreStaysInRange(t *testing.T) {
+	for _, tc := range []struct {
+		cost float64
+		hops int
+	}{
+		{0, 1}, {0, 0}, {1000, 1}, {0.001, 30}, {-1, 3},
+	} {
+		if got := standard().PathScore(tc.cost, tc.hops); got < 0 || got > 10 {
+			t.Errorf("PathScore(%v, %d) = %v, want within 0..10", tc.cost, tc.hops, got)
+		}
+	}
+}
+
+func TestImpactComesFromTheTarget(t *testing.T) {
+	// Every path used to record a flat 7.0 whatever it reached, so impact
+	// carried no information at all.
+	low := standard().Impact(&model.AttackNode{Criticality: 1})
+	high := standard().Impact(&model.AttackNode{Criticality: 4})
+
+	if !(high > low) {
+		t.Errorf("criticality 4 scores %.1f, criticality 1 scores %.1f", high, low)
+	}
+	if crit := standard().Impact(&model.AttackNode{Criticality: 4, IsCriticalSystem: true}); crit <= high {
+		t.Errorf("a critical system scores %.1f, no more than a plain criticality-4 node at %.1f", crit, high)
+	}
+	if got := standard().Impact(&model.AttackNode{}); got <= 0 || got > 10 {
+		t.Errorf("a target with nothing recorded scores %.1f, want a usable middle value", got)
+	}
+}
+
+func TestPathFlagsAreComputed(t *testing.T) {
+	// These three were declared, persisted and read back by the API, and never
+	// set: every path in the database recorded false for all of them.
+	b := newBuilder()
+	b.node("edge-server", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("admin", func(n *model.AttackNode) { n.IsPrivileged = true })
+	b.node("crown-jewels", func(n *model.AttackNode) { n.IsCriticalSystem = true; n.Criticality = 4 })
+	b.edge("edge-server", "admin", func(e *model.AttackEdge) {
+		e.EdgeType = model.EdgeTypeExploit
+		e.CVEID = "CVE-2024-3094"
+	})
+	b.edge("admin", "crown-jewels")
+
+	paths, _ := run(t, b, scenario(b, 5, "edge-server", "crown-jewels"))
+	if len(paths) != 1 {
+		t.Fatalf("%d paths, want 1", len(paths))
+	}
+	p := paths[0]
+
+	if !p.HasInternetEntry {
+		t.Error("HasInternetEntry is false though the entry node faces the internet")
+	}
+	if !p.HasExploitStep {
+		t.Error("HasExploitStep is false though the path crosses an exploit edge with a CVE")
+	}
+	if !p.HasPrivEsc {
+		t.Error("HasPrivEsc is false though the path passes through a privileged node")
+	}
+	if p.PathType != model.PathTypePrivEscalation {
+		t.Errorf("PathType = %q, want %q", p.PathType, model.PathTypePrivEscalation)
+	}
+	if p.Impact <= 7.0 {
+		t.Errorf("Impact = %.1f for a critical, criticality-4 target — the old flat 7.0 is showing", p.Impact)
+	}
+}
+
+func TestPathsKeepTheirOwnSequences(t *testing.T) {
+	// The walk reuses its slices as it backtracks, so a path that kept a
+	// reference would be rewritten by the next branch.
+	b := newBuilder()
+	b.node("a")
+	b.node("x")
+	b.node("y")
+	b.node("t")
+	b.edge("a", "x")
+	b.edge("a", "y")
+	b.edge("x", "t")
+	b.edge("y", "t")
+
+	paths, _ := run(t, b, scenario(b, 5, "a", "t"))
+	if len(paths) != 2 {
+		t.Fatalf("%d paths, want 2", len(paths))
+	}
+	if paths[0].NodeSequence[1] == paths[1].NodeSequence[1] {
+		t.Errorf("both paths report the same middle node %v — the sequences are shared", paths[0].NodeSequence)
+	}
+	for _, p := range paths {
+		if len(p.NodeSequence) != 3 || len(p.EdgeSequence) != 2 {
+			t.Errorf("path has %d nodes and %d edges, want 3 and 2", len(p.NodeSequence), len(p.EdgeSequence))
+		}
+	}
+}
+
+func TestChokePointIsTheSharedNode(t *testing.T) {
+	b := newBuilder()
+	b.node("a")
+	b.node("bottleneck")
+	b.node("t1")
+	b.node("t2")
+	b.edge("a", "bottleneck")
+	b.edge("bottleneck", "t1")
+	b.edge("bottleneck", "t2")
+
+	paths, _ := run(t, b, scenario(b, 5, "a", "t1", "t2"))
+	computeChokePoints(paths)
+
+	if len(paths) != 2 {
+		t.Fatalf("%d paths, want 2", len(paths))
+	}
+	for _, p := range paths {
+		if p.ChokePointNodeID == nil || *p.ChokePointNodeID != b.byName["bottleneck"] {
+			t.Errorf("choke point = %v, want the shared node", p.ChokePointNodeID)
+		}
+	}
+}
+
+// ─── The store seam ───────────────────────────────────────────────────────────
+
+type fakeStore struct {
+	graph     *model.Graph
+	statuses  []string
+	saved     []*model.AttackPath
+	savedFor  []uuid.UUID
+	saveCalls int
+	result    struct {
+		pathCount int
+		risk      float64
+		outcome   model.ScenarioOutcome
+	}
+}
+
+func (s *fakeStore) FindPaths(ctx context.Context, scenario *model.AttackScenario,
+	entryID uuid.UUID, budget int) ([]model.DiscoveredPath, bool, error) {
+	return NewGraphPathFinder(s.graph).FindPaths(ctx, scenario, entryID, budget)
+}
+func (s *fakeStore) SetScenarioStatus(_ context.Context, _ uuid.UUID, status string) error {
+	s.statuses = append(s.statuses, status)
+	return nil
+}
+func (s *fakeStore) SavePaths(_ context.Context, scenarioID uuid.UUID, paths []*model.AttackPath) error {
+	s.saved = paths
+	s.savedFor = append(s.savedFor, scenarioID)
+	s.saveCalls++
+	return nil
+}
+func (s *fakeStore) UpdateScenarioResult(_ context.Context, _ uuid.UUID, outcome model.ScenarioOutcome) error {
+	s.result.pathCount, s.result.risk = outcome.PathCount, outcome.RiskScore
+	s.result.outcome = outcome
+	return nil
+}
+
+func TestRunScenarioRecordsWhatItFound(t *testing.T) {
+	// The analyzer depends on GraphStore, not on the PostgreSQL repository,
+	// which is what will let a Neo4j implementation take its place — and what
+	// lets this run with no database at all.
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	b.edge("web", "db")
+
+	store := &fakeStore{graph: b.graph()}
+	s := scenario(b, 5, "web", "db")
+
+	if err := NewAnalyzer(store, nil, zerolog.Nop()).RunScenario(context.Background(), s); err != nil {
+		t.Fatalf("RunScenario: %v", err)
+	}
+
+	if len(store.statuses) == 0 || store.statuses[0] != model.ScenarioStatusRunning {
+		t.Errorf("statuses = %v, want the run marked running first", store.statuses)
+	}
+	if store.result.pathCount != 1 || len(store.saved) != 1 {
+		t.Errorf("recorded %d paths and saved %d, want 1 and 1", store.result.pathCount, len(store.saved))
+	}
+	if store.result.risk <= 0 {
+		t.Errorf("risk score = %.2f, want above zero for a reachable critical target", store.result.risk)
+	}
+}
+
+// ─── What a run records ───────────────────────────────────────────────────────
+
+// critical_path used to hold the hop count of the LONGEST route and call it the
+// most critical one, which is close to the opposite: an attacker takes the
+// route that scores highest, and length counts against a route rather than for
+// it.
+func TestTheCriticalPathIsTheHighestScoringOne(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("mid")
+	b.node("far")
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	// A direct, cheap route and a long, costly one.
+	b.edge("web", "db")
+	b.edge("web", "mid", func(e *model.AttackEdge) { e.Weight = 3 })
+	b.edge("mid", "far", func(e *model.AttackEdge) { e.Weight = 3 })
+	b.edge("far", "db", func(e *model.AttackEdge) { e.Weight = 3 })
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	if len(paths) != 2 {
+		t.Fatalf("found %d routes, want 2", len(paths))
+	}
+	got := summarise(paths)
+
+	if got.Shortest == nil || *got.Shortest != 1 {
+		t.Errorf("shortest = %v, want the one-hop route", got.Shortest)
+	}
+	if got.Critical == nil || *got.Critical != 1 {
+		t.Errorf("critical = %v, want the hop count of the highest-scoring route, not the longest", got.Critical)
+	}
+	if got.CheapestCost == nil || *got.CheapestCost != 1 {
+		t.Errorf("cheapest cost = %v, want the direct route's weight of 1", got.CheapestCost)
+	}
+}
+
+// The weighted shortest route is not the one with the fewest hops: a single hop
+// that needs an admin credential and a remote exploit is more work than three
+// hops across open shares. The accumulated weight was computed on every walk
+// and never kept.
+func TestTheCheapestRouteIsNotAlwaysTheShortest(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("a")
+	b.node("bb")
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	b.edge("web", "db", func(e *model.AttackEdge) { e.Weight = 9 }) // one hard hop
+	b.edge("web", "a", func(e *model.AttackEdge) { e.Weight = 1 })  // three easy ones
+	b.edge("a", "bb", func(e *model.AttackEdge) { e.Weight = 1 })
+	b.edge("bb", "db", func(e *model.AttackEdge) { e.Weight = 1 })
+
+	paths, _ := run(t, b, scenario(b, 5, "web", "db"))
+	got := summarise(paths)
+
+	if got.Shortest == nil || *got.Shortest != 1 {
+		t.Errorf("shortest = %v, want 1 hop", got.Shortest)
+	}
+	if got.CheapestCost == nil || *got.CheapestCost != 3 {
+		t.Errorf("cheapest cost = %v, want the three-hop route at 3", got.CheapestCost)
+	}
+	for _, p := range paths {
+		if p.HopCount == 3 && p.TotalCost != 3 {
+			t.Errorf("the three-hop route recorded cost %v, want 3", p.TotalCost)
+		}
+	}
+}
+
+// A run must replace what the last one found, not add to it.
+//
+// SavePaths used to insert and never delete, and to return early on an empty
+// result. A scenario reporting two paths held thirty-eight rows from nineteen
+// runs, each scored under whatever weightings were in force that day, and a
+// scenario whose only route had been closed went on showing the route.
+func TestARunReplacesWhatTheLastOneFound(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	b.edge("web", "db")
+
+	store := &fakeStore{graph: b.graph()}
+	sc := scenario(b, 5, "web", "db")
+
+	a := NewAnalyzer(store, nil, zerolog.Nop())
+	for i := 0; i < 3; i++ {
+		if err := a.RunScenario(context.Background(), sc); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+
+	// Three runs, three saves, each naming the scenario so the store can clear
+	// the previous answer — including when a run finds nothing.
+	if store.saveCalls != 3 {
+		t.Errorf("three runs produced %d saves", store.saveCalls)
+	}
+	for _, id := range store.savedFor {
+		if id != sc.ID {
+			t.Errorf("a save named scenario %s, not %s", id, sc.ID)
+		}
+	}
+	// And what the last run handed over is one run's worth, not three.
+	if len(store.saved) != 1 {
+		t.Errorf("the last run saved %d paths; the graph has one route", len(store.saved))
+	}
+}
+
+// A run that finds nothing still has to say so. Returning early on an empty
+// slice is how a scenario whose route was closed kept showing the route.
+func TestARunThatFindsNothingStillClearsTheLastAnswer(t *testing.T) {
+	b := newBuilder()
+	b.node("web", func(n *model.AttackNode) { n.IsInternetFacing = true })
+	b.node("db", func(n *model.AttackNode) { n.Criticality = 4 })
+	// No edge: there is no route at all.
+
+	store := &fakeStore{graph: b.graph()}
+	sc := scenario(b, 5, "web", "db")
+
+	if err := NewAnalyzer(store, nil, zerolog.Nop()).RunScenario(context.Background(), sc); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if store.saveCalls != 1 {
+		t.Errorf("a run that found nothing called SavePaths %d times; it has to clear the last answer", store.saveCalls)
+	}
+	if len(store.saved) != 0 {
+		t.Errorf("a run with no route saved %d paths", len(store.saved))
+	}
+}

@@ -15,10 +15,10 @@ allow if {
     perm == required_permission
 }
 
-# Super-admin bypass — granted access to every permission.
-allow if {
-    input.user.is_super_admin == true
-}
+# No super-admin bypass: super_admin holds every permission through
+# role_permissions (migration 000035), so it is allowed by the rule above like
+# any other role. A bypass here would hide from this policy what the platform's
+# most privileged account may do.
 
 # ─── Permission definitions ──────────────────────────────────────────────────
 # These mirror the permissions seeded in 000002_create_identities.sql.
@@ -38,7 +38,9 @@ tenant_match if {
     input.user.tenant_id == input.resource.tenant_id
 }
 
-# Super-admins can cross tenant boundaries.
+# Super-admins can cross tenant boundaries. This is what the flag is for, and
+# the only thing it is for: permissions say WHAT a caller may do, this says
+# WHOSE data they may do it to.
 tenant_match if {
     input.user.is_super_admin == true
 }

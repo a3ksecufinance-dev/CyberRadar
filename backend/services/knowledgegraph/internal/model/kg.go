@@ -132,8 +132,8 @@ type KGStats struct {
 	TotalRelationships int            `json:"total_relationships"`
 	RelsByType         map[string]int `json:"relationships_by_type"`
 	TotalObservations  int            `json:"total_observations"`
-	HighRiskEntities   int            `json:"high_risk_entities"`   // risk_score >= 7
-	RecentObservations int            `json:"recent_observations"`  // last 24h
+	HighRiskEntities   int            `json:"high_risk_entities"`  // risk_score >= 7
+	RecentObservations int            `json:"recent_observations"` // last 24h
 }
 
 // ── Request / filter models ───────────────────────────────────────────────────
@@ -183,7 +183,7 @@ type CreateObservationRequest struct {
 type EntityFilter struct {
 	TenantID   uuid.UUID
 	EntityType string
-	Search     string  // name ILIKE
+	Search     string // name ILIKE
 	MinRisk    float64
 	Tags       []string
 	Limit      int

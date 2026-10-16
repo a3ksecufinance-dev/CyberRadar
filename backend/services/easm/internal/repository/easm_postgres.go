@@ -501,13 +501,22 @@ func (r *EASMRepository) UpdateBrandAlert(ctx context.Context, tenantID, alertID
 
 // ─── Scans ────────────────────────────────────────────────────────────────────
 
+// CreateScan queues a scan.
+//
+// error_text is nullable and the model holds it as a string, so the RETURNING
+// list has to coalesce it — exactly as GetScan and ListScans already did.
+// Without that, every single call failed with "cannot scan NULL into *string":
+// a fresh scan has no error, so the column is always NULL on insert. The read
+// paths were audited and fixed; this write path was not, and POST /easm/scans
+// answered 500 every time.
 func (r *EASMRepository) CreateScan(ctx context.Context, tenantID uuid.UUID, req *model.CreateScanRequest, createdBy uuid.UUID) (*model.EASMScan, error) {
 	var s model.EASMScan
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO easm_scans (tenant_id, scan_type, targets, created_by)
 		VALUES ($1,$2,$3,$4)
 		RETURNING id, tenant_id, scan_type, status, targets,
-		          assets_found, exposures_found, started_at, completed_at, error_text, created_by, created_at`,
+		          assets_found, exposures_found, started_at, completed_at,
+		          COALESCE(error_text,''), created_by, created_at`,
 		tenantID, req.ScanType, req.Targets, createdBy,
 	).Scan(
 		&s.ID, &s.TenantID, &s.ScanType, &s.Status, &s.Targets,

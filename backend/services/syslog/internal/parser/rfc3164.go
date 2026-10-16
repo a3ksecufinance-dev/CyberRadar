@@ -17,9 +17,9 @@ import (
 // rfc3164Months maps abbreviated month names to their numeric value.
 var rfc3164Months = map[string]time.Month{
 	"Jan": time.January, "Feb": time.February, "Mar": time.March,
-	"Apr": time.April,   "May": time.May,       "Jun": time.June,
-	"Jul": time.July,    "Aug": time.August,     "Sep": time.September,
-	"Oct": time.October, "Nov": time.November,   "Dec": time.December,
+	"Apr": time.April, "May": time.May, "Jun": time.June,
+	"Jul": time.July, "Aug": time.August, "Sep": time.September,
+	"Oct": time.October, "Nov": time.November, "Dec": time.December,
 }
 
 // parseRFC3164 parses an RFC 3164 syslog message.
@@ -83,7 +83,9 @@ func parseRFC3164(line string, defaultHostname string) (*Parsed, error) {
 	}
 
 	// ─── Tag (PROCESS[PID]: ) ────────────────────────────────
-	if idx := strings.IndexAny(rest, ":[ "); idx > 0 {
+	// '[' must not terminate the tag: the PID is part of it, and stopping at
+	// the bracket left ProcID empty and prefixed the message with "[1234]: ".
+	if idx := strings.IndexAny(rest, ": "); idx > 0 {
 		tag := rest[:idx]
 		rest = rest[idx:]
 

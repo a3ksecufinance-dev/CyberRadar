@@ -36,36 +36,36 @@ type Identity struct {
 
 // CreateUserRequest is the validated payload for user creation.
 type CreateUserRequest struct {
-	Username       string     `json:"username"       validate:"required,min=3,max=255"`
-	Email          string     `json:"email"          validate:"required,email"`
-	DisplayName    string     `json:"display_name"`
-	Password       string     `json:"password"       validate:"required,min=12"`
-	IdentityType   string     `json:"identity_type"  validate:"omitempty,oneof=user admin service_account machine bot"`
-	Department     string     `json:"department"`
-	BusinessUnit   string     `json:"business_unit"`
-	PrivilegeLevel string     `json:"privilege_level" validate:"omitempty,oneof=standard elevated admin"`
+	Username       string      `json:"username"       validate:"required,min=3,max=255"`
+	Email          string      `json:"email"          validate:"required,email"`
+	DisplayName    string      `json:"display_name"`
+	Password       string      `json:"password"       validate:"required,min=12"`
+	IdentityType   string      `json:"identity_type"  validate:"omitempty,oneof=user admin service_account machine bot"`
+	Department     string      `json:"department"`
+	BusinessUnit   string      `json:"business_unit"`
+	PrivilegeLevel string      `json:"privilege_level" validate:"omitempty,oneof=standard elevated admin"`
 	RoleIDs        []uuid.UUID `json:"role_ids"`
 }
 
 // UpdateUserRequest is the validated payload for partial user update.
 type UpdateUserRequest struct {
-	DisplayName    *string    `json:"display_name"`
-	Department     *string    `json:"department"`
-	BusinessUnit   *string    `json:"business_unit"`
-	PrivilegeLevel *string    `json:"privilege_level" validate:"omitempty,oneof=standard elevated admin super_admin"`
-	Status         *string    `json:"status"          validate:"omitempty,oneof=active dormant disabled"`
+	DisplayName    *string     `json:"display_name"`
+	Department     *string     `json:"department"`
+	BusinessUnit   *string     `json:"business_unit"`
+	PrivilegeLevel *string     `json:"privilege_level" validate:"omitempty,oneof=standard elevated admin super_admin"`
+	Status         *string     `json:"status"          validate:"omitempty,oneof=active dormant disabled"`
 	RoleIDs        []uuid.UUID `json:"role_ids"`
 }
 
 // ListUsersFilter holds query parameters for listing identities.
 type ListUsersFilter struct {
-	TenantID      uuid.UUID
-	Status        string
-	IdentityType  string
+	TenantID       uuid.UUID
+	Status         string
+	IdentityType   string
 	PrivilegeLevel string
-	Search        string
-	Page          int
-	Limit         int
+	Search         string
+	Page           int
+	Limit          int
 }
 
 // UserList is a paginated list of identities.

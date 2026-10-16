@@ -1,0 +1,54 @@
+# CRP-IAM-0003 — Session administrateur ouverte avec succès
+#
+# Part of the CyberRadar detection pack. This file is the source of truth: the
+# catalogue in the database is reconciled against it by `contentctl`, and a new
+# version is published when anything below changes. There is no version number
+# to maintain here — one nobody remembers to bump is how a tenant is told they
+# are current while running something else.
+
+code: CRP-IAM-0003
+title: Session administrateur ouverte avec succès
+description: Une authentification privilégiée qui aboutit.
+category: IAM
+severity: CRITICAL
+mitre:
+  tactic: TA0001
+  technique: T1078
+conditions:
+  field_matches:
+  - op: contains
+    field: action
+    value: admin_login
+  - op: eq
+    field: outcome
+    value: success
+actions:
+- type: notify
+- type: create_case
+dedup_window_s: 600
+rationale: >-
+  Une session à privilèges est le point à partir duquel un attaquant n'a plus besoin d'exploiter
+  quoi que ce soit. Les tracer toutes coûte peu et vaut beaucoup ; c'est aussi ce qu'un évaluateur
+  demande à voir.
+false_positives: >-
+  Toute administration légitime. Cette règle est faite pour être bruyante et revue, pas pour
+  réveiller quelqu'un — l'affiner sur les plages horaires et les adresses attendues est le
+  premier réglage à faire.
+response: >-
+  Rapprocher de la demande d'accès privilégié correspondante. Une session sans demande est
+  l'écart à instruire.
+frameworks:
+- DORA
+- PCIDSS
+- SWIFTCSP
+- ISO27001
+controls:
+- DORA-10.3
+- PCI-8.3.6
+- CSCF-4.2
+- A.8.2
+requires: []
+enabled_by_default: true
+tags:
+- accès-privilégié
+- standard

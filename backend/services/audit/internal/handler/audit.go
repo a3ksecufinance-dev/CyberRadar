@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	apierrors "github.com/cyberradar/platform/internal/pkg/errors"
+	"github.com/cyberradar/platform/internal/pkg/authctx"
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/httperr"
 	"github.com/cyberradar/platform/internal/pkg/response"
 	"github.com/cyberradar/platform/services/audit/internal/model"
 	"github.com/cyberradar/platform/services/audit/internal/service"
@@ -32,10 +34,21 @@ func NewAuditHandler(svc *service.AuditService) *AuditHandler {
 // RegisterRoutes mounts audit routes.
 func (h *AuditHandler) RegisterRoutes(r chi.Router) {
 	r.Route("/audit", func(r chi.Router) {
-		r.Post("/events", h.Write)         // Write a single event (service-to-service)
-		r.Get("/events", h.Search)         // Search audit events
-		r.Get("/events/{id}", h.GetByID)   // Get a specific event
-		r.Post("/export", h.Export)        // Export audit log
+		// Reading the audit trail is privileged; exporting it is a separate
+		// authority again, which is why audit:export exists alongside audit:read.
+		r.With(authmw.RequirePermission("audit:read")).Get("/events", h.Search)
+		r.With(authmw.RequirePermission("audit:read")).Get("/events/{id}", h.GetByID)
+		r.With(authmw.RequirePermission("audit:export")).Post("/export", h.Export)
+
+		// Written by other CRP services, never by a person. Both gates are
+		// needed: audit:write is the authority, and RequireServiceAccount
+		// stops a human token from reaching it even if some role is granted
+		// audit:write by mistake. Appending to an audit trail from a browser
+		// session is never legitimate.
+		r.With(
+			authmw.RequireServiceAccount(),
+			authmw.RequirePermission("audit:write"),
+		).Post("/events", h.Write)
 	})
 }
 
@@ -128,9 +141,9 @@ func (h *AuditHandler) Export(w http.ResponseWriter, r *http.Request) {
 	tenantID := mustTenantID(r)
 
 	var body struct {
-		From  *time.Time `json:"from"`
-		To    *time.Time `json:"to"`
-		Action string   `json:"action"`
+		From   *time.Time `json:"from"`
+		To     *time.Time `json:"to"`
+		Action string     `json:"action"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
@@ -156,31 +169,19 @@ func (h *AuditHandler) Export(w http.ResponseWriter, r *http.Request) {
 
 // ─── Context helpers ─────────────────────────────────────────────────────────
 
-type contextKey string
-
 func mustTenantID(r *http.Request) uuid.UUID {
-	v, _ := r.Context().Value(contextKey("tenant_id")).(string)
-	id, _ := uuid.Parse(v)
-	return id
+	return authctx.TenantID(r.Context())
 }
 
 func mustIsSuperAdmin(r *http.Request) bool {
-	v, _ := r.Context().Value(contextKey("is_super_admin")).(bool)
-	return v
+	return authctx.IsSuperAdmin(r.Context())
 }
 
 func mapError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil
 	}
-	switch {
-	case apierrors.IsKind(err, apierrors.KindForbidden):
-		response.Forbidden(w, err.Error())
-	case apierrors.IsKind(err, apierrors.KindBadInput):
-		response.BadRequest(w, "BAD_INPUT", err.Error())
-	default:
-		response.InternalError(w)
-	}
+	httperr.Write(w, err)
 	return err
 }
 

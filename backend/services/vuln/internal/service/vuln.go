@@ -59,7 +59,18 @@ func (s *VulnService) CreateFinding(ctx context.Context, tenantID uuid.UUID, req
 	if err != nil || v == nil {
 		return nil, apierrors.Wrap(apierrors.KindNotFound, "vulnerability not found", err)
 	}
-	av, err := s.repo.UpsertFinding(ctx, tenantID, req, v.CVSSScore, v.CVSSSeverity)
+
+	policy, err := s.repo.RemediationPolicy(ctx, tenantID)
+	if err != nil {
+		return nil, apierrors.Internal("remediation policy", err)
+	}
+	contexts, err := s.repo.FindingContexts(ctx, tenantID, []uuid.UUID{req.AssetID})
+	if err != nil {
+		return nil, apierrors.Internal("finding context", err)
+	}
+
+	av, err := s.repo.UpsertFinding(ctx, tenantID, req,
+		v.CVSSScore, v.CVSSSeverity, v.IsExploited, policy, contexts[req.AssetID])
 	if err != nil {
 		return nil, apierrors.Internal("create finding", err)
 	}
@@ -68,6 +79,28 @@ func (s *VulnService) CreateFinding(ctx context.Context, tenantID uuid.UUID, req
 }
 
 func (s *VulnService) BulkCreateFindings(ctx context.Context, tenantID uuid.UUID, req *model.BulkCreateFindingsRequest) (int, error) {
+	// The policy and the asset flags are read once for the batch. A scan import
+	// creates thousands of findings; a query per finding would make the deadline
+	// the slowest part of ingesting one.
+	policy, err := s.repo.RemediationPolicy(ctx, tenantID)
+	if err != nil {
+		return 0, apierrors.Internal("remediation policy", err)
+	}
+	assetIDs := make([]uuid.UUID, 0, len(req.Findings))
+	seen := make(map[uuid.UUID]struct{}, len(req.Findings))
+	for i := range req.Findings {
+		id := req.Findings[i].AssetID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		assetIDs = append(assetIDs, id)
+	}
+	contexts, err := s.repo.FindingContexts(ctx, tenantID, assetIDs)
+	if err != nil {
+		return 0, apierrors.Internal("finding contexts", err)
+	}
+
 	count := 0
 	for i := range req.Findings {
 		item := &req.Findings[i]
@@ -79,7 +112,8 @@ func (s *VulnService) BulkCreateFindings(ctx context.Context, tenantID uuid.UUID
 			s.logger.Warn().Str("vuln_id", item.VulnID.String()).Msg("bulk_finding_vuln_not_found")
 			continue
 		}
-		if _, err := s.repo.UpsertFinding(ctx, tenantID, item, v.CVSSScore, v.CVSSSeverity); err != nil {
+		if _, err := s.repo.UpsertFinding(ctx, tenantID, item,
+			v.CVSSScore, v.CVSSSeverity, v.IsExploited, policy, contexts[item.AssetID]); err != nil {
 			s.logger.Error().Err(err).Str("asset_id", item.AssetID.String()).Msg("bulk_finding_error")
 			continue
 		}

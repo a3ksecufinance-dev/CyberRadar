@@ -18,10 +18,10 @@ type SOARService struct {
 }
 
 // NewSOARService creates a SOARService.
-func NewSOARService(repo *repository.SOARRepository, logger zerolog.Logger) *SOARService {
+func NewSOARService(repo *repository.SOARRepository, dispatcher Dispatcher, logger zerolog.Logger) *SOARService {
 	return &SOARService{
 		repo:     repo,
-		executor: NewExecutor(repo, logger),
+		executor: NewExecutor(repo, dispatcher, logger),
 		logger:   logger,
 	}
 }

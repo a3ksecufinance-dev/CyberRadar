@@ -3,6 +3,7 @@ package writer
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -16,12 +17,20 @@ const (
 )
 
 // ClickHouseWriter batches normalized events and writes them to cyber_events.
+//
+// Two goroutines reach it: the consumer loop, which calls Write for every
+// event, and the periodic flush loop, which calls Flush on a ticker. mu guards
+// the buffer between them. Without it the two race on the same slice, and the
+// loss is silent — an append and a truncation that interleave drop events that
+// the consumer has already committed as handled.
 type ClickHouseWriter struct {
 	conn      clickhouse.Conn
 	logger    zerolog.Logger
 	batchSize int
-	buf       []*event.NormalizedEvent
-	flushAt   time.Time
+
+	mu      sync.Mutex
+	buf     []*event.NormalizedEvent
+	flushAt time.Time
 }
 
 // NewClickHouseWriter creates a ClickHouseWriter.
@@ -40,17 +49,30 @@ func NewClickHouseWriter(conn clickhouse.Conn, logger zerolog.Logger, batchSize 
 
 // Write adds an event to the buffer. Flushes automatically when full or timed out.
 func (w *ClickHouseWriter) Write(ctx context.Context, e *event.NormalizedEvent) error {
+	w.mu.Lock()
 	w.buf = append(w.buf, e)
+	due := len(w.buf) >= w.batchSize || time.Now().After(w.flushAt)
+	w.mu.Unlock()
 
-	if len(w.buf) >= w.batchSize || time.Now().After(w.flushAt) {
+	if due {
 		return w.Flush(ctx)
 	}
 	return nil
 }
 
 // Flush writes all buffered events to ClickHouse in a single batch INSERT.
+//
+// The buffer is taken under the lock and the insert runs without it, so a slow
+// ClickHouse holds up the events it is already carrying and not the ones still
+// arriving.
 func (w *ClickHouseWriter) Flush(ctx context.Context) error {
-	if len(w.buf) == 0 {
+	w.mu.Lock()
+	batched := w.buf
+	w.buf = make([]*event.NormalizedEvent, 0, w.batchSize)
+	w.flushAt = time.Now().Add(defaultFlushTimeout)
+	w.mu.Unlock()
+
+	if len(batched) == 0 {
 		return nil
 	}
 
@@ -71,7 +93,7 @@ func (w *ClickHouseWriter) Flush(ctx context.Context) error {
 		return fmt.Errorf("clickhouse prepare batch: %w", err)
 	}
 
-	for _, e := range w.buf {
+	for _, e := range batched {
 		var (
 			userID         = nullStr(e.UserID)
 			userName       = nullStr(e.UserName)
@@ -128,19 +150,15 @@ func (w *ClickHouseWriter) Flush(ctx context.Context) error {
 
 	if err := batch.Send(); err != nil {
 		w.logger.Error().Err(err).
-			Int("batch_size", len(w.buf)).
+			Int("batch_size", len(batched)).
 			Msg("clickhouse_batch_send_failed")
-		w.buf = w.buf[:0]
-		w.flushAt = time.Now().Add(defaultFlushTimeout)
 		return fmt.Errorf("clickhouse batch send: %w", err)
 	}
 
 	w.logger.Info().
-		Int("written", len(w.buf)).
+		Int("written", len(batched)).
 		Msg("clickhouse_batch_written")
 
-	w.buf = w.buf[:0]
-	w.flushAt = time.Now().Add(defaultFlushTimeout)
 	return nil
 }
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/ClickHouse/clickhouse-go/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,13 +12,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cyberradar/platform/internal/pkg/authmw"
+	"github.com/cyberradar/platform/internal/pkg/clientip"
+	"github.com/cyberradar/platform/internal/pkg/corsmw"
 	"github.com/cyberradar/platform/internal/pkg/event"
+	pkgjwt "github.com/cyberradar/platform/internal/pkg/jwt"
 	pkgkafka "github.com/cyberradar/platform/internal/pkg/kafka"
+	"github.com/cyberradar/platform/internal/pkg/observe"
 	"github.com/cyberradar/platform/services/collector/internal/handler"
+	"github.com/cyberradar/platform/services/collector/internal/repository"
 	"github.com/cyberradar/platform/services/collector/internal/service"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -25,9 +32,22 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := log.With().Str("service", "collector-service").Logger()
 
-	port      := envOrDefault("SERVICE_PORT", "8005")
-	jwtSecret := mustEnv("JWT_SECRET")
-	brokers   := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	// Optional: with no collector configured this is a no-op, so a
+	// missing collector never stops the service from starting.
+	shutdownTracing, tracingErr := observe.InitTracing(context.Background(),
+		"collector-service", envOrDefault("SERVICE_VERSION", "dev"),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	if tracingErr != nil {
+		logger.Warn().Err(tracingErr).Msg("tracing disabled")
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
+	port := envOrDefault("SERVICE_PORT", "8005")
+	jwtVerifier, err := pkgjwt.NewVerifierFromFile(mustEnv("JWT_PUBLIC_KEY_PATH"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("load jwt public key")
+	}
+	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
 
 	producer := pkgkafka.NewProducer(pkgkafka.ProducerConfig{
 		Brokers:  brokers,
@@ -43,22 +63,60 @@ func main() {
 	}, logger)
 	defer dlqProducer.Close()
 
-	collectorSvc     := service.NewCollectorService(producer, logger)
+	// ── ClickHouse, for what the collector learns about its sources ──────────
+	// The service held no database at all and therefore could not answer the
+	// first question an operator asks — which of my sources stopped sending.
+	// It reads crp_audit.cyber_events, which the pipeline fills, and writes
+	// crp_fabric.connectors, which held nothing until now.
+	chOpts, err := clickhouse.ParseDSN(mustEnv("CLICKHOUSE_DSN"))
+	if err != nil {
+		logger.Fatal().Err(err).Msg("clickhouse dsn parse failed")
+	}
+	chOpts.DialTimeout = 10 * time.Second
+	chConn, err := clickhouse.Open(chOpts)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("clickhouse open failed")
+	}
+	defer chConn.Close()
+
+	health := repository.NewHealthRepository(chConn)
+	collectorSvc := service.NewCollectorService(producer, dlqProducer, health, logger)
 	collectorHandler := handler.NewCollectorHandler(collectorSvc)
 
 	r := chi.NewRouter()
+	// Before everything else: a browser sends a preflight without
+	// credentials, so an OPTIONS that reaches the JWT middleware is
+	// answered 401 and the browser blocks the real request.
+	r.Use(corsmw.Middleware(corsmw.DefaultConfig(
+		corsmw.OriginsFromEnv(os.Getenv("CORS_ALLOWED_ORIGINS")))))
+	r.Use(observe.Middleware("collector-service"))
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	// The client address, from the forwarded chain, not from whatever the
+	// caller wrote in a header. See internal/pkg/clientip.
+	r.Use(clientip.Middleware())
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
 
+	r.Handle("/metrics", observe.MetricsHandler())
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","service":"collector-service"}`)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(jwtMiddleware(jwtSecret, logger))
+		// No identity provider here: this service holds no PostgreSQL
+		// connection, so it cannot resolve a role into the permissions it
+		// grants. Giving it a pool would be the way to change that;
+		// authmw.ProviderFromEnv refuses without one rather than
+		// authenticating people and granting them nothing.
+		//
+		// That is a narrower limit than "no person calls this service", which
+		// is what this comment used to say and is no longer true: source
+		// health is read by whoever answers for the collection. A person's
+		// token carries its permissions, and RequirePermission reads them
+		// from the token, so the route authorises without resolving anything.
+		// What the missing pool costs is role resolution, not people.
+		r.Use(authmw.RequireJWT(jwtVerifier, logger))
 		collectorHandler.RegisterRoutes(r)
 	})
 
@@ -88,42 +146,6 @@ func main() {
 }
 
 // ─── JWT middleware ───────────────────────────────────────────────────────────
-
-type jwtClaims struct {
-	TenantID string   `json:"tid"`
-	UserID   string   `json:"uid"`
-	IsAdmin  bool     `json:"is_admin"`
-	Roles    []string `json:"roles"`
-	gojwt.RegisteredClaims
-}
-
-func jwtMiddleware(secret string, logger zerolog.Logger) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			if len(auth) < 8 || auth[:7] != "Bearer " {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing Authorization"}}`, http.StatusUnauthorized)
-				return
-			}
-			token, err := gojwt.ParseWithClaims(auth[7:], &jwtClaims{}, func(t *gojwt.Token) (any, error) {
-				return []byte(secret), nil
-			})
-			if err != nil || !token.Valid {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-			claims := token.Claims.(*jwtClaims)
-			if claims.TenantID == "" {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"Missing tenant"}}`, http.StatusUnauthorized)
-				return
-			}
-			ctx := context.WithValue(r.Context(), "tenant_id", claims.TenantID)
-			ctx = context.WithValue(ctx, "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "is_super_admin", claims.IsAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)

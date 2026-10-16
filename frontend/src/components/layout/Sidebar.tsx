@@ -2,11 +2,12 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
+import { signOut } from 'next-auth/react'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Activity, Siren, Server, Radio, Bug,
   GitBranch, Smartphone, Factory, Database, CheckSquare,
-  TrendingUp, Package, Bot, Settings, LogOut, Shield,
+  TrendingUp, Package, Bot, Settings, LogOut, Shield, Webhook,
 } from 'lucide-react'
 
 const groups = [
@@ -47,6 +48,16 @@ const groups = [
     items: [
       { key: 'compliance', href: '/compliance', icon: CheckSquare },
       { key: 'risk',       href: '/risk',       icon: TrendingUp },
+    ],
+  },
+  // The integration surface had a page, a service and a permission, and no
+  // way to reach it: it was missing from this list, so the only route to it
+  // was typing the URL. An integrator evaluating the platform would have
+  // concluded it does not exist.
+  {
+    key: 'integration',
+    items: [
+      { key: 'apiGateway', href: '/api-gateway', icon: Webhook },
     ],
   },
 ]
@@ -107,7 +118,17 @@ export function Sidebar({ locale }: { locale: string }) {
           <Settings className="h-4 w-4" />
           {t('settings')}
         </Link>
-        <button className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors">
+        {/* This button had no handler. It highlighted on hover, it said "Log
+            out", and the session stayed valid — on a shared analyst
+            workstation that is the whole of the defect. signOut also ends the
+            session at Keycloak, through the event in lib/auth.ts: clearing the
+            cookie here while the provider still holds a session means the next
+            sign-in goes straight back in without asking for a password. */}
+        <button
+          type="button"
+          onClick={() => signOut({ redirectTo: `/${locale}/login` })}
+          className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-800 hover:text-red-400 transition-colors"
+        >
           <LogOut className="h-4 w-4" />
           {t('logout')}
         </button>
