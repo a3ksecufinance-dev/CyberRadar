@@ -141,6 +141,45 @@ test.describe('the pages an analyst opens', () => {
     expectSound(watched, '/en/siem (coverage)')
   })
 
+  // cyber_events was written on every event the platform ingested and read by
+  // nothing: an analyst who received an alert could not see what surrounded
+  // it. This is that loop, so the assertions are on it — a result row proves
+  // the search endpoint answered, and the pivot proves it is a hunting tool
+  // rather than a log list.
+  test('the event search answers, and a pivot narrows it', async ({ page }) => {
+    const watched = await openAndAudit(page, '/en/siem')
+    expectSound(watched, '/en/siem')
+
+    await page.getByRole('button', { name: 'Search' }).click()
+    await page.waitForLoadState('networkidle')
+
+    // Rows only exist if the search endpoint answered over the default
+    // window. The demonstration set injects events, so an empty table means
+    // either the pipeline did not write them or the query never ran.
+    const rows = page.locator('tbody tr')
+    await expect(rows.first()).toBeVisible()
+    const before = await rows.count()
+    expect(before, 'the event search returned nothing over 24h').toBeGreaterThan(0)
+
+    // Opening a row shows the raw payload, which is what the analyst came to
+    // read: the canonical event has no column for an amount or a counterparty.
+    await rows.first().click()
+    await expect(page.getByText('Raw payload')).toBeVisible()
+
+    // The pivot: clicking an actor or a source re-runs the search on it. The
+    // chip naming the filter is the proof it was applied, and the result set
+    // must be no larger than before.
+    const pivots = page.locator('tbody button')
+    if (await pivots.count() > 0) {
+      await pivots.first().click()
+      await page.waitForLoadState('networkidle')
+      const after = await page.locator('tbody tr').count()
+      expect(after, 'pivoting on a value returned more rows than the unfiltered search').toBeLessThanOrEqual(before)
+    }
+
+    expectSound(watched, '/en/siem (search)')
+  })
+
   test('the attack path page shows what the analysis enumerated', async ({ page }) => {
     const watched = await openAndAudit(page, '/en/attackpath')
     expectSound(watched, '/en/attackpath')

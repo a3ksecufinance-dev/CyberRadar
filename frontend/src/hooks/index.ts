@@ -1,5 +1,5 @@
 export { useApiGet, useApiList, useApiToken } from './useApi'
-export { useSIEMAlerts, useSIEMStats, useRuleLibrary, useRuleCoverage } from './useSIEM'
+export { useSIEMAlerts, useSIEMStats, useRuleLibrary, useRuleCoverage, useEventSearch } from './useSIEM'
 export { useAssets, useAssetStats } from './useAssets'
 export { useIncidents, useIRStats } from './useIR'
 export { useDevices, useMobileStats } from './useMobile'

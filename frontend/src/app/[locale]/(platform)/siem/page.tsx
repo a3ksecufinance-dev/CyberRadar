@@ -2,6 +2,7 @@
 import { useTranslations } from 'next-intl'
 import { useState } from 'react'
 import { Coverage } from '@/components/siem/Coverage'
+import { EventSearch } from '@/components/siem/EventSearch'
 import { RuleLibrary } from '@/components/siem/RuleLibrary'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,11 +20,17 @@ const SEVERITY_KEY: Record<string, string> = {
   All: 'sevAll', Critical: 'sevCritical', High: 'sevHigh', Medium: 'sevMedium', Low: 'sevLow',
 }
 
-// The three questions this page answers, in the order they are asked: what fired,
-// what are we running and how does it differ from the standard, and what are we
-// blind to. The catalogue and the coverage used to be reachable only through the
-// API — the platform knew, and the customer could not act on it.
-const TABS = ['alerts', 'library', 'coverage'] as const
+// The four questions this page answers, in the order they are asked: what
+// fired, what surrounded it, what are we running and how does it differ from
+// the standard, and what are we blind to. The catalogue and the coverage used
+// to be reachable only through the API — the platform knew, and the customer
+// could not act on it.
+//
+// `events` comes second because that is the analyst's actual move: an alert is
+// a conclusion, and the next question is always what else happened around it.
+// Until the search existed, that question had no answer anywhere in the
+// product — cyber_events was written on every event and read by nothing.
+const TABS = ['alerts', 'events', 'library', 'coverage'] as const
 type Tab = (typeof TABS)[number]
 
 export default function SiemPage() {
@@ -60,6 +67,7 @@ export default function SiemPage() {
       </div>
 
       {tab === 'alerts' && <Alerts />}
+      {tab === 'events' && <EventSearch />}
       {tab === 'library' && <RuleLibrary />}
       {tab === 'coverage' && <Coverage />}
     </div>

@@ -128,9 +128,16 @@ produit qu'un analyste refuse à la première démonstration où on lui demande
 « et maintenant, montrez-moi ce qui s'est passé avant ». Je le place en tête
 des manques pour les deux marchés.
 
-Estimation : **25 à 40 jours** pour une recherche filtrée et paginée sur
-`cyber_events` avec l'écran correspondant — la table est déjà partitionnée et
-ordonnée par `(tenant_id, timestamp)`, ce qui est la bonne forme pour ça.
+**Depuis, c'est fait.** `GET /api/v1/siem/events` cherche sur une fenêtre
+bornée avec seize filtres, et l'onglet **Recherche** du SIEM porte la boucle :
+fenêtre glissante, texte libre dans la charge brute, filtres, panneau de
+détail avec la charge brute, et le **pivot** — cliquer une adresse ou un
+compte dans un résultat relance la recherche dessus, qui est le geste que
+l'analyste répète.
+
+Ce qui reste sur ce point : l'écran n'a pas encore été exercé contre une pile
+réelle (le parcours Playwright est écrit, pas joué), et la pagination est en
+`offset`, ce qui se dégrade en profondeur sur une grande fenêtre.
 
 ---
 
@@ -138,7 +145,6 @@ ordonnée par `(tenant_id, timestamp)`, ce qui est la bonne forme pour ça.
 
 | Manque | Pourquoi ça bloque | Estimation |
 |---|---|---|
-| **Recherche d'événements** | Boucle de travail de l'analyste (§ 6) | 25–40 j |
 | **Connecteur core banking** | Aucun analyseur ISO 8583 ni SWIFT MT/MX. Sans transactions en entrée, la thèse ne s'exerce pas | à chiffrer |
 | **Règles de fraude wallet** | Le moteur sait compter dans une fenêtre ; personne ne lui a dit quoi compter | 40–60 j |
 | **RLS PostgreSQL** | La ségrégation banque / filiale EDP tient au code applicatif, pas à la base. Relève de l'agrément | 15–25 j |
@@ -158,7 +164,8 @@ remplace.
 Les manques marocains restent valables. S'y ajoutent ceux qui séparent la
 plateforme d'un produit comparable à Splunk ES, QRadar, Sentinel ou Wazuh.
 
-**Le premier, de très loin : la couverture des sources.** Quatre formats
+**Le premier, maintenant que la recherche existe : la couverture des
+sources.** Quatre formats
 (JSON, CEF, syslog, LEEF) et six analyseurs, contre plusieurs centaines de
 connecteurs chez un concurrent établi. C'est le critère numéro un d'un appel
 d'offres SIEM, et l'écart est d'un ordre de grandeur. C'est aussi le chantier
@@ -186,17 +193,16 @@ Classé par ce qui débloque une vente, pas par facilité.
 
 | | Chantier | Sert | Estimation |
 |---|---|---|---|
-| 1 | **Recherche d'événements** | Les deux | 25–40 j |
-| 2 | **Comptage réel du volume** chez un client | Les deux | 5 j |
-| 3 | **Traducteur Sigma** | International d'abord, Maroc aussi | 20–30 j |
+| ~~1~~ | ~~**Recherche d'événements**~~ | — | **livrée** (§ 6) |
+| 1 | **Comptage réel du volume** chez un client | Les deux | 5 j |
+| 2 | **Traducteur Sigma** | International d'abord, Maroc aussi | 20–30 j |
 | 4 | **Connecteur CBS + règles wallet** | Maroc, cœur de la thèse | 40–60 j + à chiffrer |
 | 5 | **RLS PostgreSQL** | Maroc, exigence d'agrément | 15–25 j |
 | 6 | **Traitement concurrent** | Les deux | 20–30 j |
 | 7 | **SDK de connecteur** | International | 30–45 j |
 | 8 | **Contrôles pré-chargés + droits 09-08** | Maroc | 35–55 j |
 
-Les deux premiers sont à faire avant tout engagement : le premier parce qu'une
-démonstration bute dessus, le second parce que tout le dimensionnement repose
+Le premier est à faire avant tout engagement : tout le dimensionnement repose
 aujourd'hui sur une extrapolation.
 
 Le troisième mérite son rang : c'est le seul chantier de cette liste qui

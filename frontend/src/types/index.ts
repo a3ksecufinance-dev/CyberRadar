@@ -37,6 +37,37 @@ export type Severity = 'low' | 'medium' | 'high' | 'critical'
 export type Breakdown = Record<string, number>
 
 // ─── SIEM — services/siem/internal/model ─────────────────────
+// Un événement normalisé, tel que le pipeline l'a écrit dans
+// crp_audit.cyber_events. Miroir de services/siem/internal/model.Event.
+export interface NormalizedEvent {
+  event_id: string
+  tenant_id: string
+  timestamp: string
+  ingested_at: string
+  source: string
+  source_type: string
+  connector_id?: string
+  user_id?: string
+  user_name?: string
+  asset_hostname?: string
+  ip_source?: string
+  ip_destination?: string
+  geo_country?: string
+  action?: string
+  category: string
+  severity: Severity
+  outcome: string
+  threat_score: number
+  risk_score: number
+  mitre_tactic?: string
+  mitre_technique?: string
+  ioc_matched?: string[]
+  business_service?: string
+  cbs_impact: number
+  swift_impact: number
+  raw_event?: string
+}
+
 export interface SIEMAlert {
   alert_id: string
   tenant_id: string

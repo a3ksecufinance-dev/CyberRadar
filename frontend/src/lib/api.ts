@@ -38,6 +38,10 @@ export const ROUTES = {
     rules: '/api/v1/siem/rules',
     ruleLibrary: '/api/v1/siem/rule-library',
     ruleCoverage: '/api/v1/siem/rule-library/coverage',
+    // La recherche d'événements : ce que la plateforme a vu, et non les
+    // conclusions qu'elle en a tirées. Permission events:read, distincte
+    // d'alerts:read.
+    events: '/api/v1/siem/events',
   },
   asset: {
     list: '/api/v1/assets',
