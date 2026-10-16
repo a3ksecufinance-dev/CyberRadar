@@ -33,3 +33,17 @@ WHERE r.name IN (
     'fraud_analyst'       -- les transactions signalées arrivent dans ce flux
 )
 ON CONFLICT DO NOTHING;
+
+-- super_admin détient toute permission, y compris celle-ci.
+--
+-- Depuis 000035, l'autorité d'un opérateur de plateforme est énumérable dans
+-- la matrice plutôt que dérivée d'un contournement : une permission ajoutée
+-- sans cette ligne lui *retire* un droit qu'il est censé avoir tous.
+-- TestSuperAdminHoldsEveryPermission casse la construction quand on l'oublie,
+-- et c'est exactement ce qui est arrivé ici.
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON (p.resource, p.action) IN (('events', 'read'))
+WHERE r.name = 'super_admin'
+ON CONFLICT DO NOTHING;
